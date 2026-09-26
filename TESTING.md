@@ -312,6 +312,7 @@ node --test \
   tests/lesson-brief.test.js \
   tests/render-media-bundle.test.js \
   tests/scene-broll-media.test.js \
+  tests/scene-broll-overlay.test.js \
   tests/scene-media-sync.test.js
 
 npm run test:review-ui -- --grep \

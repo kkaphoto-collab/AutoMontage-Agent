@@ -491,3 +491,76 @@ test('diff fails closed when complete briefs contain unsupported changes', () =>
     (error) => error && error.message === 'review diff contains unsupported changes',
   );
 });
+
+function cleanOverlayBrief(overlay = 'none') {
+  const brief = fixtureBrief();
+  brief.scenes[1].brollMedia.overlay = overlay;
+  return brief;
+}
+
+test('b-roll commands keep the chosen overlay and never add one to plain media', () => {
+  const clean = cleanOverlayBrief();
+  assert.deepEqual(apply(clean, {
+    type: 'set-broll-fit', sceneIndex: 1, fit: 'contain',
+  }).scenes[1].brollMedia, {
+    kind: 'image', assetId: 'asset-1', fit: 'contain', overlay: 'none',
+  });
+
+  const replaced = applyReviewCommands({
+    brief: clean,
+    assets: assetMap(),
+    fps: 25,
+    commands: [
+      { type: 'replace-broll', sceneIndex: 1, assetId: 'asset-7' },
+      { type: 'set-broll-video-start', sceneIndex: 1, trimStartSec: 1.019 },
+      { type: 'set-broll-audio-mode', sceneIndex: 1, audioMode: 'mix' },
+    ],
+  });
+  assert.deepEqual(replaced.scenes[1].brollMedia, {
+    kind: 'video', assetId: 'asset-7', trimStartSec: 1, fit: 'contain', audioMode: 'mix', overlay: 'none',
+  });
+  assert.deepEqual(diffLessonBrief({ before: clean, after: replaced }), [
+    { kind: 'asset', scene: 1, from: 'asset-1', to: 'asset-7' },
+    { kind: 'fit', scene: 1, from: 'cover', to: 'contain' },
+    { kind: 'clip-start', scene: 1, from: null, to: 1 },
+    { kind: 'audio-mode', scene: 1, from: null, to: 'mix' },
+  ]);
+
+  assert.equal(apply(cleanOverlayBrief('default'), {
+    type: 'replace-broll', sceneIndex: 1, assetId: 'asset-2',
+  }).scenes[1].brollMedia.overlay, 'default');
+  const plain = apply(fixtureBrief(), { type: 'replace-broll', sceneIndex: 1, assetId: 'asset-7' });
+  assert.equal(Object.hasOwn(plain.scenes[1].brollMedia, 'overlay'), false);
+});
+
+test('b-roll commands reject a candidate with an unknown overlay value', () => {
+  for (const overlay of ['clean', 'None', '', null, true, { mode: 'none' }]) {
+    assert.throws(() => apply(cleanOverlayBrief(overlay), {
+      type: 'set-broll-fit', sceneIndex: 1, fit: 'contain',
+    }), /review command/i, JSON.stringify(overlay));
+  }
+});
+
+test('diff keeps an unchanged overlay and fails closed when only the overlay changes', () => {
+  const clean = cleanOverlayBrief();
+  const fitted = structuredClone(clean);
+  fitted.scenes[1].brollMedia.fit = 'contain';
+  assert.deepEqual(diffLessonBrief({ before: clean, after: fitted }), [
+    { kind: 'fit', scene: 1, from: 'cover', to: 'contain' },
+  ]);
+
+  const flipped = cleanOverlayBrief('default');
+  const invalid = cleanOverlayBrief('clean');
+  invalid.scenes[1].brollMedia.fit = 'contain';
+  for (const [before, after] of [
+    [fixtureBrief(), cleanOverlayBrief()],
+    [clean, fixtureBrief()],
+    [clean, flipped],
+    [clean, invalid],
+  ]) {
+    assert.throws(
+      () => diffLessonBrief({ before, after }),
+      (error) => error && error.message === 'review diff contains unsupported changes',
+    );
+  }
+});

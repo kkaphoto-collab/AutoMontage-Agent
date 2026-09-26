@@ -305,6 +305,51 @@ test('persisted video b-roll rejects invalid starts and enum values', () => {
   }
 });
 
+test('persisted b-roll media accepts an absent, default or clean overlay', () => {
+  for (const makeMedia of [makeImageBrollMedia, makeVideoBrollMedia]) {
+    for (const overlay of [undefined, 'default', 'none']) {
+      const media = overlay === undefined ? makeMedia() : makeMedia({ overlay });
+      const brief = makeBrief({ scenes: [makeBrollScene({ brollMedia: media })] });
+      const serialized = JSON.stringify(brief);
+
+      assert.deepEqual(validateLessonBrief(brief), { ok: true, errors: [] }, `${media.kind}/${overlay}`);
+      assert.equal(JSON.stringify(brief), serialized);
+    }
+  }
+});
+
+test('persisted b-roll media rejects unknown overlay values with a Russian field error', () => {
+  for (const makeMedia of [makeImageBrollMedia, makeVideoBrollMedia]) {
+    for (const overlay of ['clean', 'None', '', null, true, 0, ['none'], { mode: 'none' }]) {
+      const result = validateLessonBrief(makeBrief({
+        scenes: [makeBrollScene({ brollMedia: makeMedia({ overlay }) })],
+      }));
+
+      assert.equal(result.ok, false, `${makeMedia().kind}/${JSON.stringify(overlay)}`);
+      assert.ok(result.errors.includes(
+        `scenes[0].brollMedia.overlay: значение ${JSON.stringify(overlay)} не разрешено; допустимо "default" или "none"`,
+      ), result.errors.join('\n'));
+    }
+  }
+});
+
+test('markdown marks a clean b-roll overlay and keeps default summaries unchanged', () => {
+  const media = makeVideoBrollMedia();
+  const plain = formatBriefMarkdown(makeBrief({
+    scenes: [makeBrollScene({ brollMedia: media })],
+  }));
+  const explicitDefault = formatBriefMarkdown(makeBrief({
+    scenes: [makeBrollScene({ brollMedia: { ...media, overlay: 'default' } })],
+  }));
+  const clean = formatBriefMarkdown(makeBrief({
+    scenes: [makeBrollScene({ brollMedia: { ...media, overlay: 'none' } })],
+  }));
+
+  assert.match(plain, new RegExp(`ПРИМЕР B-ROLL \\(${media.src}\\) \\|`));
+  assert.equal(explicitDefault, plain);
+  assert.match(clean, new RegExp(`ПРИМЕР B-ROLL \\(${media.src}; без оформления движка\\) \\|`));
+});
+
 test('persisted b-roll media permits only canonical relative references', () => {
   for (const src of [
     '/private/media.webp',

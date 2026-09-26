@@ -1,4 +1,5 @@
 const { validateLessonBrief } = require('../lesson/brief');
+const { BROLL_OVERLAYS } = require('../lesson/broll-media');
 
 const OPAQUE_ASSET_ID = /^asset-[1-9]\d*$/;
 
@@ -109,6 +110,10 @@ function selectableAsset(assets, assetId) {
   return asset;
 }
 
+function hasOverlay(media) {
+  return isPlainObject(media) && Object.hasOwn(media, 'overlay');
+}
+
 function applyReplaceBroll(candidate, command, assets) {
   if (!exactCommandShape(command, ['type', 'sceneIndex', 'assetId'])
     || command.type !== 'replace-broll') {
@@ -117,12 +122,14 @@ function applyReplaceBroll(candidate, command, assets) {
   const { sceneIndex, assetId } = command;
   const scene = eligibleBrollScene(candidate, sceneIndex);
   const asset = selectableAsset(assets, assetId);
+  // Оформление сцены (brollMedia.overlay) Review не меняет: замена файла его сохраняет.
+  const overlay = hasOverlay(scene.brollMedia) ? { overlay: scene.brollMedia.overlay } : {};
   delete scene.brollSrc;
   delete scene.brollReview;
   if (asset.provenance) candidate.brollReviewPolicy = 'preview-required';
   scene.brollMedia = asset.mediaKind === 'video'
-    ? { kind: 'video', assetId, trimStartSec: 0, fit: 'contain', audioMode: 'mute' }
-    : { kind: 'image', assetId, fit: 'cover' };
+    ? { kind: 'video', assetId, trimStartSec: 0, fit: 'contain', audioMode: 'mute', ...overlay }
+    : { kind: 'image', assetId, fit: 'cover', ...overlay };
 }
 
 function applyAllowBrollText(candidate, command, assets) {
@@ -164,14 +171,19 @@ function validateMediaSelection(scene, assets, fps) {
   const asset = selectedAsset(scene, assets);
   if (!asset || asset.mediaKind !== media.kind) commandError('selected asset is invalid');
   if (!['contain', 'cover'].includes(media.fit)) commandError('broll fit is invalid');
+  const overlayKeys = hasOverlay(media) ? ['overlay'] : [];
+  if (overlayKeys.length > 0 && !BROLL_OVERLAYS.has(media.overlay)) {
+    commandError('broll overlay is invalid');
+  }
+  const overlay = overlayKeys.length > 0 ? { overlay: media.overlay } : {};
   if (media.kind === 'image') {
-    if (!exactCommandShape(media, ['kind', 'assetId', 'fit'])
+    if (!exactCommandShape(media, ['kind', 'assetId', 'fit', ...overlayKeys])
       || asset.capabilities?.brollImage !== true) commandError('image selection is invalid');
     return {
-      kind: 'image', src: asset.reference, sha256: asset.canonicalSha256, fit: media.fit,
+      kind: 'image', src: asset.reference, sha256: asset.canonicalSha256, fit: media.fit, ...overlay,
     };
   }
-  if (!exactCommandShape(media, ['kind', 'assetId', 'trimStartSec', 'fit', 'audioMode'])
+  if (!exactCommandShape(media, ['kind', 'assetId', 'trimStartSec', 'fit', 'audioMode', ...overlayKeys])
     || asset.capabilities?.brollVideo !== true
     || !Number.isFinite(media.trimStartSec) || media.trimStartSec < 0
     || !['mute', 'mix', 'replace'].includes(media.audioMode)
@@ -200,6 +212,7 @@ function validateMediaSelection(scene, assets, fps) {
     trimStartSec: media.trimStartSec,
     fit: media.fit,
     audioMode: media.audioMode,
+    ...overlay,
   };
 }
 

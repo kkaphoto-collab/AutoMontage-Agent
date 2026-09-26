@@ -187,7 +187,7 @@ function assertApprovalRacePreserved(state, options, race) {
   assert.deepEqual(tempEntries(state.workspace), []);
 }
 
-function makeReviewWorkspace(t, { approved = true, name = 'review-save' } = {}) {
+function makeReviewWorkspace(t, { approved = true, name = 'review-save', brollMedia = null } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'automontage-review-save-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const sourcePath = path.join(root, 'camera.mp4');
@@ -222,7 +222,7 @@ function makeReviewWorkspace(t, { approved = true, name = 'review-save' } = {}) 
         scene: 'broll',
         start: 4,
         end: 7,
-        brollSrc: 'assets/broll/diagram.png',
+        ...(brollMedia ? { brollMedia } : { brollSrc: 'assets/broll/diagram.png' }),
         headCream: 'ПОКАЗЫВАЕМ',
         headOrange: 'СХЕМУ',
       },
@@ -1484,6 +1484,80 @@ test('legacy image re-selection persists brollMedia and resolves after a real se
       JSON.stringify({ brief: reloaded.body.brief, assets: reloaded.body.assets }),
       /assets\/broll|[a-f0-9]{64}|\/Users\//,
     );
+  } finally {
+    await closeServer(second.server);
+  }
+});
+
+test('review save keeps a clean b-roll overlay through replace, fit and a real server restart', async (t) => {
+  const sha256 = crypto.createHash('sha256').update('safe-image').digest('hex');
+  const state = makeReviewWorkspace(t, {
+    approved: false,
+    name: 'clean-overlay-round-trip',
+    brollMedia: {
+      kind: 'image', src: 'assets/broll/diagram.png', sha256, fit: 'cover', overlay: 'none',
+    },
+  });
+  fs.writeFileSync(path.join(state.workspace.dir, 'transcript', 'words.json'), `${JSON.stringify([{
+    start: 0,
+    end: 10,
+    text: 'Тестовая дорожка',
+    words: [{ w: 'Тестовая', s: 0, e: 1 }, { w: 'дорожка', s: 1, e: 2 }],
+  }])}\n`);
+  const baseBytes = fs.readFileSync(state.baseJsonPath);
+  const start = () => startReviewServer({
+    root: REPOSITORY_ROOT,
+    projectDir: state.workspace.dir,
+    editable: true,
+    open: false,
+    runToolImpl: () => { throw new Error('waveform unavailable'); },
+    probeReviewMediaImpl: () => ({
+      mediaKind: 'image', width: 1, height: 1, fps: 0, durationSec: 0, hasAudio: false,
+    }),
+  });
+  const first = await start();
+  let savedPath;
+  let selectedId;
+  try {
+    const initial = await reviewJson(first, '/api/state');
+    assert.equal(initial.status, 200);
+    const selected = initial.body.assets.find((asset) => asset.label === 'diagram.png');
+    assert.ok(selected);
+    selectedId = selected.id;
+    assert.deepEqual(initial.body.brief.scenes[1].brollMedia, {
+      kind: 'image', assetId: selectedId, fit: 'cover', overlay: 'none',
+    });
+    const response = await reviewJson(first, '/api/save', {
+      method: 'POST',
+      body: {
+        baseRevision: initial.body.session.baseRevision,
+        baseHash: initial.body.session.baseHash,
+        manifestHash: initial.body.session.manifestHash,
+        commands: [
+          { type: 'replace-broll', sceneIndex: 1, assetId: selectedId },
+          { type: 'set-broll-fit', sceneIndex: 1, fit: 'contain' },
+        ],
+      },
+    });
+    assert.equal(response.status, 201);
+    savedPath = response.body.path;
+  } finally {
+    await closeServer(first.server);
+  }
+
+  assert.deepEqual(fs.readFileSync(state.baseJsonPath), baseBytes);
+  const persisted = JSON.parse(fs.readFileSync(path.join(state.workspace.dir, savedPath), 'utf8'));
+  assert.deepEqual(persisted.scenes[1].brollMedia, {
+    kind: 'image', src: 'assets/broll/diagram.png', sha256, fit: 'contain', overlay: 'none',
+  });
+
+  const second = await start();
+  try {
+    const reloaded = await reviewJson(second, '/api/state');
+    assert.equal(reloaded.status, 200);
+    assert.deepEqual(reloaded.body.brief.scenes[1].brollMedia, {
+      kind: 'image', assetId: selectedId, fit: 'contain', overlay: 'none',
+    });
   } finally {
     await closeServer(second.server);
   }
