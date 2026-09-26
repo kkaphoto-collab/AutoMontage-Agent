@@ -86,7 +86,7 @@ test('public scene catalog names the exact reusable properties exercised by fixt
   const catalog = fs.readFileSync(path.join(ROOT, 'docs', 'SCENE-CATALOG.md'), 'utf8');
   for (const property of [
     'side-overlay', 'stepStartsSec', 'showSpeakerPip', 'centerOnFade',
-    'brollMedia.fit', 'brollMedia.trimStartSec', 'brollMedia.audioMode',
+    'brollMedia.fit', 'brollMedia.trimStartSec', 'brollMedia.audioMode', 'brollMedia.overlay',
   ]) {
     assert.match(catalog, new RegExp(property.replace('.', '\\.'), 'u'), property);
   }

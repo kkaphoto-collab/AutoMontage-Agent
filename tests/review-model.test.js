@@ -337,6 +337,36 @@ test('persisted media projects to an opaque selection only on exact reference an
   assert.doesNotMatch(JSON.stringify(unresolved.scenes[1]), /assets\/broll|[a-f0-9]{64}/);
 });
 
+test('persisted media overlay survives projection to the opaque Review selection', (t) => {
+  const { projectDir, briefPath, workspace } = makeReviewProject(t);
+  const mediaPath = path.join(workspace.dir, 'assets', 'broll', 'motion-layer.png');
+  const bytes = Buffer.from('full-frame motion layer bytes');
+  fs.writeFileSync(mediaPath, bytes);
+  const sha256 = crypto.createHash('sha256').update(bytes).digest('hex');
+  const records = listReviewAssetRecords({ root: ROOT, projectDir });
+  const assetFiles = new Map(records.map((record, index) => [`asset-${index + 1}`, record]));
+  const selected = [...assetFiles].find(([, record]) => record.reference === 'assets/broll/motion-layer.png');
+  assert.ok(selected);
+
+  for (const overlay of ['none', 'default', undefined]) {
+    const canonicalBrief = JSON.parse(fs.readFileSync(briefPath, 'utf8'));
+    canonicalBrief.scenes[1] = {
+      scene: 'broll', start: 2, end: 4,
+      brollMedia: {
+        kind: 'image', src: 'assets/broll/motion-layer.png', sha256, fit: 'cover',
+        ...(overlay === undefined ? {} : { overlay }),
+      },
+      headCream: 'ЧИСТЫЙ', headOrange: 'СЛОЙ',
+    };
+
+    const projected = buildReviewCandidateBase({ canonicalBrief, assetFiles });
+    assert.deepEqual(projected.scenes[1].brollMedia, {
+      kind: 'image', assetId: selected[0], fit: 'cover',
+      ...(overlay === undefined ? {} : { overlay }),
+    });
+  }
+});
+
 test('browser state exposes a fixed unresolved-media diagnostic without legacy or persisted values', (t) => {
   const { projectDir, briefPath } = makeReviewProject(t);
   const canonicalBrief = JSON.parse(fs.readFileSync(briefPath, 'utf8'));

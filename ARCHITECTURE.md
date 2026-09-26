@@ -390,6 +390,9 @@ manifest. Поэтому `/api/state` продолжает видеть стар
 источником геометрии, diff и timing audit. Текст, scene type, effects, keyframes, masks и прочие
 поля fail closed как unsupported diff. `set-broll-query` меняет только два поисковых запроса
 в существующем intent, а `allow-broll-text` - разрешение на встроенный текст выбранного файла.
+`brollMedia.overlay` Review только переносит: projection, `replace-broll`, validate и Save
+сохраняют значение, отсутствие поля остаётся отсутствием, а любое изменение overlay в diff
+считается unsupported – команды для него нет.
 
 #### Поиск B-roll и границы доверия
 
@@ -779,6 +782,13 @@ Remotion `OffthreadVideo`. `trimBefore = round(trimStartSec × fps)`, а дли�
 границах сцены. Музыка остаётся отдельной root-level дорожкой. Отдельный loudness pass для
 каждого b-roll asset в V1 намеренно не выполняется.
 
+Оформление поверх b-roll решает чистая функция `brollOverlayPresentation(brollMedia)` из того же
+файла. Без поля `overlay` и при `"default"` она возвращает прежний набор: `brightness(0.85)` на
+медиа, нижний градиент, чип, блок заголовка с `sub` и окно спикера – вывод совпадает с прежним
+побайтно. `"none"` выключает всё это, и `SceneBroll` показывает только медиа. Схема и
+`validateLessonBrief` принимают `overlay` у image и video, другие значения отклоняются; props
+передают поле в Remotion без изменений.
+
 Официальные lesson-сцены находятся в `src/scenes/scenes.jsx`:
 
 | JSON-ключ | Назначение |
@@ -789,7 +799,7 @@ Remotion `OffthreadVideo`. `trimBefore = round(trimStartSec × fps)`, а дли�
 | `blur-overlay` | сильный числовой или смысловой акцент |
 | `text-only` | крупная цитата без спикера |
 | `stat` | реально произнесённая метрика |
-| `broll` | визуальный пример из локального файла; draft допускает `brollIntent` с заглушкой до выбора; `showSpeakerPip: false` убирает окно спикера и оставляет медиа полноэкранным |
+| `broll` | визуальный пример из локального файла; draft допускает `brollIntent` с заглушкой до выбора; `showSpeakerPip: false` убирает окно спикера и оставляет медиа полноэкранным; `brollMedia.overlay: "none"` убирает всё оформление движка для слоя со своим текстом |
 
 `chart` реализован как эксперимент, но запрещён в автоматическом lesson-brief.
 Сторона `fullscreen/side-overlay` вычисляется по `facePos`: графика всегда занимает отрицательное

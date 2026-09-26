@@ -1010,6 +1010,8 @@ function materializeReviewAssets({
         sha256: registered.canonicalSha256,
         fit: selected.fit,
       };
+    // Значение overlay проверяет validateLessonBrief ниже; Review его только переносит.
+    if (Object.hasOwn(selected, 'overlay')) scene.brollMedia.overlay = selected.overlay;
   }
   const validation = validateLessonBrief(materialized);
   if (!validation.ok) rejectRequest(422, 'INVALID_REVIEW_BRIEF');

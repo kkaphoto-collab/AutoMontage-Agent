@@ -42,18 +42,34 @@ export const brollMediaPresentation = (media, fps) => ({
   muted: media?.kind === 'video' && media.audioMode === 'mute',
 });
 
+// Оформление движка поверх b-roll. `overlay: "none"` нужен полноэкранному слою, который уже
+// несёт свой текст и дизайн (Creative Motion): медиа показывается ровно как отрендерено - без
+// затемнения, нижнего градиента, чипа, заголовка с подписью и окна спикера. Отсутствие поля,
+// `"default"` и любое другое значение сохраняют прежнее оформление без изменений.
+export const brollOverlayPresentation = (media) => {
+  const clean = media?.overlay === 'none';
+  return {
+    mediaFilter: clean ? null : 'brightness(0.85)',
+    bottomGradient: !clean,
+    chip: !clean,
+    textBlock: !clean,
+    speakerPip: !clean,
+  };
+};
+
 export const BrollMedia = ({ media, legacySrc, durationInFrames }) => {
   const { fps } = useVideoConfig();
   const source = media?.src || legacySrc;
   if (!source) return null;
   const presentation = brollMediaPresentation(media, fps);
+  const { mediaFilter } = brollOverlayPresentation(media);
 
   const style = {
     width: '100%',
     height: '100%',
     objectFit: presentation.objectFit,
     objectPosition: '50% 40%',
-    filter: 'brightness(0.85)',
+    ...(mediaFilter ? { filter: mediaFilter } : {}),
   };
 
   if (media?.kind !== 'video') {

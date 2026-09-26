@@ -3,6 +3,8 @@ const path = require('path');
 const BROLL_MEDIA_KINDS = new Set(['image', 'video']);
 const BROLL_FITS = new Set(['contain', 'cover']);
 const BROLL_AUDIO_MODES = new Set(['mute', 'mix', 'replace']);
+// `default` (или отсутствие поля) - прежнее оформление сцены broll; `none` - чистый слой.
+const BROLL_OVERLAYS = new Set(['default', 'none']);
 const OPAQUE_ASSET_ID = /^asset-\d+$/;
 const URL_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/;
 
@@ -47,6 +49,7 @@ module.exports = {
   BROLL_AUDIO_MODES,
   BROLL_FITS,
   BROLL_MEDIA_KINDS,
+  BROLL_OVERLAYS,
   frameSnapSeconds,
   isCanonicalBrollReference,
   sceneDurationFrames,

@@ -136,6 +136,8 @@ function buildReviewCandidateBase({ canonicalBrief, assetFiles } = {}) {
         audioMode: persisted.audioMode,
       }
       : { kind: 'image', assetId: resolved.assetId, fit: persisted.fit };
+    // Review не меняет оформление сцены, но обязан донести его до следующей ревизии.
+    if (Object.hasOwn(persisted, 'overlay')) scene.brollMedia.overlay = persisted.overlay;
   }
   return candidate;
 }

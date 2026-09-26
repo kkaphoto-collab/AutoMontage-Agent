@@ -1,6 +1,7 @@
 const { isDeepStrictEqual } = require('node:util');
 
 const { isOpaqueAssetId } = require('./commands');
+const { BROLL_OVERLAYS } = require('../lesson/broll-media');
 
 function unsupportedDiff() {
   throw new Error('review diff contains unsupported changes');
@@ -64,14 +65,24 @@ function reviewMedia(scene) {
 function safeReviewMedia(media) {
   if (!media || !['image', 'video'].includes(media.kind)
     || !isOpaqueAssetId(media.assetId) || !['contain', 'cover'].includes(media.fit)) return false;
+  const hasOverlay = Object.hasOwn(media, 'overlay');
+  if (hasOverlay && !BROLL_OVERLAYS.has(media.overlay)) return false;
+  const overlayKeys = hasOverlay ? ['overlay'] : [];
   if (media.kind === 'image') {
-    return isDeepStrictEqual(Object.keys(media).sort(), ['assetId', 'fit', 'kind']);
+    return isDeepStrictEqual(Object.keys(media).sort(), ['assetId', 'fit', 'kind', ...overlayKeys].sort());
   }
   return isDeepStrictEqual(
     Object.keys(media).sort(),
-    ['assetId', 'audioMode', 'fit', 'kind', 'trimStartSec'],
+    ['assetId', 'audioMode', 'fit', 'kind', 'trimStartSec', ...overlayKeys].sort(),
   ) && Number.isFinite(media.trimStartSec) && media.trimStartSec >= 0
     && ['mute', 'mix', 'replace'].includes(media.audioMode);
+}
+
+// Ни одна команда Review не меняет brollMedia.overlay, поэтому любое его изменение - чужая правка.
+function sameOverlay(beforeMedia, afterMedia) {
+  const before = beforeMedia && Object.hasOwn(beforeMedia, 'overlay') ? beforeMedia.overlay : undefined;
+  const after = afterMedia && Object.hasOwn(afterMedia, 'overlay') ? afterMedia.overlay : undefined;
+  return before === after;
 }
 
 function addAssetChanges(before, after, expected, changes) {
@@ -82,7 +93,7 @@ function addAssetChanges(before, after, expected, changes) {
     const afterMedia = reviewMedia(afterScene);
     if (isDeepStrictEqual(beforeMedia, afterMedia)) continue;
     if (beforeScene.scene !== 'broll' || afterScene.scene !== 'broll'
-      || !safeReviewMedia(afterMedia)) unsupportedDiff();
+      || !safeReviewMedia(afterMedia) || !sameOverlay(beforeMedia, afterMedia)) unsupportedDiff();
 
     delete expected.scenes[index].brollSrc;
     expected.scenes[index].brollMedia = deepClone(afterMedia);

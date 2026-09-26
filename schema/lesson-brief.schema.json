@@ -168,7 +168,8 @@
                   "kind": { "const": "image" },
                   "src": { "type": "string", "minLength": 1 },
                   "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-                  "fit": { "enum": ["contain", "cover"] }
+                  "fit": { "enum": ["contain", "cover"] },
+                  "overlay": { "enum": ["default", "none"] }
                 }
               },
               {
@@ -181,7 +182,8 @@
                   "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
                   "trimStartSec": { "type": "number", "minimum": 0 },
                   "fit": { "enum": ["contain", "cover"] },
-                  "audioMode": { "enum": ["mute", "mix", "replace"] }
+                  "audioMode": { "enum": ["mute", "mix", "replace"] },
+                  "overlay": { "enum": ["default", "none"] }
                 }
               }
             ]

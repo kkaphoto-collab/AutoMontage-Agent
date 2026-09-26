@@ -1,7 +1,11 @@
 const fs = require('fs');
 const path = require('path');
 const Ajv = require('ajv');
-const { frameSnapSeconds, isCanonicalBrollReference } = require('./broll-media');
+const {
+  BROLL_OVERLAYS,
+  frameSnapSeconds,
+  isCanonicalBrollReference,
+} = require('./broll-media');
 
 const OFFICIAL_SCENES = [
   'fullscreen',
@@ -88,6 +92,10 @@ function validateLessonBrief(brief, {
           errors.push(`scenes[${index}].brollMedia.trimStartSec: время b-roll некорректно`);
         }
       }
+      if (typeof scene.brollMedia === 'object' && Object.hasOwn(scene.brollMedia, 'overlay')
+        && !BROLL_OVERLAYS.has(scene.brollMedia.overlay)) {
+        errors.push(`scenes[${index}].brollMedia.overlay: значение ${JSON.stringify(scene.brollMedia.overlay)} не разрешено; допустимо "default" или "none"`);
+      }
     }
     if (scene.scene === 'broll' && scene.brollIntent && brief.status === 'approved') {
       errors.push(`scenes[${index}].brollIntent: unresolved b-roll intent cannot be approved`);
@@ -170,7 +178,10 @@ function sceneSummary(scene) {
   if (scene.scene === 'text-only') return `«${scene.quoteCream} ${scene.quoteOrange}»`;
   if (scene.scene === 'stat') return `${scene.statCream}${scene.statOrange}: ${scene.headCream} ${scene.headOrange}`;
   if (scene.scene === 'blur-overlay') return `${scene.big}: ${scene.headCream} ${scene.headOrange}`;
-  if (scene.scene === 'broll') return `${scene.headCream} ${scene.headOrange} (${scene.brollMedia?.src ?? scene.brollSrc})`;
+  if (scene.scene === 'broll') {
+    const clean = scene.brollMedia?.overlay === 'none' ? '; без оформления движка' : '';
+    return `${scene.headCream} ${scene.headOrange} (${scene.brollMedia?.src ?? scene.brollSrc}${clean})`;
+  }
   return `${scene.headCream} ${scene.headOrange}: ${(scene.bullets || []).join('; ')}`;
 }
 

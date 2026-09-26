@@ -2,7 +2,7 @@ import { AbsoluteFill, useCurrentFrame, useVideoConfig } from 'remotion';
 import { useTheme } from '../theme';
 import { tk, safeFor, safeWidth } from './safezone';
 import { SceneBg, FaceLayer, Chip, FitHeading, useRise } from './parts';
-import { BrollMedia } from './BrollMedia';
+import { BrollMedia, brollOverlayPresentation } from './BrollMedia';
 import { clamp, countUp, fmt } from '../anim';
 
 const Bullets = ({ items = [], k, delay = 30, stagger = 7, delayForIndex = null, size = 38 }) => (
@@ -470,10 +470,12 @@ export const shouldShowBrollSpeakerPip = (faceSrc, showSpeakerPip) => (
   Boolean(faceSrc) && showSpeakerPip !== false
 );
 
-// 7. BROLL: медиа на весь экран, опциональный спикер в углу, текст снизу
+// 7. BROLL: медиа на весь экран, опциональный спикер в углу, текст снизу.
+// brollMedia.overlay === 'none' оставляет только медиа: чистый полноэкранный слой.
 export const SceneBroll = (p) => {
   const t = useTheme(); const k = tk(t); const { width, height } = useVideoConfig(); const s = safeFor(width, height);
   const land = width > height; const cardEnter = useRise(0, 20);
+  const overlay = brollOverlayPresentation(p.brollMedia);
   const circle = land ? 200 : 220;
   // кружок спикера в правом верхнем углу сейф-зоны (адаптивно, не вылезает)
   const circleTop = land ? s.top + 10 : 940;
@@ -485,13 +487,13 @@ export const SceneBroll = (p) => {
     <AbsoluteFill style={{ background: k.bg, color: k.cream }}>
       {p.brollMedia || p.brollSrc ? <BrollMedia media={p.brollMedia} legacySrc={p.brollSrc} durationInFrames={p.durationInFrames} />
         : <AbsoluteFill style={{ background: 'repeating-linear-gradient(135deg,#241a12,#241a12 40px,#1d1610 40px,#1d1610 80px)' }}><AbsoluteFill style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6f5e49', fontFamily: k.fonts.mono, fontSize: 38 }}>[ B-ROLL ]</AbsoluteFill></AbsoluteFill>}
-      <AbsoluteFill style={{ background: 'linear-gradient(180deg, transparent 45%, rgba(0,0,0,.8))' }} />
-      <Chip text={p.videoTitle || 'ВИДЕО'} />
-      {shouldShowBrollSpeakerPip(p.faceSrc, p.showSpeakerPip) ? <div style={{ position: 'absolute', right: s.right, top: circleTop, width: circle, height: circle, borderRadius: 26, overflow: 'hidden', border: `1px solid ${k.orange}70`, ...cardEnter }}><FaceLayer faceSrc={p.faceSrc} facePos={speakerPos} faceZoom={p.faceZoom} sourceStartFrame={p.sourceStartFrame} /></div> : null}
-      <div style={{ position: 'absolute', left: s.left, width: textW, bottom: s.bottom }}>
+      {overlay.bottomGradient ? <AbsoluteFill style={{ background: 'linear-gradient(180deg, transparent 45%, rgba(0,0,0,.8))' }} /> : null}
+      {overlay.chip ? <Chip text={p.videoTitle || 'ВИДЕО'} /> : null}
+      {overlay.speakerPip && shouldShowBrollSpeakerPip(p.faceSrc, p.showSpeakerPip) ? <div style={{ position: 'absolute', right: s.right, top: circleTop, width: circle, height: circle, borderRadius: 26, overflow: 'hidden', border: `1px solid ${k.orange}70`, ...cardEnter }}><FaceLayer faceSrc={p.faceSrc} facePos={speakerPos} faceZoom={p.faceZoom} sourceStartFrame={p.sourceStartFrame} /></div> : null}
+      {overlay.textBlock ? <div style={{ position: 'absolute', left: s.left, width: textW, bottom: s.bottom }}>
         <FitHeading cream={p.headCream} orange={p.headOrange} width={textW} maxSize={92} />
         {p.sub ? <div style={{ marginTop: 20, fontSize: 34, opacity: 0.92 }}>{p.sub}</div> : null}
-      </div>
+      </div> : null}
     </AbsoluteFill>
   );
 };

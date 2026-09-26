@@ -192,6 +192,25 @@ test('generator preserves documented negative-space and real screencast variants
   assert.equal(brief.scenes[1].showSpeakerPip, false);
 });
 
+test('generator keeps the clean overlay of an available full-frame layer', () => {
+  const layer = {
+    kind: 'video',
+    src: 'assets/broll/motion-layer.mp4',
+    sha256: 'c'.repeat(64),
+    trimStartSec: 0,
+    fit: 'cover',
+    audioMode: 'mute',
+    overlay: 'none',
+  };
+  const brief = normalizeGeneratedBrief({
+    scenes: [{
+      scene: 'broll', start: 0, end: 6, headCream: 'ЧИСТЫЙ', headOrange: 'СЛОЙ', brollMedia: layer,
+    }],
+  }, { ...context, availableBroll: [layer.src] });
+
+  assert.deepEqual(brief.scenes[0].brollMedia, layer);
+});
+
 test('scene limit is enforced after the LLM response', () => {
   const scenes = [0, 2, 4].map((start, index) => ({
     scene: 'fullscreen',
