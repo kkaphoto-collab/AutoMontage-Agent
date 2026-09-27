@@ -6,3 +6,4 @@ export * from './camera.js';
 export * from './motion.js';
 export * from './inserts.js';
 export * from './sfx.js';
+export * from './captions.js';
