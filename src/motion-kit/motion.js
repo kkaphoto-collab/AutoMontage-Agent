@@ -67,10 +67,19 @@ export function animOf(item, frame, fps) {
   return out;
 }
 
+// Порог видимости — общий для рендера (KitBox) и манифеста (itemExtentAt): гейт safe-zone
+// должен видеть ровно то же самое «не показано», что и настоящий кадр Remotion, иначе манифест
+// пропустит габарит элемента, который на экране ещё виден полупрозрачным, или наоборот сочтёт
+// видимым элемент, которого KitBox уже не рисует.
+export const VISIBLE_MIN = 0.01;
+export function isShown(anim) {
+  return anim.o > VISIBLE_MIN;
+}
+
 // Габарит элемента в кадре с учётом масштаба, поворота и сдвига. null — элемент не виден.
 export function itemExtentAt(item, frame, fps) {
   const a = animOf(item, frame, fps);
-  if (a.o <= 0.01) return null;
+  if (!isShown(a)) return null;
   const { x, y, w, h } = item.box;
   const th = (Math.abs(a.rot) * Math.PI) / 180;
   // abs(cos)/abs(sin): без него cos(th) уходит в минус при th>90° и переворачивает габарит

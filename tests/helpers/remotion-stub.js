@@ -2,12 +2,22 @@ const React = require('react');
 const real = require('remotion');
 
 // Реальные spring/interpolate/Easing + подмена хуков и медиа-компонентов на простую разметку.
-function remotionStub({ frame = 0, fps = 25, width = 1080, height = 1920, calls = {} } = {}) {
+//
+// Известные ограничения этой подмены (важно для новых тестов на её основе):
+// - Sequence не сдвигает useCurrentFrame и не прячет children за пределами своего окна — это
+//   просто <div> с data-атрибутами from/durationInFrames, без реального поведения Remotion;
+// - Freeze игнорирует `active` и не замораживает children на заданном кадре — просто оборачивает
+//   их в <div data-freeze>;
+// - renderToStaticMarkup никогда не выполняет эффекты, поэтому continueRender/cancelRender в
+//   таких тестах недостижимы — посчитать можно только вызовы delayRender;
+// - остальные компоненты Remotion (Loop, Series, Html5Audio и т. д.) не подменены и попадут в
+//   настоящие реализации из 'remotion', которые ждут реальный Remotion-рендер, а не Node-тест.
+function remotionStub({ frame = 0, fps = 25, width = 1080, height = 1920, durationInFrames = 100000, calls = {} } = {}) {
   const box = (tag) => ({ children, style, ...rest }) => React.createElement(tag, { style, ...rest }, children);
   return {
     ...real,
     useCurrentFrame: () => frame,
-    useVideoConfig: () => ({ fps, width, height, durationInFrames: 100000 }),
+    useVideoConfig: () => ({ fps, width, height, durationInFrames }),
     AbsoluteFill: box('div'),
     Sequence: ({ children, from, durationInFrames }) => React.createElement('div', { 'data-sequence-from': from, 'data-sequence-duration': durationInFrames }, children),
     Freeze: ({ children, frame: at }) => React.createElement('div', { 'data-freeze': at }, children),

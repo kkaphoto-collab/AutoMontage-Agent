@@ -1,5 +1,5 @@
 import { useCurrentFrame, useVideoConfig } from 'remotion';
-import { animOf } from './motion.js';
+import { animOf, isShown } from './motion.js';
 
 export function kitBoxStyle(item, frame, fps) {
   const a = animOf(item, frame, fps);
@@ -13,11 +13,23 @@ export function kitBoxStyle(item, frame, fps) {
   };
 }
 
-// Любой текст и карточка слоя живут внутри KitBox: тогда гейт safe-zone видит их габарит.
+// Содержимое должно помещаться внутри item.box: гейт safe-zone (G5) видит именно этот
+// прямоугольник, а не то, что текст реально нарисовал внутри (переполнение он не ловит).
 export function KitBox({ item, children }) {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
-  if (frame < item.from || frame >= item.until) return null;
+  if (!Number.isFinite(item.from) || !Number.isFinite(item.until)) {
+    // Частая ошибка — передать в KitBox сырой items[] из plan.js (там at/until в секундах плана,
+    // а не item.from/until в кадрах композиции). KitBox рендерится на верхнем уровне, а не внутри
+    // <Sequence>, и всегда ждёт результат compileLayer/compileItems.
+    throw new Error(
+      `KitBox needs a compiled item with frame numbers from compileLayer/compileItems, got plan seconds? (item.id=${item.id}, from=${item.from}, until=${item.until})`
+    );
+  }
+  // Окно показа не проверяем отдельно: animOf сам возвращает o:0 вне [from, until), и isShown
+  // отсекает этот случай той же единой проверкой, что использует манифест (itemExtentAt).
+  const a = animOf(item, frame, fps);
+  if (!isShown(a)) return null;
   const marker = item.kind === 'media' || item.bleed ? {} : { 'data-kit-text': item.id };
   return <div {...marker} style={kitBoxStyle(item, frame, fps)}>{children}</div>;
 }
