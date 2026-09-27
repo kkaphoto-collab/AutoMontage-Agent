@@ -38,6 +38,11 @@ function assertNoWeightlessDuplicates(faces) {
   }
 }
 
+// Реестр зарегистрированных лиц по fontSet: ключ family+file+weight → промис загрузки. Второй
+// одинаковый FontFace в document.fonts не появляется, повторная регистрация ждёт ту же загрузку.
+// WeakMap по самому fontSet: у каждого документа (и у каждого фейка в тестах) свой реестр.
+const REGISTERED = new WeakMap();
+
 // Синхронная часть: конструирует каждый FontFace, СРАЗУ кладёт его в fontSet (до load(), а не
 // после) и запускает load(). «Сразу» — не деталь стиля, а сама суть исправления ревью round 3:
 // FontLoader вызывает эту функцию из lazy-инициализатора useState — во время рендера, до ЛЮБОГО
@@ -50,13 +55,23 @@ function assertNoWeightlessDuplicates(faces) {
 // когда любой layout-эффект где-либо в дереве впервые выполнится, document.fonts уже содержит
 // запись для каждого face (пусть ещё не загруженную) — и чей угодно document.fonts.load(того же
 // семейства) дождётся её настоящей загрузки, а не зарезолвится в пустоту.
+//
+// Регистрация идёт в фазе рендера и повторяется на каждом монтировании FontLoader (ремаунт, второй
+// FontLoader с теми же шрифтами) — уже зарегистрированное лицо берётся из REGISTERED.
 export function registerFontFaces(faces, { FontFaceImpl, fontSet, toUrl }) {
   if (!faces || faces.length === 0) return [];
   assertNoWeightlessDuplicates(faces);
+  if (!REGISTERED.has(fontSet)) REGISTERED.set(fontSet, new Map());
+  const registry = REGISTERED.get(fontSet);
   return faces.map((face) => {
-    const fontFace = new FontFaceImpl(face.family, `url("${toUrl(face.file)}")`, { weight: face.weight || '100 900' });
-    fontSet.add(fontFace);
-    return { face, promise: fontFace.load() };
+    const weight = face.weight || '100 900';
+    const key = JSON.stringify([face.family, face.file, weight]);
+    if (!registry.has(key)) {
+      const fontFace = new FontFaceImpl(face.family, `url("${toUrl(face.file)}")`, { weight });
+      fontSet.add(fontFace);
+      registry.set(key, fontFace.load());
+    }
+    return { face, promise: registry.get(key) };
   });
 }
 
@@ -76,6 +91,22 @@ export function settleFontFaces(registered) {
 // не необработанным исключением из самого вызова.
 export function loadFontFaces(faces, deps) {
   return Promise.resolve().then(() => settleFontFaces(registerFontFaces(faces, deps)));
+}
+
+// Эффект монтирования гейта — чистая функция (в renderToStaticMarkup эффекты не выполняются, так
+// её можно проверить без DOM). Ждёт уже зарегистрированные лица: готово → onReady, сбой → onError.
+// Возвращает очистку эффекта: после неё поздняя загрузка или ошибка ничего не трогают, а release
+// отпускает delayRender-handle — если гейт размонтирован раньше, чем шрифты загрузились, Remotion
+// иначе ждал бы этот handle до таймаута. Дети остаются закрытыми: ready так и не станет true.
+export function watchFontFaces(registered, { onReady, onError, release }) {
+  let cancelled = false;
+  settleFontFaces(registered)
+    .then(() => { if (!cancelled) onReady(); })
+    .catch((error) => { if (!cancelled) onError(error); });
+  return () => {
+    cancelled = true;
+    release();
+  };
 }
 
 // Шрифты слоя из public/fonts (OFL с кириллицей). FontLoader — ГЕЙТ: он обязан ОБОРАЧИВАТЬ то, что
@@ -111,13 +142,15 @@ export function FontLoader({ faces, children }) {
 
   useEffect(() => {
     if (typeof document === 'undefined') { setReady(true); return undefined; }
-    let cancelled = false;
-    settleFontFaces(registered)
-      .then(() => { if (!cancelled) setReady(true); })
+    return watchFontFaces(registered, {
+      onReady: () => setReady(true),
       // cancelRender — НЕ через settle: реальная ошибка обязана репортиться всегда, даже если
       // settle уже «использован» где-то на успешном пути (см. комментарий у settleOnce).
-      .catch((error) => { if (!cancelled) cancelRender(error); });
-    return () => { cancelled = true; };
+      onError: (error) => cancelRender(error),
+      // Размонтирование до загрузки: handle отпускается здесь; после успешной загрузки settle
+      // уже использован эффектом ниже, и повторного continueRender не будет.
+      release: () => settle(() => continueRender(handle)),
+    });
     // [] — намеренно: faces иммутабельны, регистрация и загрузка происходят один раз на mount.
   }, []);
 

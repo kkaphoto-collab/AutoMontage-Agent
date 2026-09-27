@@ -174,7 +174,9 @@ function assertVariant(probes, label) {
   for (const p of withCaption) {
     assert.ok(p.scrollWidth <= p.clientWidth + 1, `${label} frame ${p.frame}: текст обрезан — scrollWidth=${p.scrollWidth} > clientWidth=${p.clientWidth} (fontSize=${p.fontSize})`);
     const actual = parseFloat(p.fontSize);
-    assert.ok(Math.abs(actual - p.referenceFontSize) <= 0.3,
+    // Эталон ищет тем же бинарным поиском; разница только в round1 эталона (шаг поиска 0,25 →
+    // до 0,05 px), поэтому допуск 0,1 px: заметно другой кегль значит замер другим шрифтом.
+    assert.ok(Math.abs(actual - p.referenceFontSize) <= 0.1,
       `${label} frame ${p.frame}: фактический кегль ${actual}px разошёлся с независимым эталоном ${p.referenceFontSize}px (замер, вероятно, случился до готовности Onest)`);
   }
 }

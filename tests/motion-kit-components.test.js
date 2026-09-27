@@ -926,6 +926,119 @@ test('settleFontFaces awaits every registered load() and wraps a failure with it
   await assert.rejects(() => kit.settleFontFaces(registered), /KitOnest.*fonts\/Onest\.ttf.*network error/);
 });
 
+// Ревью пакета 1: регистрация идёт в инициализаторе useState (фаза рендера), поэтому каждое
+// монтирование FontLoader (ремаунт, второй FontLoader с теми же шрифтами) снова зовёт
+// registerFontFaces. Уже зарегистрированное в этом fontSet лицо (тот же family+file+weight)
+// переиспользуется: второй FontFace в document.fonts не появляется, промис загрузки — тот же.
+test('registerFontFaces reuses a face already registered in the same fontSet instead of adding a duplicate', async () => {
+  const kit = kitAt(0);
+  const added = [];
+  let constructed = 0;
+  class FakeFontFace {
+    constructor(family, source, descriptors) { constructed += 1; this.family = family; this.descriptors = descriptors; }
+    load() { return Promise.resolve(this); }
+  }
+  const fontSet = { add: (f) => added.push(f) };
+  const deps = { FontFaceImpl: FakeFontFace, fontSet, toUrl: (f) => f };
+  const faces = [{ family: 'KitOnest', file: 'fonts/Onest.ttf' }, { family: 'KitMono', file: 'fonts/Mono.ttf', weight: '400' }];
+  const first = kit.registerFontFaces(faces, deps);
+  const second = kit.registerFontFaces(faces.map((face) => ({ ...face })), deps);
+  assert.equal(added.length, 2, 'повторная регистрация тех же лиц не должна добавлять их в fontSet ещё раз');
+  assert.equal(constructed, 2);
+  assert.equal(second[0].promise, first[0].promise, 'повторная регистрация ждёт ту же загрузку');
+  await kit.settleFontFaces(second);
+
+  // Другой weight того же файла — другое начертание, а другой fontSet (другой документ) —
+  // свой реестр: в обоих случаях лицо регистрируется заново.
+  kit.registerFontFaces([{ family: 'KitMono', file: 'fonts/Mono.ttf', weight: '700' }], deps);
+  assert.equal(added.length, 3);
+  const otherSet = [];
+  kit.registerFontFaces(faces, { ...deps, fontSet: { add: (f) => otherSet.push(f) } });
+  assert.equal(otherSet.length, 2);
+});
+
+test('FontLoader mounted twice with the same faces registers them in document.fonts once', () => {
+  const kit = kitAt(0);
+  const added = [];
+  class FakeFontFace {
+    constructor(family) { this.family = family; }
+    load() { return new Promise(() => {}); }
+  }
+  const saved = { document: Object.getOwnPropertyDescriptor(global, 'document'), FontFace: Object.getOwnPropertyDescriptor(global, 'FontFace') };
+  global.document = { fonts: { add: (f) => added.push(f) } };
+  global.FontFace = FakeFontFace;
+  try {
+    const faces = [{ family: 'KitOnest', file: 'fonts/Onest.ttf' }];
+    // renderToStaticMarkup выполняет инициализаторы useState, но не эффекты — ровно та фаза,
+    // в которой FontLoader регистрирует шрифты. Шрифт не загружен → гейт закрыт, детей нет.
+    assert.equal(render(React.createElement(kit.FontLoader, { faces }, 'x')), '');
+    assert.equal(render(React.createElement(kit.FontLoader, { faces }, 'x')), '');
+    assert.equal(added.length, 1);
+  } finally {
+    for (const [name, descriptor] of Object.entries(saved)) {
+      if (descriptor) Object.defineProperty(global, name, descriptor); else delete global[name];
+    }
+  }
+});
+
+// Ревью пакета 1: эффект монтирования гейта — чистая функция watchFontFaces (эффекты в
+// renderToStaticMarkup не выполняются). Если FontLoader размонтирован раньше, чем шрифты
+// загрузились, очистка обязана отпустить delayRender-handle — иначе Remotion ждал бы его до
+// таймаута; поздняя загрузка или ошибка после размонтирования уже ничего не трогают.
+test('watchFontFaces releases the delayRender handle when the gate unmounts before the fonts load', async () => {
+  const kit = kitAt(0);
+  let releaseLoad;
+  class SlowFontFace { load() { return new Promise((resolve) => { releaseLoad = resolve; }); } }
+  const registered = kit.registerFontFaces([{ family: 'KitOnest', file: 'fonts/Onest.ttf' }],
+    { FontFaceImpl: SlowFontFace, fontSet: { add: () => {} }, toUrl: (f) => f });
+  const settle = kit.settleOnce();
+  const events = [];
+  const cleanup = kit.watchFontFaces(registered, {
+    onReady: () => events.push('ready'),
+    onError: () => events.push('error'),
+    release: () => settle(() => events.push('continue')),
+  });
+  cleanup();
+  assert.deepEqual(events, ['continue'], 'размонтирование до загрузки обязано сразу отпустить handle');
+  releaseLoad();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(events, ['continue'], 'поздняя загрузка после размонтирования не зовёт onReady');
+});
+
+test('watchFontFaces reports ready once the fonts load, and a later unmount does not release the handle twice', async () => {
+  const kit = kitAt(0);
+  class FastFontFace { load() { return Promise.resolve(this); } }
+  const registered = kit.registerFontFaces([{ family: 'KitOnest', file: 'fonts/Onest.ttf' }],
+    { FontFaceImpl: FastFontFace, fontSet: { add: () => {} }, toUrl: (f) => f });
+  const settle = kit.settleOnce();
+  const events = [];
+  const release = () => settle(() => events.push('continue'));
+  const cleanup = kit.watchFontFaces(registered, {
+    onReady: () => { events.push('ready'); release(); },
+    onError: () => events.push('error'),
+    release,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(events, ['ready', 'continue']);
+  cleanup();
+  assert.deepEqual(events, ['ready', 'continue'], 'handle уже отпущен — повторного continueRender нет');
+});
+
+test('watchFontFaces passes a load failure to onError, but not after the gate has unmounted', async () => {
+  const kit = kitAt(0);
+  class FailingFontFace { load() { return Promise.reject(new Error('network error')); } }
+  const deps = { FontFaceImpl: FailingFontFace, fontSet: { add: () => {} }, toUrl: (f) => f };
+  const errors = [];
+  kit.watchFontFaces(kit.registerFontFaces([{ family: 'KitOnest', file: 'a.ttf' }], deps),
+    { onReady: () => {}, onError: (error) => errors.push(error.message), release: () => {} });
+  const cleanup = kit.watchFontFaces(kit.registerFontFaces([{ family: 'KitMono', file: 'b.ttf' }], deps),
+    { onReady: () => {}, onError: (error) => errors.push(error.message), release: () => {} });
+  cleanup();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /KitOnest.*a\.ttf.*network error/);
+});
+
 // Round 3 (важно, ревью п.2б): FontLoader — гейт, обязан ОБОРАЧИВАТЬ то, что ждёт шрифт, а не
 // стоять рядом с ним отдельным элементом (та самая ошибка использования из ревью). В браузере
 // (document существует) отсутствие children — однозначная ошибка; в Node/SSR document не
