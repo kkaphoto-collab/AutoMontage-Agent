@@ -494,3 +494,29 @@ test('ShutterFlash keeps the same real-time flash duration at 50fps as at 25fps'
   const gone = render(React.createElement(kitAt(at + 12, { fps: 50 }).ShutterFlash, { at }));
   assert.equal(gone, '', 'flash should be gone at at+12 when running at 50fps');
 });
+
+test('SfxTrack plays each kept cue at -5 dB by default and fades its tail', () => {
+  const kit = kitAt(0);
+  const cue = { id: 'whoosh-in@100', file: 'sfx/whoosh-in.wav', startFrame: 90, durationFrames: 30, vol: 0.7 };
+  assert.ok(Math.abs(kit.cueVolume(cue, 0) - 0.7 * 10 ** (-5 / 20)) < 1e-9);
+  assert.ok(Math.abs(kit.cueVolume(cue, 29) - 0.7 * 10 ** (-5 / 20) * 0.2) < 1e-9);
+  assert.ok(Math.abs(kit.cueVolume(cue, 0, 0) - 0.7) < 1e-9);
+  const html = render(React.createElement(kit.SfxTrack, { cues: [cue, { ...cue, id: 'b', startFrame: 200 }] }));
+  assert.equal((html.match(/<audio/g) || []).length, 2);
+  assert.match(html, /data-sequence-from="90" data-sequence-duration="30"/);
+  assert.match(html, /src="\/static\/sfx\/whoosh-in\.wav"/);
+});
+
+// Отклонение от плана: fade — не жёсткая константа в 5 кадров, а ref25(5, fps) эталонных кадров,
+// иначе на 50fps хвост звука затухал бы вдвое быстрее по времени, чем на 25fps (5 кадров на 50fps
+// — это всего 0.1с вместо 0.2с). cueVolume принимает fps четвёртым параметром (по умолчанию 25,
+// поэтому все проверки выше при дефолтном fps не меняются); SfxTrack сам берёт fps из
+// useVideoConfig() и передаёт его в volume-callback каждой Sequence.
+test('cueVolume fades over the same real time at fps 50: a 60-frame cue fades over its last 10 frames', () => {
+  const kit = kitAt(0);
+  const cue = { id: 'long@0', file: 'sfx/long.wav', startFrame: 0, durationFrames: 60, vol: 0.7 };
+  const full = kit.cueVolume(cue, 0, -5, 50);
+  assert.ok(Math.abs(kit.cueVolume(cue, 50, -5, 50) - full) < 1e-9, 'local frame 50: fade has not started yet, full volume');
+  assert.ok(Math.abs(kit.cueVolume(cue, 55, -5, 50) - full * 0.5) < 1e-9, 'local frame 55: exactly halfway through the 10-frame fade');
+  assert.ok(Math.abs(kit.cueVolume(cue, 59, -5, 50) - full * 0.1) < 1e-9, 'local frame 59: one frame before the cue ends, 0.1 of full');
+});

@@ -1,4 +1,4 @@
-import { secToFrame } from './time.js';
+import { ref25, secToFrame } from './time.js';
 
 export const NOTABLE_ROLES = Object.freeze(['whoosh', 'swoosh', 'impact', 'riser', 'shutter']);
 export const ROLE_VOLUME = Object.freeze({
@@ -95,4 +95,18 @@ export function thinCues(cues, { fps, minGapSec = 0.3, notableGapSec = 1.0 } = {
   }
   kept.sort((a, b) => a.startFrame - b.startFrame);
   return { kept, dropped };
+}
+
+export const dbToGain = (db) => 10 ** (db / 20);
+
+// masterDb −5 — утверждённый уровень эффектов относительно «горячих» громкостей в плане; движок
+// затем подмешивает звук слоя ещё на −18 dB (audioMode "mix", см. D5/D6 в context.md).
+// fade — не жёсткая константа 5 кадров, а ref25(5, fps) эталонных кадров: хвост звука обязан
+// затухать одно и то же ВРЕМЯ на любом fps (5 кадров на 50fps — это вдвое короче по времени, чем
+// на 25fps). SfxTrack передаёт fps из useVideoConfig(); значение по умолчанию 25 сохраняет старое
+// поведение вызовов без явного fps.
+export function cueVolume(cue, localFrame, masterDb = -5, fps = 25) {
+  const fade = Math.max(1, Math.min(ref25(5, fps), Math.floor(cue.durationFrames / 3)));
+  const tail = Math.min(1, Math.max(0, (cue.durationFrames - localFrame) / fade));
+  return cue.vol * dbToGain(masterDb) * tail;
 }

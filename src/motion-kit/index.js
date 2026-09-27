@@ -4,3 +4,4 @@ export { KitBox, kitBoxStyle } from './KitBox.jsx';
 export { SpeakerLayer, speakerTransform, speakerFillStyle } from './SpeakerLayer.jsx';
 export { FullscreenReveal, StockInsert } from './Inserts.jsx';
 export { BrowserFrame, ScrollShot, ShutterFlash } from './Screen.jsx';
+export { SfxTrack } from './SfxTrack.jsx';
