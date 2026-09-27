@@ -268,16 +268,21 @@ const MOTION_KIT_ALIAS = '@automontage/motion-kit';
 const MOTION_KIT_DIR = path.join(__dirname, '..', 'src', 'motion-kit');
 
 // Проектные motion-слои импортируют общие детали по стабильному имени, где бы ни лежал слой.
-function withMotionKitAlias(config) {
+// Remotion CLI выполняет remotion.config.js из своей папки (там __dirname неверен), поэтому
+// конфиг передаёт каталог kit от process.cwd(); MOTION_KIT_DIR — для обычного Node.
+function withMotionKitAlias(config, kitDirectory = MOTION_KIT_DIR) {
   return {
     ...config,
     resolve: {
       ...config.resolve,
-      alias: { ...(config.resolve?.alias || {}), [MOTION_KIT_ALIAS]: MOTION_KIT_DIR },
+      alias: { ...(config.resolve?.alias || {}), [MOTION_KIT_ALIAS]: kitDirectory },
     },
   };
 }
 ```
+
+Регрессионный тест `tests/motion-kit-remotion-alias.test.js`: настоящий `loadConfigFile` Remotion → `bundle`
+файла вне `src/`, который импортирует `@automontage/motion-kit` и `@automontage/motion-kit/core`.
 
 и заменить экспорт на `module.exports = { MOTION_KIT_ALIAS, MOTION_KIT_DIR, includeInstalledSource, withMotionKitAlias };`.
 
@@ -286,7 +291,9 @@ function withMotionKitAlias(config) {
 ```js
 const { includeInstalledSource, withMotionKitAlias } = require('./scripts/remotion-webpack');
 // ...
-Config.overrideWebpackConfig(config => withMotionKitAlias(includeInstalledSource(config, sourceDirectory)));
+Config.overrideWebpackConfig(config => withMotionKitAlias(
+  includeInstalledSource(config, sourceDirectory), path.join(sourceDirectory, 'motion-kit'),
+));
 ```
 
 ```js
@@ -405,7 +412,8 @@ export function makeAnchors(words, { tolerance = 1.2 } = {}) {
   let cursor = 0;
   const matches = (word, key) => {
     const n = normWord(word.w);
-    return n === key || (key.length > 2 && n.startsWith(key));
+    // Короткий ключ («это») по началу слова цеплял бы «этот» и сдвигал курсор — только точно.
+    return n === key || (key.length >= 4 && n.startsWith(key));
   };
   function locate(spec, near) {
     const key = normWord(spec);
