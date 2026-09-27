@@ -1,5 +1,5 @@
 import { Easing, interpolate, spring } from 'remotion';
-import { secToFrame } from './time.js';
+import { secToFrame, ref25 } from './time.js';
 
 export const DEFAULT_PRESETS = Object.freeze({
   W: { s: 1.0 },
@@ -31,10 +31,17 @@ export function compileCamera(spec, { fps, width, height, durationInFrames }) {
   const presets = Object.fromEntries(Object.entries({ ...DEFAULT_PRESETS, ...(spec.presets || {}) })
     .map(([name, p]) => [name, { ...p, ...(p.dx !== undefined ? { dx: p.dx * k } : {}), ...(p.dy !== undefined ? { dy: p.dy * k } : {}) }]));
   const f = (sec) => secToFrame(sec, fps);
-  const shots = [...(spec.shots || [])].sort((a, b) => a.at - b.at).map((shot, index) => {
-    if (!presets[shot.preset]) throw new Error(`camera.shots[${index}]: неизвестный пресет «${shot.preset}»`);
-    return { index, from: f(shot.at), preset: shot.preset, drift: shot.drift || 'in', dx: shot.dx, dy: shot.dy };
-  });
+  // Исходный индекс в spec.shots запоминаем ДО сортировки по at — иначе ошибка «camera.shots[N]»
+  // называет позицию после сортировки, а не тот план, который написал человек в plan.js.
+  const shots = (spec.shots || [])
+    .map((shot, originalIndex) => ({ shot, originalIndex }))
+    .sort((a, b) => a.shot.at - b.shot.at)
+    .map(({ shot, originalIndex }, index) => {
+      if (!presets[shot.preset]) throw new Error(`camera.shots[${originalIndex}]: неизвестный пресет «${shot.preset}»`);
+      // shot.dx/dy — ручной сдвиг в пикселях кадра исходника (уже в реальном масштабе, k не
+      // применяется); dx/dy пресета заданы для кадра шириной 1080 и масштабированы выше через k.
+      return { index, from: f(shot.at), preset: shot.preset, drift: shot.drift || 'in', dx: shot.dx, dy: shot.dy };
+    });
   if (!shots.length || shots[0].from !== 0) throw new Error('camera.shots: первый план должен начинаться с 0 с');
   shots.forEach((shot, i) => { shot.to = i + 1 < shots.length ? shots[i + 1].from : durationInFrames; });
   return {
@@ -56,40 +63,47 @@ export function withAways(track, aways) {
 
 export function cameraAt(track, frame) {
   const cfg = CAMERA_DEFAULTS;
+  const fps = track.fps;
+  // Все длительности cfg заданы в кадрах эталона 25 fps — переводим в кадры композиции, чтобы
+  // ритм дрейфа, панча, размытия и ухода был одинаковым в секундах на любом fps.
   const shot = track.shots.reduce((current, s) => (s.from <= frame ? s : current), track.shots[0]);
   const preset = track.presets[shot.preset];
-  const span = Math.max(1, Math.min(shot.to - shot.from, cfg.drift.maxFrames));
+  const span = Math.max(1, Math.min(shot.to - shot.from, ref25(cfg.drift.maxFrames, fps)));
   const p = DRIFT(Math.min(1, Math.max(0, (frame - shot.from) / span)));
   const grow = shot.drift === 'in' ? p : shot.drift === 'out' ? 1 - p : 0;
   let s = preset.s * (1 + cfg.drift.amp * grow);
 
   for (const punch of track.punches) {
     if (frame < punch.from) continue;
+    // spring() сам переводит кадры в секунды через переданный fps, поэтому реальную скорость
+    // подъёма панча масштабировать не нужно — только releaseFrames ниже (это ramp, не spring).
     const on = spring({
-      frame: frame - punch.from, fps: track.fps,
+      frame: frame - punch.from, fps,
       config: { damping: cfg.punch.damping, stiffness: cfg.punch.stiffness, mass: cfg.punch.mass },
     });
-    const off = ramp(frame, punch.until, cfg.punch.releaseFrames);
+    const off = ramp(frame, punch.until, ref25(cfg.punch.releaseFrames, fps));
     s *= 1 + (punch.k - 1) * on * (1 - off);
   }
 
   let blur = 0;
   for (const b of track.blurs) {
     if (frame < b.from) continue;
-    const inV = b.from === 0 ? 1 : ramp(frame, b.from, cfg.blur.inFrames);
-    const outV = 1 - ramp(frame, b.to, cfg.blur.outFrames);
+    const inV = b.from === 0 ? 1 : ramp(frame, b.from, ref25(cfg.blur.inFrames, fps));
+    const outV = 1 - ramp(frame, b.to, ref25(cfg.blur.outFrames, fps));
     blur = Math.max(blur, b.px * Math.min(inV, outV));
   }
 
   let gone = 0;
   for (const a of track.aways) {
-    gone = Math.max(gone, ramp(frame, a.from, cfg.away.enterFrames) * (1 - ramp(frame, a.to, cfg.away.exitFrames)));
+    gone = Math.max(gone, ramp(frame, a.from, ref25(cfg.away.enterFrames, fps)) * (1 - ramp(frame, a.to, ref25(cfg.away.exitFrames, fps))));
   }
   blur = Math.max(blur, cfg.away.blurPx * gone);
 
   const requested = s;
   s = Math.min(s, track.maxScale);
-  const sway = cfg.sway.reduce((sum, w) => sum + w.px * track.k * Math.sin(frame / w.period), 0);
+  // Период покачивания cfg.sway задан в секундах через кадры при 25 fps — frame * 25 / fps
+  // переводит текущий кадр в «кадры на 25 fps», поэтому период колебания одинаков в секундах.
+  const sway = cfg.sway.reduce((sum, w) => sum + w.px * track.k * Math.sin(((frame * 25) / fps) / w.period), 0);
   let dx = (shot.dx ?? preset.dx ?? 0) + sway;
   let dy = shot.dy ?? preset.dy ?? 0;
   if (!preset.fill) {

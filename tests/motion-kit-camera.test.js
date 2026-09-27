@@ -17,6 +17,15 @@ test('compileCamera rejects a missing face, an unknown preset and a late first s
   assert.throws(() => kit.compileCamera({ face, shots: [{ at: 1, preset: 'W' }] }, cfg), /первый план/);
 });
 
+test('compileCamera reports a shot\'s original array index even after sorting by `at`', () => {
+  // shots[2] в исходном массиве («XL») после сортировки по at окажется на позиции 1 —
+  // сообщение об ошибке должно называть исходный индекс 2, а не позицию после сортировки.
+  assert.throws(
+    () => kit.compileCamera({ face, shots: [{ at: 0, preset: 'W' }, { at: 4, preset: 'M' }, { at: 2, preset: 'XL' }] }, cfg),
+    /camera\.shots\[2\]/,
+  );
+});
+
 test('drift grows W slowly and a W→M cut is a visible jump', () => {
   const track = kit.compileCamera({ face, shots: [{ at: 0, preset: 'W' }, { at: 2, preset: 'M', drift: 'out' }] }, cfg);
   const start = kit.cameraAt(track, 0);
@@ -148,4 +157,39 @@ test('autoShots evenly splits an empty transcript into chunks no longer than 2.2
 test('autoShots rejects words that are not an array', () => {
   assert.throws(() => kit.autoShots({}, { endSec: 5 }), /массив/);
   assert.throws(() => kit.autoShots('слово', { endSec: 5 }), /массив/);
+});
+
+// Камера задана в кадрах эталона 25 fps (время в секундах должно быть одинаковым на любом fps).
+const cfg50 = { fps: 50, width: 1080, height: 1920, durationInFrames: 500 };
+
+test('at 50 fps the blur in-ramp takes 12 frames (6 frames at 25 fps = 0.24 s)', () => {
+  // b.from > 0, поэтому размытие входит через inFrames-рампу (не «резко с первого кадра»).
+  const track = kit.compileCamera({ face, shots: [{ at: 0, preset: 'W', drift: 'none' }],
+    blurs: [{ from: 1, to: 8, px: 24 }] }, cfg50);
+  const fromFrame = 50; // at: 1 с при 50 fps
+  assert.ok(kit.cameraAt(track, fromFrame + 11).blur < 24, 'до 12 кадров рампа ещё не завершена');
+  assert.equal(kit.cameraAt(track, fromFrame + 12).blur, 24);
+});
+
+test('at 50 fps away hides the speaker after 16 frames (8 frames at 25 fps = 0.16 s)', () => {
+  const track = kit.withAways(kit.compileCamera({ face, shots: [{ at: 0, preset: 'W' }] }, cfg50), [{ from: 100, to: 400 }]);
+  assert.equal(kit.cameraAt(track, 100 + 15).visible, true);
+  assert.equal(kit.cameraAt(track, 100 + 16).visible, false);
+});
+
+test('sway dx at 50 fps frame 2N equals dx at 25 fps frame N for the same preset', () => {
+  // preset L использует fill: true — клэмп по safe-краю кадра не применяется, sway виден напрямую.
+  const track25 = kit.compileCamera({ face, shots: [{ at: 0, preset: 'L', drift: 'none' }] }, cfg);
+  const track50 = kit.compileCamera({ face, shots: [{ at: 0, preset: 'L', drift: 'none' }] }, cfg50);
+  for (const n of [3, 10, 40, 90]) {
+    const dx25 = kit.cameraAt(track25, n).dx;
+    const dx50 = kit.cameraAt(track50, 2 * n).dx;
+    assert.ok(Math.abs(dx25 - dx50) < 1e-6, `n=${n} dx25=${dx25} dx50=${dx50}`);
+  }
+});
+
+test('at 50 fps a punch k=1.15 grows at least 10 % within 12 frames', () => {
+  const track = kit.compileCamera({ face, shots: [{ at: 0, preset: 'W', drift: 'none' }],
+    punches: [{ at: 0, until: 5, k: 1.15 }] }, cfg50);
+  assert.ok(kit.cameraAt(track, 12).s >= 1.10, `s=${kit.cameraAt(track, 12).s}`);
 });
