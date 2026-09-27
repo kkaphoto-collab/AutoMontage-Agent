@@ -1,11 +1,15 @@
 import { useEffect, useState } from 'react';
 import { cancelRender, continueRender, delayRender, staticFile } from 'remotion';
 
-// «once»-обёртка вокруг continueRender/cancelRender: не потому, что повторный continueRender на
-// уже продолженный handle бросает исключение (в Remotion 4.0.504 это не так — он просто no-op),
-// а как защита от React StrictMode, который в dev-режиме монтирует/размонтирует/снова монтирует
-// эффект при первом рендере: без guard'а это запустило бы loadFontFaces дважды и дважды дёрнуло бы
-// continueRender/cancelRender на один и тот же handle. Чистая функция — тестируется без React.
+// «once»-обёртка вокруг continueRender: не потому, что повторный continueRender на уже
+// продолженный handle бросает исключение (в Remotion 4.0.504 это не так — он просто no-op), а как
+// защита от React StrictMode, который в dev-режиме монтирует/размонтирует/снова монтирует эффект
+// при первом рендере — общий на все эти прогоны guard не даёт continueRender выстрелить дважды на
+// один handle. Отклонение round 3 (ревью minor 5): guard оборачивает ТОЛЬКО continueRender —
+// cancelRender вызывается напрямую, без settle, при любой реальной ошибке, сколько бы раз она ни
+// произошла (даже после того как settle уже «использован» для continueRender): реальный сбой не
+// должен быть молча проглочен только потому, что guard уже сработал на успешном пути. Чистая
+// функция — тестируется без React.
 export function settleOnce() {
   let done = false;
   return (fn) => {
@@ -34,75 +38,97 @@ function assertNoWeightlessDuplicates(faces) {
   }
 }
 
-// Чистая (при внедрённых зависимостях) загрузка набора шрифтов — тестируется в Node через
-// фейковые FontFaceImpl/fontSet/toUrl, а компонент ниже передаёт настоящие
-// window.FontFace/document.fonts/staticFile. Пустой faces — не ошибка, ждать нечего. Вся работа —
-// внутри Promise.resolve().then(...), поэтому синхронный throw из toUrl/FontFaceImpl (например,
-// staticFile на плохом пути) тоже становится отклонением промиса, а не необработанным исключением
-// из самого вызова loadFontFaces(...) — иначе .catch() в FontLoader его бы не увидел.
-export function loadFontFaces(faces, { FontFaceImpl, fontSet, toUrl }) {
-  return Promise.resolve().then(() => {
-    if (!faces || faces.length === 0) return undefined;
-    assertNoWeightlessDuplicates(faces);
-    return Promise.all(faces.map((face) => new FontFaceImpl(
-      face.family, `url("${toUrl(face.file)}")`, { weight: face.weight || '100 900' },
-    ).load()
-      .then((loaded) => fontSet.add(loaded))
-      .catch((error) => { throw new Error(`шрифт «${face.family}» (${face.file}) не загрузился: ${error.message}`); })))
-      .then(() => undefined);
+// Синхронная часть: конструирует каждый FontFace, СРАЗУ кладёт его в fontSet (до load(), а не
+// после) и запускает load(). «Сразу» — не деталь стиля, а сама суть исправления ревью round 3:
+// FontLoader вызывает эту функцию из lazy-инициализатора useState — во время рендера, до ЛЮБОГО
+// layout-эффекта в дереве, будь то его собственные children или посторонний сосед. Раньше
+// document.fonts.add происходил только ПОСЛЕ загрузки, внутри useEffect: если Subtitles стоял
+// РЯДОМ с FontLoader (а не внутри него), его собственный document.fonts.load('KitOnest') не
+// находил в document.fonts вообще никакой записи с этим именем, и браузер резолвил такой load()
+// немедленно — ждать нечего, шрифт вообще не зарегистрирован. Subtitles измерял текст фолбэк-
+// шрифтом. Регистрируя FontFace здесь и сразу добавляя её в fontSet, мы гарантируем: к моменту,
+// когда любой layout-эффект где-либо в дереве впервые выполнится, document.fonts уже содержит
+// запись для каждого face (пусть ещё не загруженную) — и чей угодно document.fonts.load(того же
+// семейства) дождётся её настоящей загрузки, а не зарезолвится в пустоту.
+export function registerFontFaces(faces, { FontFaceImpl, fontSet, toUrl }) {
+  if (!faces || faces.length === 0) return [];
+  assertNoWeightlessDuplicates(faces);
+  return faces.map((face) => {
+    const fontFace = new FontFaceImpl(face.family, `url("${toUrl(face.file)}")`, { weight: face.weight || '100 900' });
+    fontSet.add(fontFace);
+    return { face, promise: fontFace.load() };
   });
 }
 
-// Шрифты слоя из public/fonts (OFL с кириллицей). FontLoader — ГЕЙТ, а не просто индикатор
-// загрузки: children не рисуются, пока faces не загрузились и не попали в document.fonts (весь
-// это время Remotion держит рендер через delayRender). Корень бага ревью round 2: раньше
-// FontLoader ничего не гейтил, а просто грузил шрифты РЯДОМ с остальным деревом — сосед (Subtitles),
-// который меряет ширину текста в своём собственном layout-эффекте, мог измерить его РАНЬШЕ, чем
-// шрифт был готов; какой кадр Remotion откроет первым — недетерминировано (concurrency > 1, разные
-// вкладки/процессы), поэтому одна и та же композиция на разных прогонах давала разный кегль на
-// соседних кадрах одного chunk. Теперь дети вообще не существуют в дереве до готовности шрифтов, а
-// Subtitles.jsx дополнительно ждёт свой шрифт сам (defence in depth).
+// Асинхронная часть: ждёт все load(), уже запущенные registerFontFaces, оборачивает ошибку каждого
+// лица его family/file. Намеренно отделена от registerFontFaces: сама регистрация обязана быть
+// синхронной (см. выше), а не отложенной хотя бы на один тик микрозадачи.
+export function settleFontFaces(registered) {
+  return Promise.all(registered.map(({ face, promise }) => promise
+    .catch((error) => { throw new Error(`шрифт «${face.family}» (${face.file}) не загрузился: ${error.message}`); })))
+    .then(() => undefined);
+}
+
+// Утилита «зарегистрировать и дождаться разом» — то же самое, что registerFontFaces +
+// settleFontFaces, одним промисом; используется тестами и любым кодом, которому точный момент
+// регистрации не важен. Обёрнута в Promise.resolve().then(...), поэтому синхронный throw из
+// toUrl/FontFaceImpl (например, staticFile на плохом пути) тоже становится отклонением промиса, а
+// не необработанным исключением из самого вызова.
+export function loadFontFaces(faces, deps) {
+  return Promise.resolve().then(() => settleFontFaces(registerFontFaces(faces, deps)));
+}
+
+// Шрифты слоя из public/fonts (OFL с кириллицей). FontLoader — ГЕЙТ: он обязан ОБОРАЧИВАТЬ то, что
+// ждёт эти шрифты — <FontLoader faces={faces}>{children}</FontLoader>, а не стоять РЯДОМ с ним
+// отдельным элементом. children не рисуются, пока faces не загрузились и не попали в document.fonts
+// (весь это время Remotion держит рендер через delayRender); в браузере (не в SSR/тестах)
+// отсутствие children — однозначная ошибка использования (гейту нечего гейтить, и почти наверняка
+// кто-то поставил его рядом с Subtitles вместо того, чтобы обернуть) — бросаем сразу и явно.
 //
 // В SSR/тестах (нет document) — рендерим children сразу: измерять DOM всё равно негде, а блокировка
 // forever сломала бы каждый существующий тест, который рендерит компоненты кита в изоляции. Плановый
-// тест (`calls.delay === 1`) продолжает выполняться — delayRender зовётся всегда, независимо от
-// среды.
+// тест (`calls.delay === 1`) продолжает выполняться — delayRender зовётся всегда, независимо от среды.
 //
 // faces — иммутабельный набор экземпляра: передавайте один и тот же модульный литерал (например,
 // экспортированную константу из layer.json-обёртки), а не новый массив на каждый рендер Root.jsx —
-// эффект грузит шрифты один раз при монтировании ([] в зависимостях, как componentDidMount) и не
-// отслеживает изменения faces.
-//
-// settle создаётся ОДИН раз на инстанс компонента (useState — как handle, а не заново внутри
-// эффекта): под React StrictMode эффект в dev монтируется/размонтируется/снова монтируется на
-// первом рендере — общий на все эти прогоны guard не даёт continueRender/cancelRender выстрелить
-// дважды на один handle. Комментарий про "повторный continueRender бросает" был неверным (в
-// Remotion 4.0.504 повторный continueRender/cancelRender на уже продолженный handle — no-op, а не
-// исключение) — настоящая причина именно StrictMode.
-export function FontLoader({ faces, children = null }) {
+// регистрация и загрузка происходят один раз при монтировании и не отслеживают изменения faces.
+export function FontLoader({ faces, children }) {
+  if (typeof document !== 'undefined' && children === undefined) {
+    throw new Error('FontLoader: не передан children — это гейт, он должен ОБОРАЧИВАТЬ то, что ждёт шрифт (<FontLoader faces={faces}>{children}</FontLoader>), а не стоять рядом с ним отдельным элементом');
+  }
   const [handle] = useState(() => delayRender('motion-kit: шрифты'));
   const [settle] = useState(() => settleOnce());
   // Лениво: в SSR/тестах document не существует — считаем шрифты «готовыми» сразу же, дети
   // рисуются в первом же (и единственном для SSR) рендере.
   const [ready, setReady] = useState(() => typeof document === 'undefined');
+  // Регистрация — тоже в lazy-инициализаторе useState, а не в эффекте: инициализатор выполняется
+  // синхронно во время САМОГО ПЕРВОГО рендера, до того как commit-фаза дойдёт до layout-эффектов
+  // (см. комментарий у registerFontFaces выше).
+  const [registered] = useState(() => {
+    if (typeof document === 'undefined' || !document.fonts) return [];
+    return registerFontFaces(faces, { FontFaceImpl: FontFace, fontSet: document.fonts, toUrl: staticFile });
+  });
+
   useEffect(() => {
-    if (typeof document === 'undefined') {
-      settle(() => continueRender(handle));
-      return undefined;
-    }
+    if (typeof document === 'undefined') { setReady(true); return undefined; }
     let cancelled = false;
-    loadFontFaces(faces, { FontFaceImpl: FontFace, fontSet: document.fonts, toUrl: staticFile })
-      .then(() => {
-        if (cancelled) return;
-        setReady(true);
-        // Один кадр анимации, чтобы React успел закоммитить ready=true (и React реально отрисовал
-        // children с уже готовым шрифтом) ДО того, как Remotion получит разрешение снять
-        // скриншот — иначе возможна гонка между setState и самим снимком кадра.
-        requestAnimationFrame(() => settle(() => continueRender(handle)));
-      })
-      .catch((error) => settle(() => cancelRender(error)));
-    return () => { cancelled = true; settle(() => continueRender(handle)); };
-    // [] — намеренно: faces иммутабельны, грузим один раз на mount (см. комментарий выше).
+    settleFontFaces(registered)
+      .then(() => { if (!cancelled) setReady(true); })
+      // cancelRender — НЕ через settle: реальная ошибка обязана репортиться всегда, даже если
+      // settle уже «использован» где-то на успешном пути (см. комментарий у settleOnce).
+      .catch((error) => { if (!cancelled) cancelRender(error); });
+    return () => { cancelled = true; };
+    // [] — намеренно: faces иммутабельны, регистрация и загрузка происходят один раз на mount.
   }, []);
-  return ready ? children : null;
+
+  // Отдельный passive-эффект на ready, а не requestAnimationFrame (отклонение round 3, ревью
+  // minor 3): React гарантирует, что passive-эффекты во всём дереве выполняются ПОСЛЕ
+  // layout-эффектов детей и после того, как браузер закоммитил кадр с ready=true — то есть
+  // children с уже готовым шрифтом точно отрисованы прежде, чем Remotion получит разрешение снять
+  // скриншот; requestAnimationFrame был угадыванием одного кадра вперёд, а не гарантией.
+  useEffect(() => {
+    if (ready) settle(() => continueRender(handle));
+  }, [ready]);
+
+  return ready ? (children ?? null) : null;
 }

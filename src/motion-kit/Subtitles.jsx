@@ -9,6 +9,14 @@ const SHADOW_Y_RATIO = 3 / 44;
 const SHADOW_BLUR_RATIO = 12 / 44;
 const LINE_HEIGHT_CSS = 1.1;
 
+// document.fonts.load() ждёт ОДНО имя семейства, а не CSS-стек с фолбэками через запятую
+// ('KitOnest, sans-serif'). Передать весь стек в кавычках одним куском означало бы просить браузер
+// найти буквально шрифт с именем "KitOnest, sans-serif" — такого не существует, и load() просто не
+// нашёл бы что ждать. Берём первое имя, снимаем кавычки/пробелы вокруг него.
+export function firstFontFamily(fontFamily) {
+  return String(fontFamily ?? '').split(',')[0].trim().replace(/^["']|["']$/g, '');
+}
+
 // Важно: Subtitles обязан монтироваться на верхнем уровне композиции (как SpeakerLayer/SfxTrack),
 // а не внутри чужой <Sequence> — иначе useCurrentFrame()/useVideoConfig().durationInFrames стали
 // бы локальными для этой Sequence, и captionSpans здесь считал бы кадры не от начала ролика, как
@@ -60,7 +68,7 @@ export function Subtitles({ chunks, lane, hide = [], fontFamily = 'sans-serif', 
         // гейт (не пропускает children, пока шрифты не готовы), но Subtitles всё равно ждёт СВОЙ
         // шрифт сам — defence in depth на случай, если его когда-нибудь используют без гейта.
         if (typeof document !== 'undefined' && document.fonts) {
-          await document.fonts.load(`800 ${size}px "${fontFamily}"`);
+          await document.fonts.load(`800 ${size}px "${firstFontFamily(fontFamily)}"`);
         }
         if (cancelled) return;
         // Запас под тень с обеих сторон, чтобы overflow:hidden полосы не срезал её на подогнанном

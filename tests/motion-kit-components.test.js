@@ -879,3 +879,79 @@ test('settleOnce runs the first action and silently ignores any later ones', () 
   assert.equal(settle(() => { calls += 1; }), false);
   assert.equal(calls, 1);
 });
+
+// Round 3 (важно, ревью п.2а): суть исправления — FontFace обязана попасть в fontSet ДО того, как
+// её load() успеет разрешиться, а не после. Проверяем это напрямую: load() специально не резолвим
+// (держим resolve в замыкании), но fontSet.add уже обязан был случиться к моменту, когда
+// registerFontFaces вернула управление.
+test('registerFontFaces adds each FontFace to fontSet synchronously, before its load() settles', () => {
+  const kit = kitAt(0);
+  const added = [];
+  let releaseLoad;
+  class FakeFontFace {
+    constructor(family) { this.family = family; }
+    load() { return new Promise((resolve) => { releaseLoad = resolve; }); }
+  }
+  const registered = kit.registerFontFaces(
+    [{ family: 'KitOnest', file: 'fonts/Onest.ttf' }],
+    { FontFaceImpl: FakeFontFace, fontSet: { add: (f) => added.push(f) }, toUrl: (f) => f },
+  );
+  assert.equal(added.length, 1, 'fontSet.add must have already run — load() has not resolved yet');
+  assert.equal(added[0].family, 'KitOnest');
+  assert.equal(registered.length, 1);
+  assert.ok(registered[0].promise instanceof Promise);
+  releaseLoad(added[0]); // не блокируем — просто освобождаем висящий промис
+});
+
+test('registerFontFaces validates duplicates and returns [] for an empty/missing list, all synchronously', () => {
+  const kit = kitAt(0);
+  class FakeFontFace { load() { return Promise.resolve(this); } }
+  assert.deepEqual(kit.registerFontFaces([], { FontFaceImpl: FakeFontFace, fontSet: { add: () => {} }, toUrl: (f) => f }), []);
+  assert.throws(
+    () => kit.registerFontFaces(
+      [{ family: 'KitOnest', file: 'a.ttf' }, { family: 'KitOnest', file: 'b.ttf' }],
+      { FontFaceImpl: FakeFontFace, fontSet: { add: () => {} }, toUrl: (f) => f },
+    ),
+    /KitOnest.*weight/,
+  );
+});
+
+test('settleFontFaces awaits every registered load() and wraps a failure with its family/file', async () => {
+  const kit = kitAt(0);
+  class FailingFontFace { load() { return Promise.reject(new Error('network error')); } }
+  const registered = kit.registerFontFaces(
+    [{ family: 'KitOnest', file: 'fonts/Onest.ttf' }],
+    { FontFaceImpl: FailingFontFace, fontSet: { add: () => {} }, toUrl: (f) => f },
+  );
+  await assert.rejects(() => kit.settleFontFaces(registered), /KitOnest.*fonts\/Onest\.ttf.*network error/);
+});
+
+// Round 3 (важно, ревью п.2б): FontLoader — гейт, обязан ОБОРАЧИВАТЬ то, что ждёт шрифт, а не
+// стоять рядом с ним отдельным элементом (та самая ошибка использования из ревью). В браузере
+// (document существует) отсутствие children — однозначная ошибка; в Node/SSR document не
+// существует, поэтому проверка возможна только с временно подставленным global.document.
+test('FontLoader throws a clear error when children is missing, but only when a real DOM exists', () => {
+  const kit = kitAt(0);
+  assert.doesNotThrow(() => render(React.createElement(kit.FontLoader, { faces: [] })), 'SSR/tests (no document) must stay silent — many isolated component tests rely on this');
+  const hadDocument = Object.hasOwn(global, 'document');
+  const previousDocument = global.document;
+  global.document = {};
+  try {
+    assert.throws(
+      () => render(React.createElement(kit.FontLoader, { faces: [] })),
+      /FontLoader.*children/,
+    );
+    assert.doesNotThrow(() => render(React.createElement(kit.FontLoader, { faces: [] }, 'x')));
+  } finally {
+    if (hadDocument) global.document = previousDocument; else delete global.document;
+  }
+});
+
+test('firstFontFamily extracts and unquotes the first family from a CSS font stack', () => {
+  const kit = kitAt(0);
+  assert.equal(kit.firstFontFamily('KitOnest, sans-serif'), 'KitOnest');
+  assert.equal(kit.firstFontFamily('"KitOnest", sans-serif'), 'KitOnest');
+  assert.equal(kit.firstFontFamily("'KitOnest'"), 'KitOnest');
+  assert.equal(kit.firstFontFamily('KitOnest'), 'KitOnest');
+  assert.equal(kit.firstFontFamily('  KitOnest  , serif'), 'KitOnest');
+});
