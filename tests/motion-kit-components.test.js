@@ -388,3 +388,30 @@ test('revealProgress and insertOpacity finish the close exactly on the last draw
     assert.equal(kit.insertOpacity(insert.to - 1, insert, fps), 0);
   }
 });
+
+test('screenshot card shows the URL, scrolls smoothly and flashes once', () => {
+  const kit = kitAt(0);
+  assert.equal(kit.scrollOffset(10, 10, 60, 900), 0);
+  assert.equal(kit.scrollOffset(60, 10, 60, 900), 900);
+  assert.ok(kit.scrollOffset(35, 10, 60, 900) > 300 && kit.scrollOffset(35, 10, 60, 900) < 600);
+  assert.equal(kit.flashOpacity(9, 10), 0);
+  assert.ok(kit.flashOpacity(10, 10) > kit.flashOpacity(13, 10));
+  assert.equal(kit.flashOpacity(16, 10), 0);
+  const html = render(React.createElement(kitAt(35).BrowserFrame, { url: 'example.com/page' },
+    React.createElement(kitAt(35).ScrollShot, { src: 'shots/page.png', from: 10, to: 60, maxScroll: 900 })));
+  assert.match(html, /example\.com\/page/);
+  assert.match(html, /<img src="\/static\/shots\/page\.png"/);
+  assert.match(html, /translateY\(-/);
+});
+
+// Отклонение от плана: frames в ShutterFlash — эталонные 25fps кадры (как REVEAL_FRAMES у
+// вставок), а не кадры композиции. ShutterFlash сам переводит их через ref25(frames, fps) перед
+// вызовом чистой flashOpacity, поэтому на 50 fps вспышка длится столько же по времени, сколько на
+// 25 fps: 6 эталонных кадров = 12 кадров композиции, ещё виден на at+11, погашен на at+12.
+test('ShutterFlash keeps the same real-time flash duration at 50fps as at 25fps', () => {
+  const at = 10;
+  const visible = render(React.createElement(kitAt(at + 11, { fps: 50 }).ShutterFlash, { at }));
+  assert.notEqual(visible, '', 'flash should still be visible at at+11 when running at 50fps');
+  const gone = render(React.createElement(kitAt(at + 12, { fps: 50 }).ShutterFlash, { at }));
+  assert.equal(gone, '', 'flash should be gone at at+12 when running at 50fps');
+});
