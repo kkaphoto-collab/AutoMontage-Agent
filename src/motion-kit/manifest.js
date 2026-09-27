@@ -34,7 +34,7 @@ export function buildManifest(compiled) {
     const staticBox = [r3(lane.x), r3(lane.y), r3(lane.x + lane.w), r3(lane.y + lane.h)];
     let lastIndex = null;
     let piece = 0;
-    for (const span of captionSpans(chunks, hide, fps, durationInFrames)) {
+    for (const span of captionSpans(chunks, { hide, fps, durationInFrames })) {
       piece = span.index === lastIndex ? piece + 1 : 0;
       lastIndex = span.index;
       const id = piece === 0 ? `caption-${span.index + 1}` : `caption-${span.index + 1}${String.fromCharCode(97 + piece)}`;

@@ -555,9 +555,21 @@ test('cueVolume clamps cue.vol into [0,1] and rejects a masterDb that is not a f
   assert.equal(kit.cueVolume(negative, 0, 0), 0, 'a negative vol must clamp to 0, not go negative');
   const normal = { id: 'n', file: 'sfx/n.wav', startFrame: 0, durationFrames: 30, vol: 0.7 };
   assert.ok(Math.abs(kit.cueVolume(normal, 0, undefined) - 0.7 * 10 ** (-5 / 20)) < 1e-9, 'explicit undefined masterDb keeps the -5 default');
-  assert.throws(() => kit.cueVolume(normal, 0, null), /masterDb/, 'null must not silently become 0 dB');
-  assert.throws(() => kit.cueVolume(normal, 0, NaN), /masterDb/);
-  assert.throws(() => kit.cueVolume(normal, 0, 3), /masterDb/, 'a positive masterDb (boosting effects) is rejected');
+  // Отклонение (ревью Task 18): cueVolume и SfxTrack теперь делят одну assertMasterDb (sfx.js) с
+  // сообщением "layer.json → sfxMasterDb" — регексп проверяет именно эту (более информативную)
+  // формулировку, а не старый внутренний "cueVolume: masterDb …".
+  assert.throws(() => kit.cueVolume(normal, 0, null), /sfxMasterDb/, 'null must not silently become 0 dB');
+  assert.throws(() => kit.cueVolume(normal, 0, NaN), /sfxMasterDb/);
+  assert.throws(() => kit.cueVolume(normal, 0, 3), /sfxMasterDb/, 'a positive masterDb (boosting effects) is rejected');
+});
+
+test('assertMasterDb is the single validator shared by cueVolume and SfxTrack', () => {
+  const kit = kitAt(0);
+  assert.doesNotThrow(() => kit.assertMasterDb(-5));
+  assert.doesNotThrow(() => kit.assertMasterDb(0));
+  for (const bad of [null, NaN, 3, '−5']) {
+    assert.throws(() => kit.assertMasterDb(bad), /layer\.json.*sfxMasterDb/, `bad value: ${String(bad)}`);
+  }
 });
 
 // Step 0 (перед Task 18): в настоящем Remotion volume() зовётся только пока Sequence конкретного
@@ -614,7 +626,7 @@ test('Subtitles renders on exactly the frames captionSpans marks visible, at fps
     const kit = kitAt(0);
     // Кадры, где по captionSpans субтитр обязан быть виден — то же durationInFrames (100000), что
     // отдаёт remotionStub по умолчанию (kitAt его не пробрасывает), чтобы клэмп не разошёлся.
-    const spans = kit.captionSpans(chunks, hide, fps, 100000);
+    const spans = kit.captionSpans(chunks, { hide, fps, durationInFrames: 100000 });
     const manifestFrames = new Set();
     for (const span of spans) for (let f = span.from; f < span.until; f += 1) manifestFrames.add(f);
     assert.ok(manifestFrames.size > 0, `fps ${fps}: ожидали хотя бы один видимый кадр`);
@@ -660,25 +672,98 @@ test('Subtitles frames match the real manifest caption-* ranges end to end, acro
   }
 });
 
-// fontSize=44 и тень «0 3px 12px» были константами, посчитанными под lane.h=84 (1080x1920). На
-// другом разрешении (720x1280 → k=56/84=2/3) полоса субтитров ниже, и текст того же визуального
-// размера должен уменьшиться вместе с ней — иначе на маленьком разрешении подписи будут выглядеть
-// непропорционально крупными и вылезать за полосу. Явный fontSize остаётся аварийным люком.
-test('Subtitles font size and text-shadow scale with the caption lane height; an explicit fontSize overrides it', () => {
+// Отклонение (ревью Task 18): кегль масштабируется от РАЗРЕШЕНИЯ КОМПОЗИЦИИ (k = width / (portrait
+// ? 1080 : 1920), тот же k, что captionLane использует под safe-зону), а не от высоты полосы —
+// кастомная (например, высокая) полоса не должна раздувать текст, только тесная обязана его сжать
+// (captionFontSize, отдельно протестирован в motion-kit-captions.test.js). Явный fontSize остаётся
+// аварийным люком.
+test('Subtitles font size and text-shadow scale with the composition resolution, not the lane height', () => {
   const chunks = [{ units: [{ t: 'Раз', s: 0, e: 0.3 }], s: 0, e: 0.3, show: 1, text: 'Раз' }];
+  // Полоса captionLane(1080,1920) реальная — h=84, k=1: 44px, тень «0 3px 12px».
   const lane1080 = { x: 70, y: 1398, w: 880, h: 84 };
-  const html1080 = render(React.createElement(kitAt(0).Subtitles, { chunks, lane: lane1080 }));
+  const html1080 = render(React.createElement(kitAt(0, { width: 1080, height: 1920 }).Subtitles, { chunks, lane: lane1080 }));
   assert.match(html1080, /font-size:44px/);
   assert.match(html1080, /text-shadow:0 3px 12px rgba\(0,0,0,\.55\)/);
 
-  // k = 56/84 = 2/3: 44*2/3 ≈ 29.3, 3*2/3 = 2, 12*2/3 = 8.
+  // 720x1280: k=720/1080=2/3 → 44*2/3≈29.3, тень 3*2/3=2, 12*2/3=8. Полоса captionLane(720,1280).h=56
+  // (та же safe-зона, отдельно проверена в motion-kit-captions.test.js) — высотный клэмп при этом
+  // laneH её не трогает (56/(1.1+12/44)≈40.8 > 29.3).
   const lane720 = { x: 47, y: 932, w: 587, h: 56 };
-  const html720 = render(React.createElement(kitAt(0).Subtitles, { chunks, lane: lane720 }));
+  const html720 = render(React.createElement(kitAt(0, { width: 720, height: 1280 }).Subtitles, { chunks, lane: lane720 }));
   assert.match(html720, /font-size:29\.3px/);
   assert.match(html720, /text-shadow:0 2px 8px rgba\(0,0,0,\.55\)/);
 
-  const overridden = render(React.createElement(kitAt(0).Subtitles, { chunks, lane: lane1080, fontSize: 60 }));
+  // Кастомная ВЫСОКАЯ полоса на том же 1080x1920 (k=1, base=44) не должна раздуть шрифт сверх 44 —
+  // captionFontSize только уменьшает, никогда не увеличивает.
+  const tallLane = { x: 70, y: 100, w: 880, h: 400 };
+  const htmlTall = render(React.createElement(kitAt(0, { width: 1080, height: 1920 }).Subtitles, { chunks, lane: tallLane }));
+  assert.match(htmlTall, /font-size:44px/, 'a tall custom lane must not grow the font past the composition-based base');
+
+  const overridden = render(React.createElement(kitAt(0, { width: 1080, height: 1920 }).Subtitles, { chunks, lane: lane1080, fontSize: 60 }));
   assert.match(overridden, /font-size:60px/);
+});
+
+// Важно (ревью Task 18): субтитры никогда не переносятся и не обрезаются внутри полосы. В SSR-тесте
+// layout-эффект (бинарный поиск ширины) не выполняется — рендерится непорезанный размер, но
+// white-space:nowrap обязан стоять уже в этом первом (до подгонки) рендере, иначе кадр, снятый ДО
+// того как эффект успел сработать, показал бы перенос строки.
+test('captions are single-line: white-space is nowrap even before the width-fit layout effect runs', () => {
+  const chunks = [{ units: [{ t: 'Широкомасштабные' }, { t: 'жжёные' }, { t: 'мыши' }].map((u) => ({ ...u, s: 0, e: 0.1 })),
+    s: 0, e: 0.1, show: 1, text: 'Широкомасштабные жжёные мыши' }];
+  const lane = { x: 70, y: 1398, w: 880, h: 84 };
+  const html = render(React.createElement(kitAt(0).Subtitles, { chunks, lane }));
+  assert.match(html, /white-space:nowrap/);
+});
+
+// Важно (ревью Task 18): один канон округления секунд→кадры (secToFrame, как compileInserts) и для
+// видимости chunk, и для караоке-подсветки слова — иначе первое слово могло на 1 кадр «опаздывать»
+// за появлением своего chunk (sec=frame/fps сравнивался с необработанным unit.s, а видимость самого
+// chunk считалась через другое округление). На САМОМ ПЕРВОМ видимом кадре chunk первое слово обязано
+// быть уже подсвечено (opacity:1), на любом fps.
+test('the first word is already lit (opacity 1) on the very first frame its chunk becomes visible, at fps 25 and 30', () => {
+  const chunks = [{ units: [{ t: 'Раз', s: 0.21, e: 0.5 }, { t: 'два', s: 0.5, e: 0.8 }], s: 0.21, e: 0.8, show: 1.2, text: 'Раз два' }];
+  const lane = { x: 70, y: 1398, w: 880, h: 84 };
+  for (const fps of [25, 30]) {
+    const kit = kitAt(0);
+    const [firstSpan] = kit.captionSpans(chunks, { hide: [], fps, durationInFrames: 100000 });
+    const html = render(React.createElement(kitAt(firstSpan.from, { fps }).Subtitles, { chunks, lane }));
+    assert.match(html, /opacity:1">Раз/, `fps ${fps} frame ${firstSpan.from}: первое слово должно уже светиться`);
+  }
+});
+
+// Важно (ревью Task 18): captions.hide и вставки (inserts) оба переводят секунды в кадры через
+// secToFrame — hide, заданный ТЕМИ ЖЕ секундами, что insert.from/insert.to, обязан вырезать РОВНО
+// кадры этой вставки, кадр в кадр, на любом fps (иначе субтитр мог бы на миг «выглянуть» поверх
+// вставки или, наоборот, оставить в вырезе лишний кадр самой вставки без субтитра).
+test('a hide window at an insert\'s own from/to seconds cuts exactly the frames compileInserts assigns that insert', () => {
+  const kit = kitAt(0);
+  for (const fps of [25, 30]) {
+    const [insert] = kit.compileInserts([{ kind: 'stock', from: 0.58, to: 1.42, src: 'x.mp4' }], { fps, durationInFrames: 1000 });
+    const chunks = [{ units: [{ t: 'Раз', s: 0, e: 0.3 }], s: 0, e: 2, show: 3, text: 'Раз' }];
+    const spans = kit.captionSpans(chunks, { hide: [{ from: 0.58, to: 1.42 }], fps, durationInFrames: 1000 });
+    assert.equal(spans.length, 2, `fps ${fps}: hide должен разрезать единственный chunk на два span`);
+    assert.equal(spans[0].until, insert.from, `fps ${fps}: левая граница выреза обязана совпасть с началом вставки`);
+    assert.equal(spans[1].from, insert.to, `fps ${fps}: правая граница выреза обязана совпасть с концом вставки`);
+  }
+});
+
+// Minor (ревью Task 18): accentWords сравнивается через канонический normWord (words.js) с обеих
+// сторон — регистр, «ё», хвостовая пунктуация не должны мешать подсветке; мутация, убирающая accent
+// целиком, раньше не ловилась ни одним тестом.
+test('accentWords colours a word regardless of case, ё/е and trailing punctuation, and leaves others untouched', () => {
+  const chunks = [{ units: [{ t: 'Клод,', s: 0, e: 0.2 }, { t: 'привет', s: 0.2, e: 0.4 }], s: 0, e: 0.4, show: 1, text: 'Клод, привет' }];
+  const lane = { x: 70, y: 1398, w: 880, h: 84 };
+  const html = render(React.createElement(kitAt(0).Subtitles, {
+    chunks, lane, accent: '#ffcc00', accentWords: ['клод'],
+  }));
+  // Каждое слово — отдельный лист-span (opacity, без вложенных тегов); достаём их по отдельности,
+  // а не строкой .*, иначе «color:… раньше в html» ложно совпало бы с любым более поздним словом.
+  const unitSpans = [...html.matchAll(/<span style="([^"]*)">([^<]*)<\/span>/g)];
+  assert.equal(unitSpans.length, 2);
+  assert.match(unitSpans[0][2], /Клод,/);
+  assert.match(unitSpans[0][1], /color:#ffcc00/, 'нормализация обязана снять запятую и совпасть с «клод»');
+  assert.match(unitSpans[1][2], /привет/);
+  assert.doesNotMatch(unitSpans[1][1], /color:/, 'неакцентное слово не должно получить color вообще');
 });
 
 test('FontLoader blocks rendering until fonts load', () => {
@@ -699,20 +784,24 @@ test('loadFontFaces adds every face to fontSet and resolves once all of them loa
   await kit.loadFontFaces(faces, { FontFaceImpl: FakeFontFace, fontSet: { add: (f) => added.push(f) }, toUrl: (f) => `/static/${f}` });
   assert.equal(added.length, 2);
   assert.equal(added[0].family, 'KitOnest');
-  assert.equal(added[0].source, 'url(/static/fonts/Onest.ttf)');
+  // Minor (ревью Task 18): url() теперь в кавычках — незаэкранированные скобки/пробелы в пути не
+  // должны ломать CSS-значение.
+  assert.equal(added[0].source, 'url("/static/fonts/Onest.ttf")');
   assert.deepEqual(added[0].descriptors, { weight: '100 900' });
   assert.deepEqual(added[1].descriptors, { weight: '400' });
 });
 
-test('loadFontFaces rejects when any face fails to load', async () => {
+// Minor (ревью Task 18): ошибка конкретного лица оборачивается с его family/file — иначе в логе
+// рендера из пяти шрифтов непонятно, какой именно не загрузился.
+test('loadFontFaces wraps a failing face\'s rejection with its family and file', async () => {
   const kit = kitAt(0);
   class FailingFontFace {
-    load() { return Promise.reject(new Error('шрифт не загрузился')); }
+    load() { return Promise.reject(new Error('network error')); }
   }
   await assert.rejects(
     () => kit.loadFontFaces([{ family: 'KitOnest', file: 'fonts/Onest.ttf' }],
       { FontFaceImpl: FailingFontFace, fontSet: { add: () => {} }, toUrl: (f) => f }),
-    /шрифт не загрузился/,
+    /KitOnest.*fonts\/Onest\.ttf.*network error/,
   );
 });
 
@@ -723,4 +812,56 @@ test('loadFontFaces resolves immediately with an empty face list, without touchi
   const result = kit.loadFontFaces([], { FontFaceImpl: UnexpectedFontFace, fontSet: { add: () => {} }, toUrl: (f) => f });
   assert.ok(result instanceof Promise);
   return result.then(() => assert.equal(constructed, false));
+});
+
+// Minor (ревью Task 18): вся работа идёт внутри Promise.resolve().then(...), поэтому синхронный
+// throw из toUrl (например, staticFile на плохом пути) обязан стать отклонением промиса, а не
+// необработанным исключением из самого вызова loadFontFaces(...) — иначе .catch() в FontLoader
+// его бы не увидел и cancelRender никогда бы не вызвался.
+test('loadFontFaces turns a synchronous throw from toUrl into a rejection, not an uncaught exception', async () => {
+  const kit = kitAt(0);
+  class NeverCalledFontFace {
+    constructor() { throw new Error('не должен был вызваться'); }
+  }
+  let threwSynchronously = false;
+  let promise;
+  try {
+    promise = kit.loadFontFaces(
+      [{ family: 'KitOnest', file: 'fonts/Onest.ttf' }],
+      { FontFaceImpl: NeverCalledFontFace, fontSet: { add: () => {} }, toUrl: () => { throw new Error('boom'); } },
+    );
+  } catch {
+    threwSynchronously = true;
+  }
+  assert.equal(threwSynchronously, false, 'loadFontFaces must not throw synchronously');
+  await assert.rejects(() => promise, /boom/);
+});
+
+// Minor (ревью Task 18): один family дважды без явного weight — статические начертания оба
+// заявляют весь диапазон '100 900' и коллидируют в fontSet. Разные явные weight — не коллизия.
+test('loadFontFaces rejects a repeated family with no explicit weight, but allows it with distinct weights', async () => {
+  const kit = kitAt(0);
+  class FakeFontFace { load() { return Promise.resolve(this); } }
+  await assert.rejects(
+    () => kit.loadFontFaces(
+      [{ family: 'KitOnest', file: 'a.ttf' }, { family: 'KitOnest', file: 'b.ttf' }],
+      { FontFaceImpl: FakeFontFace, fontSet: { add: () => {} }, toUrl: (f) => f },
+    ),
+    /KitOnest.*weight/,
+  );
+  const added = [];
+  await kit.loadFontFaces(
+    [{ family: 'KitOnest', file: 'a.ttf', weight: '400' }, { family: 'KitOnest', file: 'b.ttf', weight: '700' }],
+    { FontFaceImpl: FakeFontFace, fontSet: { add: (f) => added.push(f) }, toUrl: (f) => f },
+  );
+  assert.equal(added.length, 2, 'distinct explicit weights on the same family must not collide');
+});
+
+test('settleOnce runs the first action and silently ignores any later ones', () => {
+  const kit = kitAt(0);
+  const settle = kit.settleOnce();
+  let calls = 0;
+  assert.equal(settle(() => { calls += 1; }), true);
+  assert.equal(settle(() => { calls += 1; }), false);
+  assert.equal(calls, 1);
 });

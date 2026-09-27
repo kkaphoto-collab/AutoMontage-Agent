@@ -40,6 +40,30 @@ test('captions can be switched off and the hook and waivers pass through', () =>
   assert.equal(layer.waivers[0].gate, 'G4');
 });
 
+// Task 18 review: captions.hide[i].from/to обязаны быть конечными секундами с from < to — иначе
+// опечатка в plan.js (например, «until» вместо «to», давая undefined/NaN, или края задом наперёд)
+// молча дала бы NaN-кадры или окно в обратную сторону в captionSpans, без единой ошибки на этапе
+// layer check.
+test('compileLayer rejects a captions.hide window with a backwards or non-finite from/to', () => {
+  assert.throws(
+    () => kit.compileLayer({ ...plan, captions: { hide: [{ from: 1, to: 0.5 }] } }, cfg),
+    /captions\.hide\[0\]/,
+  );
+  assert.throws(
+    () => kit.compileLayer({ ...plan, captions: { hide: [{ from: NaN, to: 1 }] } }, cfg),
+    /captions\.hide\[0\]/,
+  );
+  assert.throws(
+    () => kit.compileLayer({ ...plan, captions: { hide: [{ from: 0, to: undefined }] } }, cfg),
+    /captions\.hide\[0\]/,
+  );
+  // Второе валидное окно после первого невалидного всё равно называет правильный индекс.
+  assert.throws(
+    () => kit.compileLayer({ ...plan, captions: { hide: [{ from: 0, to: 0.5 }, { from: 2, to: 1 }] } }, cfg),
+    /captions\.hide\[1\]/,
+  );
+});
+
 // Граничные случаи сверх плана: ролик без карточек и вставок (только камера) не должен падать,
 // а `until`, заданный далеко за концом композиции, должен обрезаться до durationInFrames, а не
 // бросать непонятную ошибку — это обычная ситуация, когда автор plan.js пишет «до конца ролика»

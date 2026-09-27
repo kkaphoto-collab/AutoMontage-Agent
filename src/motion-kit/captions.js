@@ -1,4 +1,5 @@
 import { safeRect } from './safe.js';
+import { secToFrame } from './time.js';
 
 const END = /[.!?…]$/u;
 const COMMA = /[,;:]$/u;
@@ -46,18 +47,30 @@ export function buildChunks(words, { maxWords = 4, maxChars = 20, hardGap = 0.3,
 }
 
 // Кадры видимости субтитра в композиции — общее правило и для рендера (Subtitles), и для
-// манифеста (buildManifest): гейт обязан видеть ровно то, что нарисовано. from/until считаются
-// тем же округлением, что раньше делал только buildManifest (Math.round(s*fps)/Math.round(show*fps)),
-// и клэмпятся под durationInFrames; окна hide переводятся в кадры тем же округлением и вырезаются
-// из диапазона — окно, попавшее в середину chunk, режет его на два независимых span с общим index.
-export function captionSpans(chunks, hide = [], fps, durationInFrames) {
+// манифеста (buildManifest): гейт обязан видеть ровно то, что нарисовано. secToFrame — тот же
+// перевод секунд в кадры, что compileItems/compileInserts используют для всех остальных границ
+// плана, поэтому окно hide, заданное теми же секундами, что и вставка (insert.from/to), вырезает
+// ровно её кадры (проверено тестом рядом с compileInserts). until клэмпится под durationInFrames.
+export function captionSpans(chunks, { hide = [], fps, durationInFrames } = {}) {
   const hideFrames = hide
-    .map((h) => [Math.round(h.from * fps), Math.round(h.to * fps)])
+    .map((h) => [secToFrame(h.from, fps), secToFrame(h.to, fps)])
     .filter(([from, to]) => to > from);
+  // Сырые [from, until) каждого chunk, ещё без вырезания hide. buildChunks независимо округляет
+  // e+hold через toFixed(3), а s следующего chunk — нет: на некоторых fps и долях секунды это может
+  // дать until чуть больше следующего from (например: chunk0.e=0.4506, chunk1.s=0.4596 при
+  // fps=25 — show после toFixed(3) становится 0.46, secToFrame(0.46,25)=12, а secToFrame(0.4596,25)
+  // всё ещё 11 — 1 кадр перекрытия). Обрезаем текущий until следующим from, чтобы два chunk никогда
+  // не претендовали на один и тот же кадр — иначе Subtitles.find() и манифест могли бы разойтись
+  // в том, какой из двух текстов «на самом деле» показан на этом кадре.
+  const raw = chunks.map((chunk) => ({
+    from: secToFrame(chunk.s, fps),
+    until: Math.min(durationInFrames, secToFrame(chunk.show, fps)),
+  }));
+  for (let i = 0; i < raw.length - 1; i += 1) {
+    if (raw[i].until > raw[i + 1].from) raw[i].until = raw[i + 1].from;
+  }
   const spans = [];
-  chunks.forEach((chunk, index) => {
-    const from = Math.round(chunk.s * fps);
-    const until = Math.min(durationInFrames, Math.round(chunk.show * fps));
+  raw.forEach(({ from, until }, index) => {
     if (!(until > from)) return;
     let pieces = [[from, until]];
     for (const [hFrom, hTo] of hideFrames) {
@@ -72,6 +85,37 @@ export function captionSpans(chunks, hide = [], fps, durationInFrames) {
     for (const [s, e] of pieces) if (e > s) spans.push({ index, from: s, until: e });
   });
   return spans;
+}
+
+// Секундная развёртка для plan.js и внешних вызовов (миллиметраж режиссуры) — тот же кадр, что
+// видит captionSpans, только на входе секунды. durationInFrames вызывающему не важен: activeChunk
+// смотрит только на границы самих chunks/hide, а не на длину ролика, поэтому клэмп отключён
+// (Infinity).
+export function activeChunk(chunks, sec, hide = [], fps = 25) {
+  const frame = secToFrame(sec, fps);
+  const span = captionSpans(chunks, { hide, fps, durationInFrames: Infinity }).find((s) => frame >= s.from && frame < s.until);
+  return span ? chunks[span.index] : null;
+}
+
+const LINE_HEIGHT = 1.1;
+// Доля кегля, которую тень добавляет под строкой (см. shadowBlur = size*12/44 в Subtitles.jsx) —
+// запас, чтобы overflow:hidden узкой полосы не обрезал нижний край тени.
+const SHADOW_RATIO = 12 / 44;
+
+// Клэмп кегля под высоту полосы: строка (lineHeight×size) плюс запас под тень не должны вылезать
+// за lane.h. Только сокращает — высокая кастомная полоса не должна раздувать субтитры сверх base
+// (кегль от разрешения композиции, см. Subtitles.jsx), только тесная полоса обязана его сжать.
+export function captionFontSize({ base, laneH }) {
+  const maxByHeight = laneH / (LINE_HEIGHT + SHADOW_RATIO);
+  return Math.min(base, maxByHeight);
+}
+
+// Один шаг бинарного поиска ширины — та же схема, что инлайн использует TextBox из
+// src/motion/parts.jsx (if (fits) low = mid; else high = mid;), вынесенная в чистую функцию: сам
+// поиск измеряет DOM (scrollWidth), а сужение границ — нет, поэтому тестируется без браузера.
+export function narrowFitBounds({ low, high, fits }) {
+  const mid = (low + high) / 2;
+  return fits ? { low: mid, high } : { low, high: mid };
 }
 
 export function captionLane(width, height) {

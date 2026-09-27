@@ -106,15 +106,24 @@ export const dbToGain = (db) => 10 ** (db / 20);
 // на 25fps). SfxTrack передаёт fps из useVideoConfig(); значение по умолчанию 25 сохраняет старое
 // поведение вызовов без явного fps.
 //
-// Ревью code-quality к Task 17: границы уровня. cue.vol клэмпится в [0, 1] — «горячая» громкость
-// в plan.js не должна поднимать итоговый уровень выше самого звука. masterDb обязан быть конечным
-// числом ≤ 0: null (например, незаполненное layer.sfxMasterDb) — это не «оставить громкость как
-// есть», а испорченные данные, и он не должен тихо превратиться в 0 дБ. undefined — это и есть
-// «оставить как есть» (аргумент не передан или передан явно), поэтому только он держит дефолт −5.
-export function cueVolume(cue, localFrame, masterDb = -5, fps = 25) {
+// Одна проверка masterDb для двух вызывающих: cueVolume (расчёт громкости конкретного cue) и
+// SfxTrack (проверка на кадре 0 компонента, до того как какой-либо cue вообще вызовет cueVolume —
+// в настоящем Remotion volume() зовётся только пока Sequence этого cue активна). Название поля
+// (layer.json → sfxMasterDb) в сообщении держим одно на оба места: разойдись оно, тесты на два
+// разных текста перестали бы совпадать при следующей правке. cue.vol клэмпится в [0, 1] отдельно
+// внутри cueVolume — «горячая» громкость в plan.js не должна поднимать итоговый уровень выше
+// самого звука. masterDb обязан быть конечным числом ≤ 0: null (например, незаполненное
+// layer.sfxMasterDb) — это не «оставить громкость как есть», а испорченные данные, и он не должен
+// тихо превратиться в 0 дБ. undefined — это и есть «оставить как есть» (аргумент не передан или
+// передан явно), поэтому только он держит дефолт −5.
+export function assertMasterDb(masterDb) {
   if (!(Number.isFinite(masterDb) && masterDb <= 0)) {
-    throw new Error(`cueVolume: masterDb должен быть конечным числом ≤ 0 (дефолт −5 дБ) — получено ${String(masterDb)}`);
+    throw new Error(`layer.json → sfxMasterDb должен быть конечным числом ≤ 0 (по умолчанию −5 дБ) — получено ${String(masterDb)}`);
   }
+}
+
+export function cueVolume(cue, localFrame, masterDb = -5, fps = 25) {
+  assertMasterDb(masterDb);
   const vol = Math.min(1, Math.max(0, cue.vol));
   const fade = Math.max(1, Math.min(ref25(5, fps), Math.floor(cue.durationFrames / 3)));
   const tail = Math.min(1, Math.max(0, (cue.durationFrames - localFrame) / fade));

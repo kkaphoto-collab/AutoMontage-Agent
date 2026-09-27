@@ -43,7 +43,15 @@ export function compileLayer(plan, { fps, width, height, durationInFrames, words
   const captions = plan.captions === false ? null : {
     chunks: buildChunks(words, plan.captions?.chunk),
     lane: plan.captions?.lane || captionLane(width, height),
-    hide: (plan.captions?.hide || []).map((h) => ({ from: h.from, to: h.to })),
+    // from/to обязаны быть конечными секундами с from < to — иначе captionSpans молча получил бы
+    // NaN или окно задом наперёд (опечатка «until» вместо «to» в plan.js) и либо не вырезал бы
+    // ничего, либо вырезал бы не то место, без единой ошибки на этапе layer check.
+    hide: (plan.captions?.hide || []).map((h, i) => {
+      if (!(Number.isFinite(h.from) && Number.isFinite(h.to) && h.from < h.to)) {
+        throw new Error(`captions.hide[${i}]: нужны конечные from < to в секундах — получено from=${h.from}, to=${h.to}`);
+      }
+      return { from: h.from, to: h.to };
+    }),
   };
   return {
     kitVersion: KIT_VERSION, fps, width, height, durationInFrames,

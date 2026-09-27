@@ -56,6 +56,16 @@ test('empty items and extra sfx lists compile and thin without throwing', () => 
   assert.deepEqual(kit.thinCues([], { fps: 25 }), { kept: [], dropped: [] });
 });
 
+// Task 18 review: одна общая assertMasterDb (вместо отдельной копии внутри SfxTrack.jsx), с
+// сообщением, которое называет реальное поле layer.json.
+test('assertMasterDb accepts a finite number <= 0 and names layer.json → sfxMasterDb in its error', () => {
+  assert.doesNotThrow(() => kit.assertMasterDb(-5));
+  assert.doesNotThrow(() => kit.assertMasterDb(0));
+  assert.throws(() => kit.assertMasterDb(null), /layer\.json.*sfxMasterDb/);
+  assert.throws(() => kit.assertMasterDb(NaN), /layer\.json.*sfxMasterDb/);
+  assert.throws(() => kit.assertMasterDb(3), /layer\.json.*sfxMasterDb/);
+});
+
 test('an explicit typeSfx: null suppresses the typing bed', () => {
   const cues = kit.sfxFromItems([{ from: 50, typeFrom: 50, typeTo: 150, typeSfx: null }], [], opts);
   assert.deepEqual(cues, []);

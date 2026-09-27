@@ -5,5 +5,5 @@ export { SpeakerLayer, speakerTransform, speakerFillStyle } from './SpeakerLayer
 export { FullscreenReveal, StockInsert } from './Inserts.jsx';
 export { BrowserFrame, ScrollShot, ShutterFlash } from './Screen.jsx';
 export { SfxTrack } from './SfxTrack.jsx';
-export { Subtitles, activeChunk } from './Subtitles.jsx';
-export { FontLoader, loadFontFaces } from './FontLoader.jsx';
+export { Subtitles } from './Subtitles.jsx';
+export { FontLoader, loadFontFaces, settleOnce } from './FontLoader.jsx';
