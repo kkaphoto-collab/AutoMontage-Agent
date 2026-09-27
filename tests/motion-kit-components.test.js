@@ -559,3 +559,28 @@ test('cueVolume clamps cue.vol into [0,1] and rejects a masterDb that is not a f
   assert.throws(() => kit.cueVolume(normal, 0, NaN), /masterDb/);
   assert.throws(() => kit.cueVolume(normal, 0, 3), /masterDb/, 'a positive masterDb (boosting effects) is rejected');
 });
+
+// Step 0 (перед Task 18): в настоящем Remotion volume() зовётся только пока Sequence конкретного
+// звука активна — испорченный layer.json → sfxMasterDb иначе всплыл бы не на кадре 0, а только
+// когда рендер дойдёт до первого звука (минуты работы впустую). cues: [] — самый строгий случай:
+// проверить вообще нечему, ни один cueVolume не вызовется, значит SfxTrack обязан валидировать
+// masterDb сам, а не полагаться на побочный эффект чужого вызова.
+test('SfxTrack rejects a bad sfxMasterDb immediately on render, even with no cue playing yet', () => {
+  const kit = kitAt(0);
+  assert.throws(
+    () => render(React.createElement(kit.SfxTrack, { cues: [], masterDb: null })),
+    /layer\.json.*sfxMasterDb/,
+    'null masterDb with an empty cue list must still fail on render',
+  );
+  assert.throws(
+    () => render(React.createElement(kit.SfxTrack, { cues: [], masterDb: NaN })),
+    /layer\.json.*sfxMasterDb/,
+  );
+  assert.throws(
+    () => render(React.createElement(kit.SfxTrack, { cues: [], masterDb: 3 })),
+    /layer\.json.*sfxMasterDb/,
+    'a positive masterDb (boosting effects) is rejected',
+  );
+  // undefined — «использовать дефолт −5 дБ», не ошибка.
+  assert.doesNotThrow(() => render(React.createElement(kit.SfxTrack, { cues: [] })));
+});
