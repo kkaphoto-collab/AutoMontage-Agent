@@ -44,3 +44,31 @@ test('side presets shift the face by at least 85 px and use a fill layer', () =>
   assert.equal(l.fill, true);
   assert.ok(Math.abs(l.dx - w.dx) >= 85);
 });
+
+test('punch rises within six frames, holds until `until`, and never exceeds maxScale', () => {
+  const track = kit.compileCamera({ face, shots: [{ at: 0, preset: 'W', drift: 'none' }],
+    punches: [{ at: 1, until: 3, k: 1.15 }] }, cfg);
+  assert.equal(kit.cameraAt(track, 24).s, 1);
+  assert.ok(kit.cameraAt(track, 31).s >= 1.08);
+  assert.ok(Math.abs(kit.cameraAt(track, 70).s - 1.15) < 0.01);
+  assert.ok(Math.abs(kit.cameraAt(track, 90).s - 1) < 1e-6);
+  const capped = kit.compileCamera({ face, shots: [{ at: 0, preset: 'M', drift: 'none' }], punches: [{ at: 0, until: 5, k: 1.15 }] }, cfg);
+  const c = kit.cameraAt(capped, 20);
+  assert.equal(c.s, 1.25);
+  assert.ok(c.requested > 1.3);
+});
+
+test('blur from 0 starts sharp-free, ramps out, and dims the speaker', () => {
+  const track = kit.compileCamera({ face, shots: [{ at: 0, preset: 'W' }], blurs: [{ from: 0, to: 1, px: 24 }] }, cfg);
+  assert.equal(kit.cameraAt(track, 0).blur, 24);
+  assert.ok(Math.abs(kit.cameraAt(track, 0).dim - 0.72) < 1e-9);
+  assert.equal(kit.cameraAt(track, 40).blur, 0);
+});
+
+test('away hides the speaker after the enter ramp and brings it back', () => {
+  const track = kit.withAways(kit.compileCamera({ face, shots: [{ at: 0, preset: 'W' }] }, cfg), [{ from: 50, to: 100 }]);
+  assert.equal(kit.cameraAt(track, 49).visible, true);
+  assert.equal(kit.cameraAt(track, 60).visible, false);
+  assert.equal(kit.cameraAt(track, 115).visible, true);
+  assert.equal(kit.cameraAt(track, 60).s <= 1.25, true);
+});
