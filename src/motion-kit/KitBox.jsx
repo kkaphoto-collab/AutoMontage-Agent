@@ -23,7 +23,7 @@ export function KitBox({ item, children }) {
     // а не item.from/until в кадрах композиции). KitBox рендерится на верхнем уровне, а не внутри
     // <Sequence>, и всегда ждёт результат compileLayer/compileItems.
     throw new Error(
-      `KitBox needs a compiled item with frame numbers from compileLayer/compileItems, got plan seconds? (item.id=${item.id}, from=${item.from}, until=${item.until})`
+      `KitBox ждёт скомпилированный элемент с кадрами from/until (compileLayer/compileItems), а получил секунды плана? (item.id=${item.id}, from=${item.from}, until=${item.until})`
     );
   }
   // Окно показа не проверяем отдельно: animOf сам возвращает o:0 вне [from, until), и isShown

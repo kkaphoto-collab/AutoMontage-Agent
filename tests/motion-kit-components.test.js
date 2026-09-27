@@ -51,7 +51,7 @@ test('KitBox refuses a raw plan item: needs compiled from/until frame numbers, n
   const planShapedItem = { id: 'title', at: 0.4, until: 2.4 };
   assert.throws(
     () => render(React.createElement(kit.KitBox, { item: planShapedItem }, 'Текст')),
-    /KitBox needs a compiled item with frame numbers from compileLayer\/compileItems/
+    /KitBox ждёт скомпилированный элемент с кадрами from\/until/
   );
 });
 
@@ -60,6 +60,7 @@ test('KitBox refuses a raw plan item: needs compiled from/until frame numbers, n
 function bboxFromStyle(style) {
   const m = /translate\(([-\d.]+)px, ([-\d.]+)px\) scale\(([-\d.]+)\) rotate\(([-\d.]+)deg\)/.exec(style.transform);
   assert.ok(m, `unexpected transform: ${style.transform}`);
+  assert.equal(style.transformOrigin, 'center center');
   const [, dxStr, dyStr, sStr, rotStr] = m;
   const dx = Number(dxStr);
   const dy = Number(dyStr);
