@@ -83,3 +83,69 @@ test('autoShots cuts on word ends, keeps every shot within 2.2 s and alternates 
   assert.deepEqual(shots.slice(0, 6).map((s) => s.preset), ['W', 'M', 'W', 'L', 'W', 'R']);
   assert.ok(shots.every((s) => s.drift === (s.preset === 'W' ? 'in' : 'out')));
 });
+
+// Длины планов между соседними точками разреза (и до endSec) — по этим длинам меряем максимум.
+const shotLengths = (shots, endSec) => {
+  const bounds = [...shots.map((s) => s.at), endSec];
+  return bounds.slice(1).map((at, i) => at - bounds[i]);
+};
+
+test('autoShots cuts a short sentence-end word early when waiting for the next word would exceed 2.2 s', () => {
+  // Слово «два.» стоит на границе предложения, но само по себе кончается раньше minSec (1,2 с);
+  // следующее слово «три» без разреза увело бы план до 2,45 с — дольше maxSec.
+  const words = [
+    { w: 'один', t: 'один', s: 0, e: 0.5 },
+    { w: 'два', t: 'два.', s: 0.6, e: 1.1 },
+    { w: 'три', t: 'три', s: 1.2, e: 2.45 },
+  ];
+  const shots = kit.autoShots(words, { endSec: 2.45 });
+  const lengths = shotLengths(shots, 2.45);
+  assert.ok(lengths.every((len) => len <= 2.2 + 1e-9), `lengths ${lengths}`);
+  assert.ok(shots.length >= 2, 'слово на границе должно вызвать ранний разрез');
+});
+
+test('autoShots splits a long tail after the last word into chunks no longer than 2.2 s', () => {
+  const words = [{ w: 'тест', t: 'тест', s: 0, e: 0.2 }];
+  const shots = kit.autoShots(words, { endSec: 3.2 }); // хвост после последнего слова — 3 с
+  const lengths = shotLengths(shots, 3.2);
+  assert.ok(lengths.every((len) => len <= 2.2 + 1e-9), `lengths ${lengths}`);
+});
+
+test('autoShots splits a 5 s pause between words into chunks no longer than 2.2 s', () => {
+  const words = [
+    { w: 'да', t: 'да', s: 0, e: 0.3 },
+    { w: 'нет', t: 'нет.', s: 5.3, e: 5.6 }, // пауза 0.3 → 5.3 с = 5 с
+  ];
+  const shots = kit.autoShots(words, { endSec: 5.6 });
+  const lengths = shotLengths(shots, 5.6);
+  assert.ok(lengths.every((len) => len <= 2.2 + 1e-9), `lengths ${lengths}`);
+});
+
+test('autoShots splits long leading silence before speech starting at 3 s', () => {
+  const words = [{ w: 'старт', t: 'старт', s: 3.0, e: 3.4 }];
+  const shots = kit.autoShots(words, { endSec: 6.0 });
+  const lengths = shotLengths(shots, 6.0);
+  assert.ok(lengths.every((len) => len <= 2.2 + 1e-9), `lengths ${lengths}`);
+  assert.ok(shots.length > 1, 'молчание в начале должно быть разбито хотя бы одним разрезом');
+});
+
+test('autoShots does not leave a 1-frame flash when the last word ends right at the end', () => {
+  const words = [{ w: 'да', t: 'да.', s: 0, e: 1.5 }];
+  const shots = kit.autoShots(words, { endSec: 1.54 });
+  const lengths = shotLengths(shots, 1.54);
+  // Либо разреза вообще не было (один план на весь ролик), либо последний план не короче minSec (1,2 с).
+  assert.ok(shots.length === 1 || lengths.at(-1) >= 1.2 - 1e-9, `last length ${lengths.at(-1)}`);
+  assert.ok(lengths.every((len) => len <= 2.2 + 1e-9), `lengths ${lengths}`);
+});
+
+test('autoShots evenly splits an empty transcript into chunks no longer than 2.2 s', () => {
+  const shots = kit.autoShots([], { endSec: 10 });
+  assert.equal(shots[0].at, 0);
+  const lengths = shotLengths(shots, 10);
+  assert.ok(lengths.every((len) => len <= 2.2 + 1e-9), `lengths ${lengths}`);
+});
+
+test('autoShots rejects words that are not an array', () => {
+  assert.throws(() => kit.autoShots({}, { endSec: 5 }), /массив/);
+  assert.throws(() => kit.autoShots('слово', { endSec: 5 }), /массив/);
+});

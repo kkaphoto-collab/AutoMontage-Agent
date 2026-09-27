@@ -103,23 +103,42 @@ export function cameraAt(track, frame) {
 
 const PUNCT = /[.,!?…:;]$/u;
 
-// Раскадровка по словам: план не длиннее maxSec, режем по концу слова, по возможности на знаке препинания.
+// Раскадровка по словам: план не длиннее maxSec, режем по концу слова (по возможности на знаке
+// препинания). Молчание без подходящего слова — долгое начало до первой реплики, пауза внутри
+// речи, хвост после последнего слова — режем поровну на куски ≤ maxSec, чтобы не оставить план
+// длиннее лимита. Рядом с самым концом (ближе minSec к endSec) разрез не ставим, чтобы не оставить
+// вспышку короче minSec в последних кадрах.
 export function autoShots(words, { endSec, maxSec = 2.2, minSec = 1.2, cycle = ['W', 'M', 'W', 'L', 'W', 'R'] } = {}) {
+  if (!Array.isArray(words)) throw new Error('autoShots: words должен быть массивом слов транскрипта');
   const drift = (preset) => (preset === 'W' ? 'in' : 'out');
+  const list = words.filter((w) => Number.isFinite(w?.e));
+  const end = Number.isFinite(endSec) ? endSec : (list.at(-1)?.e ?? 0);
   const shots = [{ at: 0, preset: cycle[0], drift: drift(cycle[0]) }];
   let last = 0;
   let k = 1;
-  const end = Number.isFinite(endSec) ? endSec : (words.at(-1)?.e ?? 0);
-  for (let i = 0; i < words.length; i += 1) {
-    const cut = words[i].e;
-    const next = i + 1 < words.length ? words[i + 1].e : end;
+  const push = (at) => {
+    const preset = cycle[k % cycle.length];
+    shots.push({ at: Number(at.toFixed(3)), preset, drift: drift(preset) });
+    last = at;
+    k += 1;
+  };
+  // Молчание без слова (пауза, хвост, долгое начало) делим на равные куски ≤ maxSec.
+  const split = (until) => {
+    while (until - last > maxSec + 1e-9) push(last + (until - last) / Math.ceil((until - last) / maxSec - 1e-9));
+  };
+  for (let i = 0; i < list.length; i += 1) {
+    const word = list[i];
+    if (Number.isFinite(word.s)) split(Math.min(word.s, end));
+    const cut = word.e;
+    if (end - cut < minSec) break; // не оставлять вспышку короче minSec в самом конце
+    if (cut - last > maxSec) split(cut);
+    const next = i + 1 < list.length ? Math.min(list[i + 1].e, end) : end;
     const since = cut - last;
-    if (since >= minSec && (PUNCT.test(words[i].t ?? words[i].w) || next - last > maxSec)) {
-      const preset = cycle[k % cycle.length];
-      shots.push({ at: Number(cut.toFixed(3)), preset, drift: drift(preset) });
-      last = cut;
-      k += 1;
-    }
+    const urgent = next - last > maxSec;
+    // Обычный порог minSec — на паузе или знаке препинания; если иначе план неизбежно
+    // превысит maxSec к следующему слову — режем раньше, но не короче половины minSec.
+    if ((since >= minSec && (PUNCT.test(word.t ?? word.w) || urgent)) || (urgent && since >= minSec / 2)) push(cut);
   }
+  split(end);
   return shots;
 }
