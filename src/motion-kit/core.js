@@ -8,3 +8,4 @@ export * from './inserts.js';
 export * from './sfx.js';
 export * from './captions.js';
 export * from './compile.js';
+export * from './manifest.js';
