@@ -67,3 +67,51 @@ test('exit frames 0 keeps the element fully visible until the very last frame', 
   const item = { id: 'e', kind: 'text', from: 0, until: 20, box, exit: { frames: 0 } };
   assert.equal(kit.animOf(item, 19, 25).o, 1);
 });
+
+// Ревью: itemExtentAt считал полуширину/полувысоту как (w*cos+h*sin)/2 без abs — для th>90°
+// cos(th) уходит в минус, и хабарит переворачивается (left>right), из-за чего гейт safe-zone (G5)
+// молча пропускает элемент, который реально вылезает за кадр. Эталон — та же формула ограничивающего
+// прямоугольника повёрнутого прямоугольника, что использует ревью (min/max по 4 повёрнутым углам).
+function cssExtent(item, a) {
+  const { x, y, w, h } = item.box;
+  const cx = x + w / 2; const cy = y + h / 2;
+  const th = (a.rot * Math.PI) / 180;
+  const pts = [[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]].map(([px, py]) => {
+    const rx = px * Math.cos(th) - py * Math.sin(th);
+    const ry = px * Math.sin(th) + py * Math.cos(th);
+    return [cx + a.dx + a.s * rx, cy + a.dy + a.s * ry];
+  });
+  return {
+    left: Math.min(...pts.map((p) => p[0])), right: Math.max(...pts.map((p) => p[0])),
+    top: Math.min(...pts.map((p) => p[1])), bottom: Math.max(...pts.map((p) => p[1])),
+  };
+}
+
+test('rotations beyond 90 degrees keep left <= right and top <= bottom and match the CSS bbox', () => {
+  for (const rot of [95, 120, -150, 180]) {
+    const item = { id: 'r', kind: 'text', from: 0, until: 50, box, rot, enter: { kind: 'cut' } };
+    const frame = 20;
+    const e = kit.itemExtentAt(item, frame, 25);
+    const c = cssExtent(item, kit.animOf(item, frame, 25));
+    assert.ok(e.left <= e.right && e.top <= e.bottom, `rot ${rot}: inverted box ${JSON.stringify(e)}`);
+    assert.ok(Math.abs(e.left - c.left) < 0.01, `rot ${rot} left: ${e.left} vs ${c.left}`);
+    assert.ok(Math.abs(e.right - c.right) < 0.01, `rot ${rot} right: ${e.right} vs ${c.right}`);
+    assert.ok(Math.abs(e.top - c.top) < 0.01, `rot ${rot} top: ${e.top} vs ${c.top}`);
+    assert.ok(Math.abs(e.bottom - c.bottom) < 0.01, `rot ${rot} bottom: ${e.bottom} vs ${c.bottom}`);
+  }
+});
+
+// Ревью: на последнем видимом кадре (until-1) прозрачность ещё не доходила до 0 (0.36 на 25 fps
+// при exit.frames:5) — элемент визуально выключался рывком на кадр раньше конца затухания.
+// Интервал затухания должен заканчиваться на until-1 (последний реально отрисованный кадр), не на
+// until (кадр, который вообще не рендерится).
+test('exit reaches full transparency by the very last visible frame, not one frame later', () => {
+  const item = { id: 'e2', kind: 'card', from: 0, until: 60, box, exit: { frames: 5, dir: 'down' } };
+  assert.equal(kit.animOf(item, 59, 25).o, 0);
+});
+
+test('exit frames of 1 fades out without throwing on a degenerate interpolate range', () => {
+  const item = { id: 'e3', kind: 'text', from: 0, until: 60, box, exit: { frames: 1 } };
+  assert.doesNotThrow(() => kit.animOf(item, 59, 25));
+  assert.ok(kit.animOf(item, 59, 25).o < kit.animOf(item, 55, 25).o);
+});

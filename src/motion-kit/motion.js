@@ -49,7 +49,14 @@ export function animOf(item, frame, fps) {
   const exit = item.exit || { frames: 5, dir: 'down' };
   if (exit.frames > 0) {
     const exitFrames = r(exit.frames);
-    const q = interpolate(frame, [item.until - exitFrames, item.until], [0, 1], { ...CLAMP, easing: Easing.in(Easing.quad) });
+    // Последний реально отрисованный кадр — until-1 (until сам не рендерится, animOf для него
+    // уже вернул o:0 выше по early-return). Интервал должен заканчиваться там же, иначе на
+    // until-1 прозрачность ещё не доходит до 0, и элемент выключается рывком кадром позже.
+    // exitEnd-1 гарантирует непустой (строго возрастающий) диапазон для interpolate() даже
+    // при exitFrames:1, где start и until-1 совпали бы.
+    const exitEnd = item.until - 1;
+    const exitStart = Math.min(item.until - exitFrames, exitEnd - 1);
+    const q = interpolate(frame, [exitStart, exitEnd], [0, 1], { ...CLAMP, easing: Easing.in(Easing.quad) });
     if (q > 0) {
       out.o *= 1 - q;
       out.s *= 1 - 0.06 * q;
@@ -66,8 +73,11 @@ export function itemExtentAt(item, frame, fps) {
   if (a.o <= 0.01) return null;
   const { x, y, w, h } = item.box;
   const th = (Math.abs(a.rot) * Math.PI) / 180;
-  const hw = ((w * Math.cos(th) + h * Math.sin(th)) / 2) * a.s;
-  const hh = ((w * Math.sin(th) + h * Math.cos(th)) / 2) * a.s;
+  // abs(cos)/abs(sin): без него cos(th) уходит в минус при th>90° и переворачивает габарит
+  // (left>right) — гейт safe-zone (G5) тогда молча пропускает элемент, который реально вылез
+  // за кадр. Формула — стандартный ограничивающий прямоугольник повёрнутого прямоугольника.
+  const hw = ((w * Math.abs(Math.cos(th)) + h * Math.abs(Math.sin(th))) / 2) * a.s;
+  const hh = ((w * Math.abs(Math.sin(th)) + h * Math.abs(Math.cos(th))) / 2) * a.s;
   const cx = x + w / 2 + a.dx;
   const cy = y + h / 2 + a.dy;
   return { left: cx - hw, top: cy - hh, right: cx + hw, bottom: cy + hh };

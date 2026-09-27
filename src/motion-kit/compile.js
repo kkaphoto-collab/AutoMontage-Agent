@@ -16,6 +16,8 @@ export function compileItems(items = [], { fps, durationInFrames }) {
     const b = item.box;
     if (!b || ![b.x, b.y, b.w, b.h].every(Number.isFinite)) throw new Error(`items ${item.id}: нужен box {x,y,w,h}`);
     const from = secToFrame(item.at, fps);
+    if (from < 0) throw new Error(`items ${item.id}: at не может быть отрицательным`);
+    if (from >= durationInFrames) throw new Error(`items ${item.id}: начинается после конца ролика`);
     const until = Math.min(durationInFrames, secToFrame(item.until, fps));
     if (!(until > from)) throw new Error(`items ${item.id}: until должен быть больше at`);
     return {
@@ -30,7 +32,9 @@ export function compileItems(items = [], { fps, durationInFrames }) {
   });
 }
 
-// Один вход для рендера (Root.jsx) и для гейтов (buildManifest): всё в кадрах композиции.
+// Один вход для рендера (Root.jsx) и для гейтов (buildManifest): камера, items и inserts — в
+// кадрах композиции; субтитры (captions.chunks) остаются в секундах, как их отдал buildChunks —
+// в кадры их переводит buildManifest.
 export function compileLayer(plan, { fps, width, height, durationInFrames, words = [], sfxLibrary = { sounds: {} } }) {
   const inserts = compileInserts(plan.inserts, { fps, durationInFrames });
   const camera = withAways(compileCamera(plan.camera, { fps, width, height, durationInFrames }), awaysFromInserts(inserts, { fps }));

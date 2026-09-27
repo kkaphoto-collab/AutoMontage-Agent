@@ -26,33 +26,49 @@ export function pickSound(library, role) {
 // Звуки из элементов (sfx на входе, typing на наборе) и из списка extra [{at, name, vol, prio}].
 export function sfxFromItems(items, extra, { fps, library, durationInFrames }) {
   const cues = [];
+  // Растущий индекс делает id уникальным всегда: два бед-звука (например, две подложки набора
+  // текста), стартующие на одном кадре, иначе получали бы одинаковый `name@hitFrame` и ломали
+  // React-ключи в SfxTrack.
+  let n = 0;
   const push = (spec, hitFrame, { bedFrames = null, prio } = {}) => {
     const sound = resolveSound(library, spec);
     const role = sound.role || roleOf(sound.name);
     const own = typeof spec === 'object' ? spec.vol : undefined;
     const vol = own ?? sound.volume ?? ROLE_VOLUME[role] ?? 0.5;
+    // leadFrames — в кадрах эталона 25 fps, как и все остальные длительности kit (см. ref25 в
+    // time.js/camera.js/motion.js), а не в кадрах композиции — иначе один и тот же plan.js звучит
+    // по-разному на разных fps. Math.round без минимума в 1, поэтому leadFrames:0 остаётся 0.
     const lead = typeof spec === 'object' && Number.isFinite(spec.leadFrames)
-      ? spec.leadFrames : Math.round((sound.peakSec || 0) * fps);
+      ? Math.round((spec.leadFrames * fps) / 25) : Math.round((sound.peakSec || 0) * fps);
     const startFrame = Math.max(0, hitFrame - lead);
     const natural = Math.max(1, Math.round(sound.lengthSec * fps));
     const durationFrames = Math.max(1, Math.min(bedFrames ?? natural, natural, durationInFrames - startFrame));
     cues.push({
-      id: `${sound.name}@${hitFrame}`, name: sound.name, file: sound.file, startFrame, hitFrame, durationFrames,
+      id: `${sound.name}@${hitFrame}#${n}`, name: sound.name, file: sound.file, startFrame, hitFrame, durationFrames,
       vol, role, notable: NOTABLE_ROLES.includes(role), bed: bedFrames !== null, prio: prio ?? ROLE_PRIO[role] ?? 1,
     });
+    n += 1;
   };
   for (const item of items) {
     if (item.sfx) push(item.sfx, item.from);
     if (item.typeFrom !== undefined && item.typeTo > item.typeFrom && item.typeSfx !== null) {
       const span = item.typeTo - item.typeFrom;
       const short = library?.sounds?.typing;
-      const spec = item.typeSfx
-        || (library?.sounds?.['typing-long'] && short && span > short.lengthSec * fps ? 'typing-long' : 'typing');
-      push(spec, item.typeFrom, { bedFrames: span, prio: 0 });
+      const long = library?.sounds?.['typing-long'];
+      // Никто явно не просил typeSfx, а в библиотеке нет ни typing, ни typing-long — обычный
+      // ролик без такого звука в паке, подложку молча пропускаем. Явный item.typeSfx (даже на
+      // отсутствующий звук) — это запрос автора plan.js, resolveSound должен бросить как раньше.
+      if (item.typeSfx || short || long) {
+        const spec = item.typeSfx || (long && short && span > short.lengthSec * fps ? 'typing-long' : 'typing');
+        push(spec, item.typeFrom, { bedFrames: span, prio: 0 });
+      }
     }
   }
   for (const entry of extra || []) push(entry, secToFrame(entry.at, fps), { prio: entry.prio });
-  return cues.filter((cue) => cue.startFrame < durationInFrames);
+  // Только звуки, чей удар реально попадает в композицию: лид может утащить startFrame в 0
+  // (звук просто раньше стартует), но если сам hitFrame ушёл до начала или за конец ролика,
+  // звук ему уже не принадлежит.
+  return cues.filter((cue) => cue.hitFrame >= 0 && cue.hitFrame < durationInFrames);
 }
 
 // Не больше одного заметного звука в секунду и не ближе 0,3 с между любыми; набор текста — подложка.

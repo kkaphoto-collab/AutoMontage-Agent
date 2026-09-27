@@ -40,3 +40,20 @@ test('caption lane also fits inside a landscape frame', () => {
   const lane = kit.captionLane(1920, 1080);
   assert.ok(lane.x >= 0 && lane.y >= 0 && lane.x + lane.w <= 1920 && lane.y + lane.h <= 1080);
 });
+
+// Ревью: слияние коротких кусков ничем не ограничено — цепочка из многих слов короче minDur
+// (0,45 с) с паузами короче hardGap (0,3 с) склеивается в один длинный кусок, который переполняет
+// однострочную полосу субтитров (overflow hidden обрежет текст, и гейт G5 не увидит проблему).
+// Девять слов по 0,02 с с интервалом 0,03 с — каждое своим предложением («да.», «нет.»…), поэтому
+// на исходном (нефиксированном) коде цепочка мержится в один кусок из 9 слов / 40 знаков.
+test('merging short chunks stays within maxWords+1 words and maxChars+8 characters', () => {
+  const words = ['да.', 'нет.', 'ок.', 'вот.', 'ага.', 'угу.', 'да.', 'нет.', 'ок.']
+    .map((t, i) => ({ t, s: i * 0.05, e: i * 0.05 + 0.02 }));
+  const chunks = kit.buildChunks(words);
+  for (const chunk of chunks) {
+    assert.ok(chunk.units.length <= 5, `chunk "${chunk.text}" has ${chunk.units.length} words (limit 5)`);
+    assert.ok(chunk.text.length <= 28, `chunk "${chunk.text}" has ${chunk.text.length} chars (limit 28)`);
+  }
+  // Ни одно слово не потерялось и порядок сохранён.
+  assert.equal(chunks.flatMap((c) => c.units.map((u) => u.t)).join('|'), words.map((w) => w.t).join('|'));
+});

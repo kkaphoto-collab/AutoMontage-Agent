@@ -66,3 +66,19 @@ test('compileLayer clamps a tail insert to the composition end and rejects one s
     /начинается после конца ролика/,
   );
 });
+
+// Ревью: at < 0 и at на/после конца ролика раньше давали либо отрицательный `from` без ошибки
+// (тексты с отрицательным `from` в манифесте), либо невнятное «until должен быть больше at»,
+// которое не называет настоящую причину (элемент стартует уже после конца композиции).
+test('compileItems rejects a negative at and an at at or after the composition end', () => {
+  const base = { id: 'a', kind: 'text', box: { x: 0, y: 0, w: 1, h: 1 } };
+  assert.throws(
+    () => kit.compileItems([{ ...base, at: -0.5, until: 1 }], cfg),
+    /items a: at не может быть отрицательным/,
+  );
+  // cfg.durationInFrames = 250 = 10 с при 25 fps — at ровно на границе тоже поздно.
+  assert.throws(
+    () => kit.compileItems([{ ...base, at: 10, until: 11 }], cfg),
+    /items a: начинается после конца ролика/,
+  );
+});
