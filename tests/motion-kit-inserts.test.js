@@ -39,3 +39,33 @@ test('a covering insert shorter than the return window never inverts from/to', (
   const [away] = kit.awaysFromInserts(inserts, { fps: 25 });
   assert.ok(away.to > away.from, `away.to (${away.to}) must stay after away.from (${away.from})`);
 });
+
+// Ревью: вставки не были обрезаны по длительности композиции — донор, начатый до конца ролика,
+// но заканчивающийся далеко после него, попадал в манифест с «to» за пределами видео (G11 считал
+// бы его длину неправильно), а вставка целиком за концом ролика молча проходила компиляцию.
+test('an insert reaching past the composition end is clamped to its duration', () => {
+  const [donor] = kit.compileInserts([{ kind: 'donor', from: 18, to: 25 }], { fps: 25, durationInFrames: 500 });
+  assert.equal(donor.to, 500);
+  assert.equal(donor.from, 450);
+  assert.equal((donor.to - donor.from) / 25, 2, 'видимый хвост донора должен остаться 2 с');
+});
+
+test('an insert starting at or after the composition end is rejected', () => {
+  assert.throws(
+    () => kit.compileInserts([{ kind: 'stock', from: 22, to: 24 }], { fps: 25, durationInFrames: 500 }),
+    /inserts\[0\] \(stock\): начинается после конца ролика/,
+  );
+  assert.throws(
+    () => kit.compileInserts([{ kind: 'stock', from: 20, to: 24 }], { fps: 25, durationInFrames: 500 }),
+    /начинается после конца ролика/,
+    'from ровно на конце ролика — тоже поздно, ролик заканчивается на durationInFrames',
+  );
+});
+
+test('compileInserts keeps its old unclamped behaviour when durationInFrames is omitted', () => {
+  // Task 8 вызывает compileInserts(inserts, { fps }) без durationInFrames — эти вызовы не должны
+  // ломаться или начать обрезать to, иначе существующие тесты и places, которые ещё не знают
+  // длительность композиции, перестанут работать.
+  const [insert] = kit.compileInserts([{ kind: 'stock', from: 2, to: 100 }], { fps: 25 });
+  assert.equal(insert.to, 2500);
+});

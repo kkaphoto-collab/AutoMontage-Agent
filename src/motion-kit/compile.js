@@ -32,7 +32,7 @@ export function compileItems(items = [], { fps, durationInFrames }) {
 
 // Один вход для рендера (Root.jsx) и для гейтов (buildManifest): всё в кадрах композиции.
 export function compileLayer(plan, { fps, width, height, durationInFrames, words = [], sfxLibrary = { sounds: {} } }) {
-  const inserts = compileInserts(plan.inserts, { fps });
+  const inserts = compileInserts(plan.inserts, { fps, durationInFrames });
   const camera = withAways(compileCamera(plan.camera, { fps, width, height, durationInFrames }), awaysFromInserts(inserts, { fps }));
   const items = compileItems(plan.items, { fps, durationInFrames });
   const cues = thinCues(sfxFromItems([...items, ...inserts], plan.sfx, { fps, library: sfxLibrary, durationInFrames }), { fps });

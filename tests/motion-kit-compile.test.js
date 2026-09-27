@@ -55,3 +55,14 @@ test('an until far past the composition duration is clamped to it, not rejected'
   const layer = kit.compileLayer({ ...plan, items: [longItem] }, cfg);
   assert.equal(layer.items[0].until, cfg.durationInFrames);
 });
+
+// Ревью: compileLayer не пробрасывал durationInFrames в compileInserts, поэтому вставка, начатая
+// до конца ролика, но заканчивающаяся далеко после него, попадала в манифест необрезанной.
+test('compileLayer clamps a tail insert to the composition end and rejects one starting after it', () => {
+  const tail = kit.compileLayer({ ...plan, items: [], inserts: [{ kind: 'donor', from: 8, to: 12 }] }, cfg);
+  assert.equal(tail.inserts[0].to, cfg.durationInFrames);
+  assert.throws(
+    () => kit.compileLayer({ ...plan, items: [], inserts: [{ kind: 'stock', from: 11, to: 13 }] }, cfg),
+    /начинается после конца ролика/,
+  );
+});
