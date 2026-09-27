@@ -75,6 +75,22 @@ function bboxFromStyle(style) {
   return { left: cx - hw, top: cy - hh, right: cx + hw, bottom: cy + hh };
 }
 
+test('SpeakerLayer renders one muted video with the camera transform, fills side shots and freezes the tail', () => {
+  const base = kitAt(10);
+  const cfg = { fps: 25, width: 1080, height: 1920, durationInFrames: 250 };
+  const track = base.compileCamera({ face: { x: 540, y: 787 }, shots: [{ at: 0, preset: 'W' }, { at: 2, preset: 'L' }] }, cfg);
+  const one = render(React.createElement(base.SpeakerLayer, { src: 'speaker.mp4', track, lastFrame: 200 }));
+  assert.equal((one.match(/<video/g) || []).length, 1);
+  assert.match(one, /muted=""/);
+  assert.match(one, /transform-origin:540px 787px/);
+  const side = render(React.createElement(kitAt(60).SpeakerLayer, { src: 'speaker.mp4', track, lastFrame: 200 }));
+  assert.equal((side.match(/<video/g) || []).length, 2);
+  const tail = render(React.createElement(kitAt(230).SpeakerLayer, { src: 'speaker.mp4', track, lastFrame: 200 }));
+  assert.match(tail, /data-freeze="200"/);
+  const away = base.withAways(track, [{ from: 100, to: 150 }]);
+  assert.equal(render(React.createElement(kitAt(120).SpeakerLayer, { src: 'speaker.mp4', track: away, lastFrame: 200 })), '');
+});
+
 test('kitBoxStyle draws exactly the box itemExtentAt measures for the same frame (the gate sees what is drawn)', () => {
   // kitBoxStyle/itemExtentAt — чистые функции с явным (item, frame, fps): один и тот же bundle
   // годится для любого frame/fps, стаб используется только когда нужно смонтировать сам KitBox.
