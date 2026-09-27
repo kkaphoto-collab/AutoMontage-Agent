@@ -4,7 +4,7 @@ const React = require('react');
 const { loadEsm } = require('./helpers/load-esm');
 const { remotionStub, render } = require('./helpers/remotion-stub');
 
-const kitAt = (frame, { fps = 25, calls = {} } = {}) => loadEsm('src/motion-kit/index.js', { stubs: { remotion: remotionStub({ frame, fps, calls }) } });
+const kitAt = (frame, { fps = 25, width, height, calls = {} } = {}) => loadEsm('src/motion-kit/index.js', { stubs: { remotion: remotionStub({ frame, fps, width, height, calls }) } });
 const item = (over = {}) => ({ id: 'title', kind: 'text', from: 10, until: 60, box: { x: 90, y: 300, w: 840, h: 200 },
   rot: 0, enter: { kind: 'fly' }, exit: { frames: 5, dir: 'down' }, life: {}, ...over });
 
@@ -103,9 +103,9 @@ function fillBoxFromStyle(style) {
 }
 
 test('speakerFillStyle overscans the frame with a blur-safe margin (>= 3 sigma of the on-screen blur) on every side', () => {
-  // On-screen sigma боку размытия — blurPx * scale, потому что blur(...) применяется ДО scale()
-  // в transform: сам фильтр работает в исходных px копии, а масштаб потом растягивает картинку
-  // (и вместе с ней визуальный радиус размытия) в scale раз.
+  // Видимый на экране радиус размытия (сигма) равен blurPx * scale, потому что blur(...)
+  // применяется ДО scale() в transform: сам фильтр работает в исходных px копии, а масштаб потом
+  // растягивает картинку (и вместе с ней радиус размытия) в scale раз.
   const kit = kitAt(0);
   for (const [width, height] of [[1080, 1920], [1920, 1080]]) {
     const style = kit.speakerFillStyle({ width, height });
@@ -257,13 +257,15 @@ test('FullscreenReveal opens from a safe-zone card to the full frame and closes 
   const html = render(React.createElement(kitAt(70).StockInsert, { insert }));
   assert.match(html, /data-kit-bleed="stock-1"/);
   assert.match(html, /data-sequence-from="50"/);
+  // Сток проигрывается ровно insert.to - insert.from кадров своей Sequence, а не до конца композиции.
+  assert.match(html, /data-sequence-duration="50"/);
   assert.match(html, /<video src="\/static\/stock\/a\.mp4" muted=""/);
   assert.equal(render(React.createElement(kitAt(120).StockInsert, { insert })), '');
 });
 
-// Отклонение от плана (задача 15): CARD больше не жёсткая константа {top:420, right:56, bottom:420,
-// left:130} под 1080x1920 — на 1920x1080 она давала карточку высотой 240px. revealCard(width, height)
-// считает инсеты от той же safe-зоны, что и текст, поэтому подходит под оба соотношения сторон.
+// CARD не жёсткая константа под 1080x1920 (та давала карточку высотой 240px на 1920x1080) —
+// revealCard(width, height) считает инсеты от той же safe-зоны, что и текст, поэтому подходит
+// под оба соотношения сторон.
 test('revealCard derives its card insets from the safe-zone rect for both aspect ratios', () => {
   const kit = kitAt(0);
   const safe9x16 = kit.safeRect(1080, 1920);
@@ -282,9 +284,29 @@ test('FullscreenReveal clips to nothing (full frame, no rounding) once revealPro
   assert.match(html, /clip-path:inset\(0\.0px 0\.0px 0\.0px 0\.0px round 0\.0px\)/);
 });
 
-// Отклонение от плана (задача 15): kb необязателен в контракте (`kb?: [1.03, 1.1]`) — StockInsert
-// сам подставляет дефолт, а не падает на insert.kb[0], если вставка ещё не прошла compileInserts
-// (там дефолт уже есть) или её собрали вручную в тесте/другом месте без него.
+// Пин точных цифр, которые видит зритель: card insets в inset() посчитаны от safeRect (проверено
+// отдельно выше), а сама строка clip-path обязана собирать их в правильном порядке (top right
+// bottom left) — перестановка left/right молча ломает форму карточки, не ломая ни одного теста
+// на голые числа revealCard.
+test('FullscreenReveal draws the exact open-card clip-path for both aspect ratios at the start of the insert', () => {
+  const insert = { id: 'stock-1', kind: 'stock', from: 50, to: 100, src: 'stock/a.mp4' };
+  const portrait = render(React.createElement(kitAt(50, { width: 1080, height: 1920 }).FullscreenReveal, { insert }, 'x'));
+  assert.match(portrait, /clip-path:inset\(250\.0px 130\.0px 420\.0px 70\.0px round 28\.0px\)/);
+  const landscape = render(React.createElement(kitAt(50, { width: 1920, height: 1080 }).FullscreenReveal, { insert }, 'x'));
+  assert.match(landscape, /clip-path:inset\(60\.0px 80\.0px 60\.0px 80\.0px round 28\.0px\)/);
+});
+
+test('StockInsert Ken Burns zoom rises linearly from kb[0] at from to kb[1] near to', () => {
+  const insert = { id: 'stock-1', kind: 'stock', from: 50, to: 100, src: 'stock/a.mp4', kb: [1.03, 1.1] };
+  const at = (frame) => render(React.createElement(kitAt(frame).StockInsert, { insert }));
+  assert.match(at(50), /scale\(1\.0300\)/);
+  assert.match(at(75), /scale\(1\.0650\)/);
+  assert.match(at(99), /scale\(1\.0986\)/);
+});
+
+// kb необязателен в контракте (`kb?: [1.03, 1.1]`) — StockInsert подставляет дефолт сам, а не
+// падает на insert.kb[0], если вставка ещё не прошла compileInserts (там дефолт уже есть тоже)
+// или её собрали вручную без него.
 test('StockInsert defaults kb to [1.03, 1.1] and renders without throwing when it is absent', () => {
   const insert = { id: 'stock-2', kind: 'stock', from: 50, to: 100, src: 'stock/b.mp4' };
   assert.doesNotThrow(() => render(React.createElement(kitAt(70).StockInsert, { insert })));
@@ -292,13 +314,37 @@ test('StockInsert defaults kb to [1.03, 1.1] and renders without throwing when i
   assert.match(html, /scale\(1\.0300\)/);
 });
 
-// Отклонение от плана (задача 15): добавлен тест на fps 50, требуемый ревьюером — REVEAL/CLOSE
-// заданы в кадрах эталонных 25 fps и обязаны пересчитываться под fps композиции без изменения
-// длительности в секундах.
+// StockInsert стоит на верхнем уровне композиции, как SpeakerLayer, а не внутри чужой Sequence —
+// поэтому он ждёт уже скомпилированную вставку (compileInserts) с кадрами from/to, а не секунды
+// плана. Та же ошибка, что ловит KitBox для items.
+test('StockInsert refuses a raw plan-shaped insert with seconds instead of compiled frames', () => {
+  const kit = kitAt(0);
+  const planShaped = { id: 'stock-1', kind: 'stock', from: 2, to: 4.4, src: 'stock/a.mp4' };
+  assert.throws(
+    () => render(React.createElement(kit.StockInsert, { insert: planShaped })),
+    /StockInsert ждёт скомпилированную вставку с кадрами from\/to/,
+  );
+});
+
 test('revealProgress keeps the same reveal timing in seconds when fps doubles from 25 to 50', () => {
   const kit = kitAt(0);
   const insert = { id: 'stock-3', kind: 'stock', from: 0, to: 1000 };
   const revealFrames50 = 2 * kit.REVEAL_FRAMES;
   assert.ok(kit.revealProgress(revealFrames50 - 1, insert, 50) < 1);
   assert.equal(kit.revealProgress(revealFrames50, insert, 50), 1);
+});
+
+// Закрытие обязано доканчиваться ровно на последнем отрисованном кадре (to - 1), как выходы items
+// в motion.js, а не на to; и CLOSE_FRAMES обязан пересчитываться под fps так же, как REVEAL_FRAMES.
+test('revealProgress and insertOpacity finish the close exactly on the last drawn frame (to-1), and CLOSE_FRAMES scales with fps', () => {
+  const kit = kitAt(0);
+  for (const fps of [25, 50]) {
+    const insert = { id: 'stock-4', kind: 'stock', from: 0, to: 200 };
+    const closeStart = insert.to - kit.ref25(kit.CLOSE_FRAMES, fps);
+    assert.equal(kit.revealProgress(closeStart - 1, insert, fps), 1, `fps ${fps}: close must not have started yet`);
+    assert.ok(kit.revealProgress(closeStart + 1, insert, fps) < 1, `fps ${fps}: close must already be moving`);
+    assert.equal(kit.revealProgress(insert.to - 1, insert, fps), 0, `fps ${fps}: card must be fully shrunk on the last drawn frame`);
+    assert.equal(kit.insertOpacity(closeStart - 1, insert, fps), 1);
+    assert.equal(kit.insertOpacity(insert.to - 1, insert, fps), 0);
+  }
 });

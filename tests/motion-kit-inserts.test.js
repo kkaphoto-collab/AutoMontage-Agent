@@ -19,11 +19,60 @@ test('invalid inserts are rejected', () => {
   assert.throws(() => kit.compileInserts([{ kind: 'stock', from: 2, to: 2 }], { fps: 25 }), /to должен быть больше from/);
 });
 
-test('covering inserts send the speaker away and bring it back before the insert ends', () => {
+test('covering inserts send the speaker away and bring it back before the insert closes', () => {
+  // stock: from=2s=50f, to=4s=100f. away.to = to − ref25(CLOSE_FRAMES=6) − ref25(exitFrames=10)
+  // = 100 − 6 − 10 = 84: the return ramp must finish exactly when the close (card shrinking back
+  // down) starts, so the speaker is already sharp and fully opaque under the shrinking card.
   const aways = kit.awaysFromInserts(kit.compileInserts([
     { kind: 'stock', from: 2, to: 4 }, { kind: 'donor', from: 5, to: 6 },
   ], { fps: 25 }));
-  assert.deepEqual(aways, [{ from: 50, to: 90 }]);
+  assert.deepEqual(aways, [{ from: 50, to: 84 }]);
+});
+
+test('compileInserts rejects a malformed kb, naming the insert', () => {
+  const bad = (kb) => () => kit.compileInserts([{ kind: 'stock', from: 0, to: 1, kb }], { fps: 25 });
+  assert.throws(bad([1.03]), /inserts\[0\] \(stock-1\): kb должен быть парой чисел/);
+  assert.throws(bad([0.9, 1.1]), /inserts\[0\] \(stock-1\): kb должен быть парой чисел/);
+  assert.throws(bad(['a', 1.1]), /inserts\[0\] \(stock-1\): kb должен быть парой чисел/);
+  assert.throws(bad([1.03, 1.1, 1.2]), /inserts\[0\] \(stock-1\): kb должен быть парой чисел/);
+  assert.throws(bad('nope'), /inserts\[0\] \(stock-1\): kb должен быть парой чисел/);
+});
+
+// Ревью Task 15: карточка закрывается (revealProgress) до того, как спикер успевал вернуться —
+// сжимающаяся карточка открывала ещё размытого/полупрозрачного спикера (тёмное кольцо на стыке).
+// Проверяем на настоящем pipeline (compileInserts → awaysFromInserts → compileCamera/withAways →
+// cameraAt) на нескольких fps: (a) весь close спикер уже резкий и непрозрачный; (b) пока в кадре
+// ещё виден зазор карточки (открытие ещё не докрыло экран), спикер не должен успеть погаснуть —
+// иначе в зазоре на миг будет видна пустота вместо живого (пусть и размытого) спикера.
+test('the speaker is fully back before the close starts and never goes dark while a reveal gap is still visible', () => {
+  for (const fps of [24, 25, 30, 50, 60]) {
+    const width = 1080;
+    const height = 1920;
+    const durationInFrames = fps * 10;
+    const inserts = kit.compileInserts([{ kind: 'stock', from: 2, to: 4.4, src: 'stock/a.mp4' }], { fps, durationInFrames });
+    const [insert] = inserts;
+    const track = kit.withAways(
+      kit.compileCamera({ face: { x: 540, y: 787 }, shots: [{ at: 0, preset: 'W' }] }, { fps, width, height, durationInFrames }),
+      kit.awaysFromInserts(inserts, { fps }),
+    );
+    const card = kit.revealCard(width, height);
+    const revealFrames = kit.ref25(kit.REVEAL_FRAMES, fps);
+    let sawClose = false;
+    for (let frame = insert.from; frame < insert.to; frame += 1) {
+      const p = kit.revealProgress(frame, insert, fps);
+      const cam = kit.cameraAt(track, frame);
+      if (frame >= insert.from + revealFrames && p < 1) {
+        sawClose = true;
+        assert.ok(cam.opacity >= 0.99, `fps ${fps} frame ${frame}: speaker opacity ${cam.opacity} during close`);
+        assert.ok(cam.blur <= 0.05, `fps ${fps} frame ${frame}: speaker blur ${cam.blur} during close`);
+      }
+      const insetMax = Math.max(card.top, card.right, card.bottom, card.left) * (1 - p);
+      if (insetMax > 0.5) {
+        assert.ok(cam.opacity >= 0.01, `fps ${fps} frame ${frame}: speaker opacity ${cam.opacity} while a ${insetMax.toFixed(2)}px gap is still visible`);
+      }
+    }
+    assert.ok(sawClose, `fps ${fps}: expected the close phase to actually run for this insert`);
+  }
 });
 
 // Граничные случаи сверх плана: пустой список вставок не должен падать (нет вставок в ролике —

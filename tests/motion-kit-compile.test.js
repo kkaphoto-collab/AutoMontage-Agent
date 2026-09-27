@@ -16,7 +16,9 @@ test('compileLayer turns seconds into frames and wires inserts into the camera',
   const layer = kit.compileLayer(plan, cfg);
   assert.equal(layer.kitVersion, kit.KIT_VERSION);
   assert.deepEqual([layer.items[0].from, layer.items[0].until], [5, 50]);
-  assert.deepEqual(layer.camera.aways, [{ from: 100, to: 140 }]);
+  // insert to=150f; away.to = 150 − ref25(CLOSE_FRAMES=6) − ref25(exitFrames=10) = 150 − 16 = 134:
+  // the speaker's return finishes exactly when the reveal card starts closing, not just by insert.to.
+  assert.deepEqual(layer.camera.aways, [{ from: 100, to: 134 }]);
   assert.equal(layer.cues.kept[0].name, 'whoosh-in');
   assert.equal(layer.captions.chunks[0].text, 'Привет мир.');
   assert.equal(layer.hook, 'speaker');
