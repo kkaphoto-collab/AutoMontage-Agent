@@ -1,12 +1,18 @@
 import { AbsoluteFill, OffthreadVideo, Sequence, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
-import { insertOpacity, KB_DEFAULT, revealCard, revealProgress } from './inserts.js';
+import { assertCompiledInsert, insertOpacity, KB_DEFAULT, revealCard, revealProgress } from './inserts.js';
+import { isShown } from './motion.js';
 
 export function FullscreenReveal({ insert, children }) {
+  assertCompiledInsert(insert, 'FullscreenReveal');
   const frame = useCurrentFrame();
   const { fps, width, height } = useVideoConfig();
   const p = revealProgress(frame, insert, fps);
   if (p === null) return null;
   const opacity = insertOpacity(frame, insert, fps);
+  // Тот же порог видимости, что и у KitBox (isShown/VISIBLE_MIN): на последнем отрисованном
+  // кадре close (to − 1, на высоком fps иногда и соседнем) opacity уже практически 0 — не
+  // декодируем и не рисуем фактически невидимый кадр вставки.
+  if (!isShown({ o: opacity })) return null;
   const card = revealCard(width, height);
   const inset = (value) => (value * (1 - p)).toFixed(1);
   // Тот же коэффициент, что и safeRect: ширина к канону 1080 (портрет) / 1920 (ландшафт) — радиус
@@ -23,12 +29,8 @@ export function FullscreenReveal({ insert, children }) {
 // и revealProgress), как и в SpeakerLayer. Внутренний <Sequence from={insert.from}> нужен только
 // видео стока: оно проигрывается с собственного нуля, а не с глобального таймкода, как аватар.
 export function StockInsert({ insert, children = null }) {
+  assertCompiledInsert(insert, 'StockInsert');
   const frame = useCurrentFrame();
-  if (!Number.isInteger(insert.from) || !Number.isInteger(insert.to)) {
-    throw new Error(
-      `StockInsert ждёт скомпилированную вставку с кадрами from/to (compileInserts), а получил секунды плана? (insert.id=${insert.id}, from=${insert.from}, to=${insert.to})`
-    );
-  }
   const kb = insert.kb || KB_DEFAULT;
   const t = Math.min(1, Math.max(0, (frame - insert.from) / Math.max(1, insert.to - insert.from)));
   const zoom = kb[0] + (kb[1] - kb[0]) * t;

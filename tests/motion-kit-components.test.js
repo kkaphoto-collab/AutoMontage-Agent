@@ -284,6 +284,44 @@ test('FullscreenReveal clips to nothing (full frame, no rounding) once revealPro
   assert.match(html, /clip-path:inset\(0\.0px 0\.0px 0\.0px 0\.0px round 0\.0px\)/);
 });
 
+// Радиус масштабируется под РЕАЛЬНОЕ разрешение, не только под канонические 1080x1920/1920x1080:
+// 28 * 720/1080 ≈ 18.7px на p=0 (начало вставки, карточка ещё не открылась).
+test('FullscreenReveal scales its corner radius for a non-standard resolution too (720x1280)', () => {
+  const insert = { id: 'stock-1', kind: 'stock', from: 50, to: 100, src: 'stock/a.mp4' };
+  const html = render(React.createElement(kitAt(50, { width: 720, height: 1280 }).FullscreenReveal, { insert }, 'x'));
+  assert.match(html, /round 18\.7px\)/);
+});
+
+// Task 15 fix: revealProgress и insertOpacity читают одно closeWindow — на последнем реально
+// отрисованном кадре (to − 1) opacity доходит ровно до 0, и FullscreenReveal обязан рисовать
+// пустоту (isShown/VISIBLE_MIN), а не декодировать фактически невидимый кадр стока; в середине
+// close, пока opacity ещё дробная, разметка должна нести именно это число.
+test('FullscreenReveal renders nothing on the fully-closed last frame and the true fractional opacity mid-close', () => {
+  const insert = { id: 'stock-1', kind: 'stock', from: 50, to: 100, src: 'stock/a.mp4' };
+  const kit = kitAt(0);
+  const lastFrame = insert.to - 1;
+  assert.equal(kit.insertOpacity(lastFrame, insert), 0);
+  assert.equal(render(React.createElement(kitAt(lastFrame).FullscreenReveal, { insert }, 'x')), '');
+
+  const midClose = 97; // внутри close-окна (closeStart=94..closeEnd=99 при fps 25), но ещё виден
+  const expectedOpacity = kit.insertOpacity(midClose, insert);
+  assert.ok(expectedOpacity > 0 && expectedOpacity < 1, `ожидали дробную прозрачность в close, получили ${expectedOpacity}`);
+  const html = render(React.createElement(kitAt(midClose).FullscreenReveal, { insert }, 'x'));
+  assert.match(html, new RegExp(`opacity:${String(expectedOpacity).replace('.', '\\.')}`));
+});
+
+// Гарантия из Step 0: не только StockInsert, но и сам FullscreenReveal отказывается рисовать
+// «сырую» вставку с секундами вместо скомпилированных кадров — чтобы будущие screen/scene
+// вставки, вызывающие FullscreenReveal напрямую, тоже получили эту защиту.
+test('FullscreenReveal refuses a raw plan-shaped insert with seconds instead of compiled frames', () => {
+  const kit = kitAt(0);
+  const planShaped = { id: 'stock-1', kind: 'stock', from: 2, to: 4.4, src: 'stock/a.mp4' };
+  assert.throws(
+    () => render(React.createElement(kit.FullscreenReveal, { insert: planShaped }, 'x')),
+    /FullscreenReveal ждёт скомпилированную вставку с кадрами from\/to/,
+  );
+});
+
 // Пин точных цифр, которые видит зритель: card insets в inset() посчитаны от safeRect (проверено
 // отдельно выше), а сама строка clip-path обязана собирать их в правильном порядке (top right
 // bottom left) — перестановка left/right молча ломает форму карточки, не ломая ни одного теста
@@ -301,7 +339,9 @@ test('StockInsert Ken Burns zoom rises linearly from kb[0] at from to kb[1] near
   const at = (frame) => render(React.createElement(kitAt(frame).StockInsert, { insert }));
   assert.match(at(50), /scale\(1\.0300\)/);
   assert.match(at(75), /scale\(1\.0650\)/);
-  assert.match(at(99), /scale\(1\.0986\)/);
+  // frame 99 (to-1) — не 98: с общим close-окном (Task 15 fix) insertOpacity там уже 0, и
+  // FullscreenReveal/StockInsert теперь ничего не рисуют на фактически невидимом кадре.
+  assert.match(at(98), /scale\(1\.0972\)/);
 });
 
 // kb необязателен в контракте (`kb?: [1.03, 1.1]`) — StockInsert подставляет дефолт сам, а не

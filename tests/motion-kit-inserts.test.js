@@ -38,12 +38,12 @@ test('compileInserts rejects a malformed kb, naming the insert', () => {
   assert.throws(bad('nope'), /inserts\[0\] \(stock-1\): kb должен быть парой чисел/);
 });
 
-// Ревью Task 15: карточка закрывается (revealProgress) до того, как спикер успевал вернуться —
-// сжимающаяся карточка открывала ещё размытого/полупрозрачного спикера (тёмное кольцо на стыке).
-// Проверяем на настоящем pipeline (compileInserts → awaysFromInserts → compileCamera/withAways →
-// cameraAt) на нескольких fps: (a) весь close спикер уже резкий и непрозрачный; (b) пока в кадре
-// ещё виден зазор карточки (открытие ещё не докрыло экран), спикер не должен успеть погаснуть —
-// иначе в зазоре на миг будет видна пустота вместо живого (пусть и размытого) спикера.
+// Гарантия всего pipeline (compileInserts → awaysFromInserts → compileCamera/withAways →
+// cameraAt) на нескольких fps: спикер обязан быть резким и непрозрачным на всём close, чтобы
+// сжимающаяся обратно карточка не открывала размытое/полупрозрачное лицо (тёмное кольцо на
+// стыке); и пока в кадре ещё виден зазор карточки (открытие не докрыло экран), спикер не должен
+// успеть погаснуть — иначе в зазоре на миг будет видна пустота вместо живого (пусть и размытого)
+// спикера.
 test('the speaker is fully back before the close starts and never goes dark while a reveal gap is still visible', () => {
   for (const fps of [24, 25, 30, 50, 60]) {
     const width = 1080;
@@ -83,15 +83,42 @@ test('an empty insert list compiles and produces no away windows', () => {
   assert.deepEqual(kit.awaysFromInserts([], { fps: 25 }), []);
 });
 
-test('a covering insert shorter than the return window never inverts from/to', () => {
-  const inserts = kit.compileInserts([{ kind: 'stock', from: 0, to: 0.1 }], { fps: 25 });
+test('a covering insert at the minimum cover length never inverts from/to in its away window', () => {
+  // 0.64с = ref25(CLOSE_FRAMES=6, 25) + ref25(exitFrames=10, 25) — ровно новый минимум для
+  // cover-вставок (см. ниже); короче compileInserts теперь отклоняет вставку явной ошибкой, так
+  // что здесь остаётся граничный случай «ровно минимум»: to − close − exit = 0, и Math.max в
+  // awaysFromInserts обязан подстраховать этот ноль, а не отдать away.to === away.from.
+  const inserts = kit.compileInserts([{ kind: 'stock', from: 0, to: 0.64 }], { fps: 25 });
   const [away] = kit.awaysFromInserts(inserts, { fps: 25 });
   assert.ok(away.to > away.from, `away.to (${away.to}) must stay after away.from (${away.from})`);
 });
 
-// Ревью: вставки не были обрезаны по длительности композиции — донор, начатый до конца ролика,
-// но заканчивающийся далеко после него, попадал в манифест с «to» за пределами видео (G11 считал
-// бы его длину неправильно), а вставка целиком за концом ролика молча проходила компиляцию.
+test('compileInserts rejects a cover insert shorter than the return-before-close minimum, naming the insert and the minimum in seconds', () => {
+  for (const fps of [25, 50]) {
+    const minFrames = kit.ref25(kit.CLOSE_FRAMES, fps) + kit.ref25(kit.CAMERA_DEFAULTS.away.exitFrames, fps);
+    const minSec = minFrames / fps;
+    // Ровно минимум — проходит.
+    assert.doesNotThrow(() => kit.compileInserts([{ kind: 'stock', from: 0, to: minSec }], { fps }));
+    // На один кадр короче — падает с понятной причиной и названным минимумом в секундах.
+    const oneFrameShort = (minFrames - 1) / fps;
+    assert.throws(
+      () => kit.compileInserts([{ kind: 'stock', from: 0, to: oneFrameShort }], { fps }),
+      new RegExp(`inserts\\[0\\] \\(stock\\): закрывающая вставка короче ${minSec.toFixed(2)} с`),
+      `fps ${fps}: expected the short-cover rejection`,
+    );
+  }
+});
+
+test('a non-covering (donor) insert is not subject to the cover-length minimum', () => {
+  // donor: cover=false по умолчанию — вставка короче ref25(CLOSE_FRAMES)+ref25(exitFrames) не
+  // должна отклоняться, потому что она не отправляет спикера в away и не обязана его возвращать.
+  assert.doesNotThrow(() => kit.compileInserts([{ kind: 'donor', from: 0, to: 0.1 }], { fps: 25 }));
+});
+
+// Вставки обязаны обрезаться по длительности композиции: донор, начатый до конца ролика, но
+// заканчивающийся далеко после него, не должен попасть в манифест с «to» за пределами видео
+// (иначе G11 посчитает его длину неправильно), а вставка целиком за концом ролика должна быть
+// отклонена, а не молча пройти компиляцию.
 test('an insert reaching past the composition end is clamped to its duration', () => {
   const [donor] = kit.compileInserts([{ kind: 'donor', from: 18, to: 25 }], { fps: 25, durationInFrames: 500 });
   assert.equal(donor.to, 500);
@@ -117,4 +144,11 @@ test('compileInserts keeps its old unclamped behaviour when durationInFrames is 
   // длительность композиции, перестанут работать.
   const [insert] = kit.compileInserts([{ kind: 'stock', from: 2, to: 100 }], { fps: 25 });
   assert.equal(insert.to, 2500);
+});
+
+test('the close fade (insertOpacity) is already moving one frame after closeWindow starts at fps 50', () => {
+  const insert = { id: 'stock-4', kind: 'stock', from: 0, to: 200 };
+  const { start } = kit.closeWindow(insert, 50);
+  const opacity = kit.insertOpacity(start + 1, insert, 50);
+  assert.ok(opacity > 0 && opacity < 1, `expected 0 < opacity < 1 at closeStart+1, got ${opacity}`);
 });
