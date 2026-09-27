@@ -14,6 +14,11 @@ function assertKb(kb, label) {
   }
 }
 
+// Секунды в сообщении об ошибке округляются ВВЕРХ до сотых: если округлить к ближайшему, автор
+// plan.js, дословно переписавший показанное число, мог получить вставку, которая всё ещё короче
+// реального минимума в кадрах (secToFrame способен округлить обратно вниз).
+const ceilToHundredths = (value) => Math.ceil(value * 100) / 100;
+
 // durationInFrames необязателен: без него to не обрезается (совместимость со старыми вызовами,
 // которые ещё не знают длительность композиции).
 export function compileInserts(inserts = [], { fps, durationInFrames } = {}) {
@@ -27,18 +32,25 @@ export function compileInserts(inserts = [], { fps, durationInFrames } = {}) {
     if (hasDuration && from >= durationInFrames) {
       throw new Error(`inserts[${i}] (${label}): начинается после конца ролика`);
     }
-    let to = secToFrame(insert.to, fps);
-    if (hasDuration) to = Math.min(to, durationInFrames);
+    const rawTo = secToFrame(insert.to, fps);
+    const to = hasDuration ? Math.min(rawTo, durationInFrames) : rawTo;
+    const clampedByEnd = hasDuration && rawTo > durationInFrames;
     if (!(to > from)) throw new Error(`inserts[${i}] (${label}): to должен быть больше from`);
     const cover = insert.cover ?? insert.kind !== 'donor';
     if (cover) {
       // Закрывающая (cover) вставка обязана быть достаточно длинной, чтобы спикер успел
       // вернуться в фокус ДО начала close (awaysFromInserts: away.to = to − close − exit) —
       // короче этого камера не успевает, и на стыке виден размытый/полупрозрачный спикер.
-      const minFrames = ref25(CLOSE_FRAMES, fps) + ref25(CAMERA_DEFAULTS.away.exitFrames, fps);
+      // +1 кадр сверх close+exit — иначе на самой границе away.to − away.from вырождается в 0
+      // (спасает только Math.max-подстраховка в awaysFromInserts, а не честный расчёт).
+      const minFrames = ref25(CLOSE_FRAMES, fps) + ref25(CAMERA_DEFAULTS.away.exitFrames, fps) + 1;
       if (to - from < minFrames) {
+        const minSec = ceilToHundredths(minFrames / fps).toFixed(2);
+        const clampNote = clampedByEnd
+          ? ` (обрезана концом ролика до ${((to - from) / fps).toFixed(2)} с)`
+          : '';
         throw new Error(
-          `inserts[${i}] (${label}): закрывающая вставка короче ${(minFrames / fps).toFixed(2)} с — камера не успеет вернуть спикера в фокус до начала закрытия`
+          `inserts[${i}] (${label}): закрывающая вставка короче минимума ${minFrames} кадров (${minSec} с)${clampNote} — камера не успеет вернуть спикера в фокус до начала закрытия`
         );
       }
     }
@@ -62,8 +74,9 @@ export function compileInserts(inserts = [], { fps, durationInFrames } = {}) {
 // для самого ramp'а (нельзя параметризовать по-другому, иначе ramp и уход разъедутся), и должен
 // ЗАКОНЧИТЬСЯ ровно к началу close, поэтому старт возврата сдвинут на close и на exit
 // одновременно: away.to = insert.to − close − exit. compileInserts гарантирует cover-вставкам
-// длину ≥ close + exit, так что away.to ≥ away.from честно достижим без вырождения в ноль-длину;
-// Math.max ниже — подстраховка для вставок, собранных в обход compileInserts.
+// длину ≥ close + exit + 1 кадр, поэтому away.to − away.from ≥ 1 ВСЕГДА честно (без вырождения в
+// ноль-длину), а не только благодаря клэмпу ниже. Math.max — чистая подстраховка для вставок,
+// собранных в обход compileInserts (там такой гарантии длины нет).
 export function awaysFromInserts(inserts, { fps = 25 } = {}) {
   const close = ref25(CLOSE_FRAMES, fps);
   const exit = ref25(CAMERA_DEFAULTS.away.exitFrames, fps);

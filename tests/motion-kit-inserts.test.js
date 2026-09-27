@@ -84,29 +84,44 @@ test('an empty insert list compiles and produces no away windows', () => {
 });
 
 test('a covering insert at the minimum cover length never inverts from/to in its away window', () => {
-  // 0.64с = ref25(CLOSE_FRAMES=6, 25) + ref25(exitFrames=10, 25) — ровно новый минимум для
-  // cover-вставок (см. ниже); короче compileInserts теперь отклоняет вставку явной ошибкой, так
-  // что здесь остаётся граничный случай «ровно минимум»: to − close − exit = 0, и Math.max в
-  // awaysFromInserts обязан подстраховать этот ноль, а не отдать away.to === away.from.
-  const inserts = kit.compileInserts([{ kind: 'stock', from: 0, to: 0.64 }], { fps: 25 });
+  // Новый минимум = close + exit + 1 кадр (ревью code-quality к Task 16): ровно на минимуме
+  // away.to = to − close − exit уже честно равен insert.from + 1 САМ ПО СЕБЕ, без обращения к
+  // Math.max — гарантия «away-окно никогда не вырождается в ноль» теперь буквально верна, а не
+  // держится на подстраховке. Math.max в awaysFromInserts остаётся только для вставок, собранных
+  // в обход compileInserts.
+  const minFrames = kit.ref25(kit.CLOSE_FRAMES, 25) + kit.ref25(kit.CAMERA_DEFAULTS.away.exitFrames, 25) + 1;
+  const inserts = kit.compileInserts([{ kind: 'stock', from: 0, to: minFrames / 25 }], { fps: 25 });
   const [away] = kit.awaysFromInserts(inserts, { fps: 25 });
-  assert.ok(away.to > away.from, `away.to (${away.to}) must stay after away.from (${away.from})`);
+  assert.equal(away.to - away.from, 1, 'at the exact minimum the away window is naturally 1 frame, not clamped from 0');
 });
 
-test('compileInserts rejects a cover insert shorter than the return-before-close minimum, naming the insert and the minimum in seconds', () => {
+test('compileInserts rejects a cover insert shorter than the return-before-close minimum, naming the insert and the minimum in frames and seconds', () => {
   for (const fps of [25, 50]) {
-    const minFrames = kit.ref25(kit.CLOSE_FRAMES, fps) + kit.ref25(kit.CAMERA_DEFAULTS.away.exitFrames, fps);
-    const minSec = minFrames / fps;
+    const minFrames = kit.ref25(kit.CLOSE_FRAMES, fps) + kit.ref25(kit.CAMERA_DEFAULTS.away.exitFrames, fps) + 1;
+    // Секунды в сообщении округлены ВВЕРХ (не к ближайшему): plan-автор, который дословно
+    // перепишет это число в plan.js, обязан получить вставку не короче минимума в кадрах — иначе
+    // округление к ближайшему могло показать значение, которое всё ещё не проходит проверку.
+    const minSec = Math.ceil((minFrames / fps) * 100) / 100;
     // Ровно минимум — проходит.
-    assert.doesNotThrow(() => kit.compileInserts([{ kind: 'stock', from: 0, to: minSec }], { fps }));
-    // На один кадр короче — падает с понятной причиной и названным минимумом в секундах.
+    assert.doesNotThrow(() => kit.compileInserts([{ kind: 'stock', from: 0, to: minFrames / fps }], { fps }));
+    // На один кадр короче — падает с понятной причиной, минимумом в кадрах и в секундах.
     const oneFrameShort = (minFrames - 1) / fps;
     assert.throws(
       () => kit.compileInserts([{ kind: 'stock', from: 0, to: oneFrameShort }], { fps }),
-      new RegExp(`inserts\\[0\\] \\(stock\\): закрывающая вставка короче ${minSec.toFixed(2)} с`),
+      new RegExp(`inserts\\[0\\] \\(stock\\): закрывающая вставка короче минимума ${minFrames} кадров \\(${minSec.toFixed(2)} с\\)`),
       `fps ${fps}: expected the short-cover rejection`,
     );
   }
+});
+
+test('a cover insert shortened by the composition end says so in the short-cover error', () => {
+  // from=100f (4с), durationInFrames=110 → «сырой» to (10с=250f) обрезается до 110, оставляя
+  // всего 10 кадров — короче минимума (17 при fps 25). Сообщение обязано отдельно объяснить, что
+  // причина в конце ролика, а не в том, что автор plan.js написал слишком короткую вставку.
+  assert.throws(
+    () => kit.compileInserts([{ kind: 'stock', from: 4, to: 10 }], { fps: 25, durationInFrames: 110 }),
+    /inserts\[0\] \(stock\): закрывающая вставка короче минимума 17 кадров \(0\.68 с\) \(обрезана концом ролика до 0\.40 с\)/,
+  );
 });
 
 test('a non-covering (donor) insert is not subject to the cover-length minimum', () => {
@@ -151,4 +166,18 @@ test('the close fade (insertOpacity) is already moving one frame after closeWind
   const { start } = kit.closeWindow(insert, 50);
   const opacity = kit.insertOpacity(start + 1, insert, 50);
   assert.ok(opacity > 0 && opacity < 1, `expected 0 < opacity < 1 at closeStart+1, got ${opacity}`);
+});
+
+// Более сильная версия проверки общего close-окна: не просто «оба сдвинулись», а буквально равны
+// на каждом кадре, где revealProgress уже полностью открылся (frame >= from + reveal) — там его
+// множитель prog(...reveal) строго равен 1, так что revealProgress вырождается в тот же самый
+// (1 - closeProg), что и insertOpacity, на нескольких fps сразу.
+test('revealProgress and insertOpacity are exactly equal once the reveal is fully open, at every fps', () => {
+  const insert = { id: 'stock-5', kind: 'stock', from: 0, to: 300 };
+  for (const fps of [24, 25, 30, 50, 60]) {
+    const reveal = kit.ref25(kit.REVEAL_FRAMES, fps);
+    for (let f = insert.from + reveal; f < insert.to; f += 1) {
+      assert.equal(kit.revealProgress(f, insert, fps), kit.insertOpacity(f, insert, fps), `fps ${fps} frame ${f}`);
+    }
+  }
 });

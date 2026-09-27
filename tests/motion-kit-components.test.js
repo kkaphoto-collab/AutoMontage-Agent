@@ -389,25 +389,84 @@ test('revealProgress and insertOpacity finish the close exactly on the last draw
   }
 });
 
-test('screenshot card shows the URL, scrolls smoothly and flashes once', () => {
+// Ревью Task 16: pixel maxScroll не может быть верным — plan.js не знает натуральную высоту
+// картинки и рисковал проскроллить в белый низ раньше конца окна. scrollShare двигает долю (0..1)
+// через objectPosition, а не пиксели: короткий скриншот просто почти не двигается, но никогда не
+// уезжает мимо своего низа.
+test('scrollShare eases smoothly from 0 at from to the full share at to, through the midpoint', () => {
   const kit = kitAt(0);
-  assert.equal(kit.scrollOffset(10, 10, 60, 900), 0);
-  assert.equal(kit.scrollOffset(60, 10, 60, 900), 900);
-  assert.ok(kit.scrollOffset(35, 10, 60, 900) > 300 && kit.scrollOffset(35, 10, 60, 900) < 600);
+  assert.equal(kit.scrollShare(10, 10, 60, 1), 0);
+  assert.equal(kit.scrollShare(60, 10, 60, 1), 1);
+  assert.equal(kit.scrollShare(35, 10, 60, 1), 0.5, 'midpoint of a symmetric inOut ease must land exactly on 0.5');
+});
+
+test('scrollShare shows the ease-in near the start: far below the linear share', () => {
+  const kit = kitAt(0);
+  // from+5 в окне 50 кадров — линейно было бы 0.1; inOut-кривая на входе куда положе.
+  assert.ok(kit.scrollShare(15, 10, 60, 1) < 0.1);
+});
+
+test('scrollShare clamps before from and at/after to, and clamps an out-of-range scroll to [0,1]', () => {
+  const kit = kitAt(0);
+  assert.equal(kit.scrollShare(5, 10, 60, 1), 0, 'before from must stay at 0, never negative');
+  assert.equal(kit.scrollShare(70, 10, 60, 1), 1, 'past to must stay at the full share, never overscroll');
+  assert.equal(kit.scrollShare(35, 10, 60, 1.5), kit.scrollShare(35, 10, 60, 1), 'scroll > 1 clamps to 1');
+  assert.equal(kit.scrollShare(35, 10, 60, -0.3), 0, 'scroll < 0 clamps to 0');
+});
+
+test('ScrollShot fills the window via objectPosition (a page share, never a pixel offset that could overscroll)', () => {
+  const html = render(React.createElement(kitAt(35).ScrollShot, { src: 'shots/page.png', from: 10, to: 60, scroll: 1 }));
+  assert.match(html, /<img src="\/static\/shots\/page\.png"/);
+  assert.match(html, /object-position:50% 50\.00%/, 'frame 35 is the exact midpoint of the 10..60 window');
+  assert.doesNotMatch(html, /translateY/, 'no more pixel translateY — the old overscroll bug lived here');
+});
+
+test('screenshot card renders inside BrowserFrame and shows the URL', () => {
+  const html = render(React.createElement(kitAt(35).BrowserFrame, { url: 'example.com/page' },
+    React.createElement(kitAt(35).ScrollShot, { src: 'shots/page.png', from: 10, to: 60 })));
+  assert.match(html, /example\.com\/page/);
+  assert.match(html, /<img src="\/static\/shots\/page\.png"/);
+});
+
+test('BrowserFrame chrome scales with the composition resolution (short side / 1080), a scale prop may override it', () => {
+  assert.match(render(React.createElement(kitAt(0, { width: 1080, height: 1920 }).BrowserFrame, { url: 'x' }, 'x')), /height:64px/);
+  // k = 720/1080 = 0.6667; 64 * k ≈ 42.7 — не 64px, иначе хром окна на нестандартном разрешении
+  // рисуется в исходном (для 1080p) масштабе поверх реального кадра.
+  assert.match(render(React.createElement(kitAt(0, { width: 720, height: 1280 }).BrowserFrame, { url: 'x' }, 'x')), /height:42\.7px/);
+  assert.match(render(React.createElement(kitAt(0, { width: 1080, height: 1920 }).BrowserFrame, { url: 'x', scale: 0.5 }, 'x')), /height:32px/);
+});
+
+test('BrowserFrame merges partial colors onto BROWSER_COLORS instead of losing the rest of the palette', () => {
+  const kit = kitAt(0);
+  // Раньше colors = {...} как дефолт параметра целиком заменялся переданным объектом: {bar:'#000'}
+  // терял page/text (undefined background/цвет текста). Теперь дефолты мержатся.
+  const html = render(React.createElement(kit.BrowserFrame, { url: 'x', colors: { bar: '#000000' } }, 'x'));
+  assert.match(html, /background:#000000/);
+  assert.match(html, new RegExp(`background:${kit.BROWSER_COLORS.page}`));
+  assert.match(html, new RegExp(`color:${kit.BROWSER_COLORS.text}`));
+});
+
+test('BrowserFrame URL pill defaults to a sans-serif font (overridable) and ellipsizes overflow', () => {
+  const kit = kitAt(0);
+  const html = render(React.createElement(kit.BrowserFrame, { url: 'example.com/very/long/path' }, 'x'));
+  assert.match(html, /font-family:sans-serif/);
+  assert.match(html, /text-overflow:ellipsis/);
+  const custom = render(React.createElement(kit.BrowserFrame, { url: 'x', fontFamily: 'Georgia, serif' }, 'x'));
+  assert.match(custom, /font-family:Georgia, serif/);
+});
+
+test('flashOpacity keeps the plan-asserted values at the default fps 25', () => {
+  const kit = kitAt(0);
   assert.equal(kit.flashOpacity(9, 10), 0);
   assert.ok(kit.flashOpacity(10, 10) > kit.flashOpacity(13, 10));
   assert.equal(kit.flashOpacity(16, 10), 0);
-  const html = render(React.createElement(kitAt(35).BrowserFrame, { url: 'example.com/page' },
-    React.createElement(kitAt(35).ScrollShot, { src: 'shots/page.png', from: 10, to: 60, maxScroll: 900 })));
-  assert.match(html, /example\.com\/page/);
-  assert.match(html, /<img src="\/static\/shots\/page\.png"/);
-  assert.match(html, /translateY\(-/);
 });
 
-// Отклонение от плана: frames в ShutterFlash — эталонные 25fps кадры (как REVEAL_FRAMES у
-// вставок), а не кадры композиции. ShutterFlash сам переводит их через ref25(frames, fps) перед
-// вызовом чистой flashOpacity, поэтому на 50 fps вспышка длится столько же по времени, сколько на
-// 25 fps: 6 эталонных кадров = 12 кадров композиции, ещё виден на at+11, погашен на at+12.
+// Отклонение от плана: frames в ShutterFlash/flashOpacity — эталонные 25fps кадры (как
+// REVEAL_FRAMES у вставок), а не кадры композиции. flashOpacity(frame, at, fps, frames) сам
+// переводит их через ref25(frames, fps) внутри себя (единый смысл frames везде, компонент просто
+// пробрасывает fps из useVideoConfig), поэтому на 50 fps вспышка длится столько же по времени,
+// сколько на 25 fps: 6 эталонных кадров = 12 кадров композиции, ещё виден на at+11, погашен на at+12.
 test('ShutterFlash keeps the same real-time flash duration at 50fps as at 25fps', () => {
   const at = 10;
   const visible = render(React.createElement(kitAt(at + 11, { fps: 50 }).ShutterFlash, { at }));
