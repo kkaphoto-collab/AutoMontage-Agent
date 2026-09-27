@@ -2,3 +2,4 @@
 export * from './time.js';
 export * from './words.js';
 export * from './safe.js';
+export * from './camera.js';
