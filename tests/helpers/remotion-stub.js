@@ -6,8 +6,9 @@ const real = require('remotion');
 // Известные ограничения этой подмены (важно для новых тестов на её основе):
 // - Sequence не сдвигает useCurrentFrame и не прячет children за пределами своего окна — это
 //   просто <div> с data-атрибутами from/durationInFrames, без реального поведения Remotion;
-// - Freeze игнорирует `active` и не замораживает children на заданном кадре — просто оборачивает
-//   их в <div data-freeze>;
+// - Freeze учитывает `active` (boolean или функция от текущего кадра, как в реальном Remotion,
+//   по умолчанию true) — активным рендерит <div data-freeze>, неактивным отдаёт children как есть,
+//   без обёртки; кадр внутри children всё равно не замораживает — useCurrentFrame не подменяет;
 // - renderToStaticMarkup никогда не выполняет эффекты, поэтому continueRender/cancelRender в
 //   таких тестах недостижимы — посчитать можно только вызовы delayRender;
 // - остальные компоненты Remotion (Loop, Series, Html5Audio и т. д.) не подменены и попадут в
@@ -20,7 +21,10 @@ function remotionStub({ frame = 0, fps = 25, width = 1080, height = 1920, durati
     useVideoConfig: () => ({ fps, width, height, durationInFrames }),
     AbsoluteFill: box('div'),
     Sequence: ({ children, from, durationInFrames }) => React.createElement('div', { 'data-sequence-from': from, 'data-sequence-duration': durationInFrames }, children),
-    Freeze: ({ children, frame: at }) => React.createElement('div', { 'data-freeze': at }, children),
+    Freeze: ({ children, frame: at, active = true }) => {
+      const isActive = typeof active === 'function' ? active(frame) : active;
+      return isActive ? React.createElement('div', { 'data-freeze': at }, children) : React.createElement(React.Fragment, null, children);
+    },
     OffthreadVideo: (props) => React.createElement('video', { src: props.src, muted: props.muted, 'data-trim-before': props.trimBefore }),
     Audio: (props) => React.createElement('audio', { src: props.src, 'data-volume': typeof props.volume === 'function' ? props.volume(0).toFixed(4) : props.volume }),
     Img: (props) => React.createElement('img', { src: props.src, style: props.style }),

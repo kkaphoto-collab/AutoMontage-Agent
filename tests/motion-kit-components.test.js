@@ -91,6 +91,109 @@ test('SpeakerLayer renders one muted video with the camera transform, fills side
   assert.equal(render(React.createElement(kitAt(120).SpeakerLayer, { src: 'speaker.mp4', track: away, lastFrame: 200 })), '');
 });
 
+// left/top задают положение верхнего левого угла ДО transform — это и есть transform-origin
+// «0 0» для scale(), поэтому он остаётся на месте, а правый/нижний угол уезжает на width/height*scale.
+function fillBoxFromStyle(style) {
+  const m = /scale\(([-\d.]+)\)/.exec(style.transform);
+  assert.ok(m, `unexpected fill transform: ${style.transform}`);
+  assert.equal(style.transformOrigin, '0 0');
+  const s = Number(m[1]);
+  const { left, top, width: w, height: h } = style;
+  return { left, top, right: left + w * s, bottom: top + h * s };
+}
+
+test('speakerFillStyle overscans the frame with a blur-safe margin (>= 15px, >= 3 sigma of blur 5px) on every side', () => {
+  const kit = kitAt(0);
+  for (const [width, height] of [[1080, 1920], [1920, 1080]]) {
+    const box = fillBoxFromStyle(kit.speakerFillStyle({ width, height }));
+    assert.ok(-box.left >= 15, `${width}x${height}: left margin ${-box.left}`);
+    assert.ok(-box.top >= 15, `${width}x${height}: top margin ${-box.top}`);
+    assert.ok(box.right - width >= 15, `${width}x${height}: right margin ${box.right - width}`);
+    assert.ok(box.bottom - height >= 15, `${width}x${height}: bottom margin ${box.bottom - height}`);
+  }
+});
+
+test('speakerTransform framing matches what the gates read: face moves by exactly dx/dy and non-fill shots leave no edge gap', () => {
+  // Прогон по всем официальным пресетам плюс панч на двух соотношениях сторон — та же проверка,
+  // что делают гейты G1/G2 по манифесту камеры. Регэксп жёстко требует порядок «translate() scale()»:
+  // если он поменяется на «scale() translate()», exec вернёт null и assert.ok упадёт на первом кадре.
+  const kit = kitAt(0);
+  for (const [width, height, face] of [[1080, 1920, { x: 540, y: 787 }], [1920, 1080, { x: 960, y: 443 }]]) {
+    const cfg = { fps: 25, width, height, durationInFrames: 400 };
+    const track = kit.compileCamera({
+      face,
+      shots: [{ at: 0, preset: 'W' }, { at: 2, preset: 'M' }, { at: 4, preset: 'L' }, { at: 6, preset: 'R' }, { at: 8, preset: 'top' }, { at: 10, preset: 'M', dx: 400 }],
+      punches: [{ at: 1, until: 1.8 }],
+    }, cfg);
+    for (let frame = 0; frame < 400; frame += 1) {
+      const state = kit.cameraAt(track, frame);
+      const style = kit.speakerTransform(state, track);
+      const m = /translate\(([-\d.]+)px, ([-\d.]+)px\) scale\(([-\d.]+)\)/.exec(style.transform);
+      assert.ok(m, `${width}x${height}@${frame}: unexpected transform ${style.transform}`);
+      const [dx, dy, s] = m.slice(1).map(Number);
+      const [ox, oy] = style.transformOrigin.split(' ').map((v) => parseFloat(v));
+      const map = (x, y) => [ox + dx + s * (x - ox), oy + dy + s * (y - oy)];
+      const [fx, fy] = map(face.x, face.y);
+      assert.ok(Math.abs(fx - (face.x + state.dx)) <= 0.01, `${width}x${height}@${frame}: face x off by ${fx - (face.x + state.dx)}`);
+      assert.ok(Math.abs(fy - (face.y + state.dy)) <= 0.01, `${width}x${height}@${frame}: face y off by ${fy - (face.y + state.dy)}`);
+      if (!state.fill) {
+        const [l, t] = map(0, 0);
+        const [r, b] = map(width, height);
+        assert.ok(l <= 0.1, `${width}x${height}@${frame}: left gap ${l}`);
+        assert.ok(t <= 0.1, `${width}x${height}@${frame}: top gap ${t}`);
+        assert.ok(width - r <= 0.1, `${width}x${height}@${frame}: right gap ${width - r}`);
+        assert.ok(height - b <= 0.1, `${width}x${height}@${frame}: bottom gap ${height - b}`);
+      }
+    }
+  }
+});
+
+test('speakerTransform stays pure geometry (no opacity) and only adds blur/brightness once they are visually meaningful', () => {
+  const kit = kitAt(0);
+  const track = { width: 1080, height: 1920, face: { x: 540, y: 787 } };
+  const base = { s: 1, dx: 0, dy: 0 };
+  assert.equal(kit.speakerTransform({ ...base, blur: 0, dim: 1, opacity: 0.4 }, track).opacity, undefined);
+  assert.equal(kit.speakerTransform({ ...base, blur: 0.05, dim: 1 }, track).filter, undefined);
+  assert.match(kit.speakerTransform({ ...base, blur: 0.06, dim: 1 }, track).filter, /^blur\(0\.06px\)$/);
+  assert.equal(kit.speakerTransform({ ...base, blur: 0, dim: 0.999 }, track).filter, undefined);
+  assert.match(kit.speakerTransform({ ...base, blur: 0, dim: 0.998 }, track).filter, /^brightness\(0\.998\)$/);
+  assert.match(kit.speakerTransform({ ...base, blur: 10, dim: 0.5 }, track).filter, /^blur\(10\.00px\) brightness\(0\.500\)$/);
+});
+
+test('SpeakerLayer forwards trimBefore to the underlying video and omits it when absent', () => {
+  const cfg = { fps: 25, width: 1080, height: 1920, durationInFrames: 250 };
+  const kit = kitAt(10);
+  const track = kit.compileCamera({ face: { x: 540, y: 787 }, shots: [{ at: 0, preset: 'W' }] }, cfg);
+  const trimmed = render(React.createElement(kit.SpeakerLayer, { src: 'speaker.mp4', track, lastFrame: 200, trimBefore: 25 }));
+  assert.match(trimmed, /data-trim-before="25"/);
+  const untrimmed = render(React.createElement(kit.SpeakerLayer, { src: 'speaker.mp4', track, lastFrame: 200 }));
+  assert.doesNotMatch(untrimmed, /data-trim-before/);
+});
+
+test('SpeakerLayer keeps Freeze mounted and toggles active instead of remounting the video across lastFrame', () => {
+  const cfg = { fps: 25, width: 1080, height: 1920, durationInFrames: 250 };
+  const track = kitAt(0).compileCamera({ face: { x: 540, y: 787 }, shots: [{ at: 0, preset: 'W' }, { at: 2, preset: 'L' }] }, cfg);
+  const atLast = render(React.createElement(kitAt(200).SpeakerLayer, { src: 'speaker.mp4', track, lastFrame: 200 }));
+  assert.doesNotMatch(atLast, /data-freeze/);
+  const afterLast = render(React.createElement(kitAt(201).SpeakerLayer, { src: 'speaker.mp4', track, lastFrame: 200 }));
+  // Кадр 201 внутри бокового плана L (fill:true) — заморожены обе копии: фон и основной кадр.
+  assert.equal((afterLast.match(/data-freeze="200"/g) || []).length, 2);
+});
+
+test('SpeakerLayer fades the fill and main copies together via the group opacity, not per-copy geometry', () => {
+  const cfg = { fps: 25, width: 1080, height: 1920, durationInFrames: 250 };
+  const compiled = kitAt(0).compileCamera({ face: { x: 540, y: 787 }, shots: [{ at: 0, preset: 'W' }, { at: 2, preset: 'L' }] }, cfg);
+  const away = kitAt(0).withAways(compiled, [{ from: 100, to: 150 }]);
+  const frame = 104; // уход поднялся наполовину (enterFrames=8): opacity строго между 0 и 1
+  const kit = kitAt(frame);
+  const state = kit.cameraAt(away, frame);
+  assert.ok(state.visible && state.opacity > 0.01 && state.opacity < 0.99, `нужен частичный уход, opacity=${state.opacity}`);
+  const html = render(React.createElement(kit.SpeakerLayer, { src: 'speaker.mp4', track: away, lastFrame: 200 }));
+  const outer = /<div style="([^"]*)"/.exec(html);
+  assert.ok(outer, `no styled outer div found: ${html}`);
+  assert.match(outer[1], /opacity:0\.5/);
+});
+
 test('kitBoxStyle draws exactly the box itemExtentAt measures for the same frame (the gate sees what is drawn)', () => {
   // kitBoxStyle/itemExtentAt — чистые функции с явным (item, frame, fps): один и тот же bundle
   // годится для любого frame/fps, стаб используется только когда нужно смонтировать сам KitBox.
