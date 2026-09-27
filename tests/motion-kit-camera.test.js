@@ -159,6 +159,18 @@ test('autoShots rejects words that are not an array', () => {
   assert.throws(() => kit.autoShots('слово', { endSec: 5 }), /массив/);
 });
 
+test('autoShots rejects invalid maxSec/minSec/cycle instead of hanging or returning junk', () => {
+  // maxSec: 0 делает шаг split() делением на ноль — без этой проверки функция зацикливается
+  // навсегда, поэтому тест не вызывает её напрямую без guard: проверяем, что исключение бросается
+  // ДО цикла (words: [] — мгновенный возврат, если бы guard'а не было).
+  const words = [];
+  assert.throws(() => kit.autoShots(words, { endSec: 10, maxSec: 0 }), /maxSec > 0/);
+  assert.throws(() => kit.autoShots(words, { endSec: 10, maxSec: -1 }), /maxSec > 0/);
+  assert.throws(() => kit.autoShots(words, { endSec: 10, maxSec: NaN }), /maxSec > 0/);
+  assert.throws(() => kit.autoShots(words, { endSec: 10, minSec: 3, maxSec: 2.2 }), /maxSec > 0/);
+  assert.throws(() => kit.autoShots(words, { endSec: 10, cycle: [] }), /maxSec > 0/);
+});
+
 // Камера задана в кадрах эталона 25 fps (время в секундах должно быть одинаковым на любом fps).
 const cfg50 = { fps: 50, width: 1080, height: 1920, durationInFrames: 500 };
 

@@ -123,6 +123,11 @@ const PUNCT = /[.,!?…:;]$/u;
 // длиннее лимита. Рядом с самым концом (ближе minSec к endSec) разрез не ставим, чтобы не оставить
 // вспышку короче minSec в последних кадрах.
 export function autoShots(words, { endSec, maxSec = 2.2, minSec = 1.2, cycle = ['W', 'M', 'W', 'L', 'W', 'R'] } = {}) {
+  // Проверяем ДО цикла split(): maxSec ≤ 0 делает шаг деления на ноль и зацикливает split()
+  // навсегда, а не просто выдаёт плохой результат — поэтому это исключение, а не тихий дефолт.
+  if (!(maxSec > 0) || !(minSec >= 0) || minSec > maxSec || !Array.isArray(cycle) || !cycle.length) {
+    throw new Error('autoShots: нужны maxSec > 0, 0 ≤ minSec ≤ maxSec и непустой cycle');
+  }
   if (!Array.isArray(words)) throw new Error('autoShots: words должен быть массивом слов транскрипта');
   const drift = (preset) => (preset === 'W' ? 'in' : 'out');
   const list = words.filter((w) => Number.isFinite(w?.e));
