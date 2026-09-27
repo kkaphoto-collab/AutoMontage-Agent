@@ -92,8 +92,11 @@ motion-vNN/
            sfx?: string|{name, vol?, leadFrames?}|null,
            type?: {from, to, sfx?}, props?: {...}}],
   inserts?: [{id?, kind: 'stock'|'screen'|'donor'|'scene', from, to, src?, cover?, kb?: [1.03, 1.1], sfx?}],
+                                        // cover по умолчанию true (кроме donor); cover-вставка не короче
+                                        // close + exit + 1 кадра (0,68 с при 25 fps); kb — пара чисел ≥ 1;
+                                        // stock рисует StockInsert, screen/scene — проект через FullscreenReveal
   sfx?: [{at, name, vol?, prio?}],       // звуки вне элементов
-  captions?: false | {chunk?: {...}, lane?: {x, y, w, h}, hide?: [{from, to}]},
+  captions?: false | {chunk?: {...}, lane?: {x, y, w, h}, hide?: [{from, to}]},  // hide: конечные from < to, с
   waivers?: [{gate: 'G1'|'G4'|'G11', reason}],
 }
 ```
@@ -104,7 +107,8 @@ motion-vNN/
 {version: 1, kitVersion, fps, width, height, durationInFrames, maxScale,
  camera: {s: [], requested: [], dx: [], dy: [], blur: [], opacity: []},   // по кадру
  texts: [{id, from, frames: [[l, t, r, b] | null]}  |  {id, from, until, static: [l, t, r, b]}],
- inserts: [{id, kind, from, to}],
+                                        // субтитры: caption-<n>, после окна hide — caption-<n>b, caption-<n>c…
+ inserts: [{id, kind, from, to, cover, src}],   // cover и src — с Task 22
  cues: {kept: [{id, name, startFrame, hitFrame, notable, bed}], dropped: [{id, conflictWith, reason}]},
  hook, waivers}
 ```
@@ -128,9 +132,10 @@ motion-vNN/
 | `src/motion-kit/safe.js` | прямоугольник safe-zone, выход за него |
 | `src/motion-kit/camera.js` | пресеты, `compileCamera`, `cameraAt`, `autoShots` |
 | `src/motion-kit/motion.js` | вход/жизнь/выход элементов, габариты по кадру, `typed` |
-| `src/motion-kit/inserts.js` | вставки и уход аватара под них |
-| `src/motion-kit/sfx.js` | звуковые события, выравнивание по пику, прореживание |
-| `src/motion-kit/captions.js` | нарезка субтитров, полоса субтитров |
+| `src/motion-kit/inserts.js` | вставки и уход аватара под них, карточка и кривые раскрытия/закрытия |
+| `src/motion-kit/sfx.js` | звуковые события, выравнивание по пику, прореживание, громкость `cueVolume` |
+| `src/motion-kit/captions.js` | нарезка субтитров, полоса, кадры видимости `captionSpans`, подгонка кегля |
+| `src/motion-kit/screen.js` | прокрутка скриншота долей страницы, вспышка затвора, цвета окна браузера |
 | `src/motion-kit/compile.js` | `compileLayer`, `compileItems`, `KIT_VERSION` |
 | `src/motion-kit/manifest.js` | `buildManifest` |
 | `src/motion-kit/core.js` | реэкспорт только чистых модулей (для Node и `plan.js`) |
@@ -140,8 +145,8 @@ motion-vNN/
 | `src/motion-kit/Inserts.jsx` | `FullscreenReveal`, `StockInsert` |
 | `src/motion-kit/Screen.jsx` | `BrowserFrame`, `ScrollShot`, `ShutterFlash` |
 | `src/motion-kit/SfxTrack.jsx` | звуковая дорожка |
-| `src/motion-kit/Subtitles.jsx` | субтитры с караоке |
-| `src/motion-kit/FontLoader.jsx` | загрузка шрифтов через `delayRender` |
+| `src/motion-kit/Subtitles.jsx` | субтитры с караоке в одну строку с подгонкой кегля |
+| `src/motion-kit/FontLoader.jsx` | гейт шрифтов: оборачивает слой, держит `delayRender` до загрузки |
 | `scripts/remotion-webpack.js` | + alias `@automontage/motion-kit` |
 | `scripts/motion-kit-node.js` | загрузка kit и слоя в Node через esbuild |
 | `scripts/qa/*.js` | профили, события камеры, гейты, аудио, отчёт |
@@ -1154,6 +1159,12 @@ export function awaysFromInserts(inserts, { fps = 25 } = {}) {
 
 `core.js`: добавить `export * from './inserts.js';`.
 
+**Состояние после пакета 1** (Task 15): `RETURN_FRAMES` удалён — спикер возвращается к началу закрытия,
+`away.to = to − ref25(CLOSE_FRAMES) − ref25(CAMERA_DEFAULTS.away.exitFrames)` (сток 2–4 с при 25 fps →
+`{from: 50, to: 84}`); `compileInserts(inserts, {fps, durationInFrames})` отклоняет cover-вставку короче
+`close + exit + 1` кадра и `kb`, который не пара чисел ≥ 1 (`KB_DEFAULT = [1.03, 1.1]`). Кривые раскрытия
+и закрытия (`revealCard`, `closeWindow`, `revealProgress`, `insertOpacity`) живут в этом же модуле.
+
 - [ ] **Step 4: Запустить**
 
 Run: `node --test tests/motion-kit-inserts.test.js`
@@ -1565,6 +1576,10 @@ export function compileLayer(plan, { fps, width, height, durationInFrames, words
 
 `core.js`: добавить `export * from './compile.js';`.
 
+**Состояние после пакета 1:** окно ухода стока 4–6 с — `camera.aways = [{from: 100, to: 134}]` (Task 15);
+каждое окно `captions.hide` проверяется — конечные `from < to` в секундах, иначе ошибка `captions.hide[i]`
+(Task 18).
+
 - [ ] **Step 4: Запустить**
 
 Run: `node --test tests/motion-kit-compile.test.js`
@@ -1681,6 +1696,10 @@ export function buildManifest(compiled) {
 
 `core.js`: добавить `export * from './manifest.js';`.
 
+**Состояние после пакета 1** (Task 18): кадры субтитров считает `captionSpans(chunks, {hide, fps,
+durationInFrames})` — те же, что рисует `Subtitles`, с вырезанными окнами `hide`; первый кусок chunk —
+`caption-<n>`, следующие после окна `hide` — `caption-<n>b`, `caption-<n>c`…
+
 - [ ] **Step 4: Запустить**
 
 Run: `node --test tests/motion-kit-manifest.test.js`
@@ -1695,15 +1714,23 @@ git commit -m "feat: build motion-kit gate manifest"
 
 ## Фаза 4. Компоненты kit (React)
 
-Компоненты тонкие: всё решение о кадре принимают чистые функции из фаз 2–3. Тесты рендерят разметку
-через `react-dom/server` с подменой хуков Remotion.
+Компоненты тонкие: всё решение о кадре принимают чистые функции — из фаз 2–3 и из чистых модулей,
+которые эта фаза дописывает (`inserts.js`, `screen.js`, `sfx.js`, `captions.js`): их же читает
+`buildManifest`, поэтому гейт видит ровно то, что нарисовано. Тесты рендерят разметку через
+`react-dom/server` с подменой хуков Remotion; эффекты там не выполняются, поэтому поведение в
+настоящем браузере (шрифты, подгонка субтитров) закрепляет отдельный тест по флагу
+`tests/motion-kit-render.test.js` (Task 18).
+
+Фрагменты ниже описывают код после ревью пакета 1 (исправления шли отдельными `fix:`-коммитами).
+Короткие файлы приведены целиком, длинные — сигнатурами и ключевым поведением; источник истины —
+код в `src/motion-kit/`.
 
 ### Task 13: Подмена Remotion для тестов и `KitBox`
 
 **Files:**
 - Create: `tests/helpers/remotion-stub.js`
 - Create: `src/motion-kit/KitBox.jsx`
-- Modify: `src/motion-kit/index.js`
+- Modify: `src/motion-kit/motion.js` (общий порог видимости `VISIBLE_MIN`/`isShown`), `src/motion-kit/index.js`
 - Test: `tests/motion-kit-components.test.js`
 
 - [ ] **Step 1: Написать падающий тест**
@@ -1714,15 +1741,23 @@ const React = require('react');
 const real = require('remotion');
 
 // Реальные spring/interpolate/Easing + подмена хуков и медиа-компонентов на простую разметку.
-function remotionStub({ frame = 0, fps = 25, width = 1080, height = 1920, calls = {} } = {}) {
+// Ограничения: Sequence не сдвигает useCurrentFrame и не прячет детей; Freeze учитывает `active`
+// (boolean или функция кадра), но кадр детей не замораживает; renderToStaticMarkup не выполняет
+// эффекты — continueRender/cancelRender недостижимы, считаются только вызовы delayRender.
+function remotionStub({ frame = 0, fps = 25, width = 1080, height = 1920, durationInFrames = 100000, calls = {} } = {}) {
   const box = (tag) => ({ children, style, ...rest }) => React.createElement(tag, { style, ...rest }, children);
   return {
     ...real,
     useCurrentFrame: () => frame,
-    useVideoConfig: () => ({ fps, width, height, durationInFrames: 100000 }),
+    useVideoConfig: () => ({ fps, width, height, durationInFrames }),
     AbsoluteFill: box('div'),
     Sequence: ({ children, from, durationInFrames }) => React.createElement('div', { 'data-sequence-from': from, 'data-sequence-duration': durationInFrames }, children),
-    Freeze: ({ children, frame: at }) => React.createElement('div', { 'data-freeze': at }, children),
+    Freeze: ({ children, frame: at, active = true }) => {
+      const isActive = typeof active === 'function' ? active(frame) : active;
+      const attrs = { 'data-freeze-active': isActive ? 'true' : 'false' };
+      if (isActive) attrs['data-freeze'] = at;
+      return React.createElement('div', attrs, children);
+    },
     OffthreadVideo: (props) => React.createElement('video', { src: props.src, muted: props.muted, 'data-trim-before': props.trimBefore }),
     Audio: (props) => React.createElement('audio', { src: props.src, 'data-volume': typeof props.volume === 'function' ? props.volume(0).toFixed(4) : props.volume }),
     Img: (props) => React.createElement('img', { src: props.src, style: props.style }),
@@ -1746,7 +1781,7 @@ const React = require('react');
 const { loadEsm } = require('./helpers/load-esm');
 const { remotionStub, render } = require('./helpers/remotion-stub');
 
-const kitAt = (frame, calls = {}) => loadEsm('src/motion-kit/index.js', { stubs: { remotion: remotionStub({ frame, calls }) } });
+const kitAt = (frame, { fps = 25, width, height, calls = {} } = {}) => loadEsm('src/motion-kit/index.js', { stubs: { remotion: remotionStub({ frame, fps, width, height, calls }) } });
 const item = (over = {}) => ({ id: 'title', kind: 'text', from: 10, until: 60, box: { x: 90, y: 300, w: 840, h: 200 },
   rot: 0, enter: { kind: 'fly' }, exit: { frames: 5, dir: 'down' }, life: {}, ...over });
 
@@ -1759,7 +1794,24 @@ test('KitBox places text at its box, marks it for safe-zone checks and hides out
   assert.equal(render(React.createElement(kitAt(5).KitBox, { item: item() }, 'Текст')), '');
   assert.doesNotMatch(render(React.createElement(kit.KitBox, { item: item({ kind: 'media' }) }, 'x')), /data-kit-text/);
 });
+
+test('KitBox hides frames that are inside [from, until) but not yet opaque, using the same rule as the manifest', () => {
+  const atFrom = kitAt(10);
+  assert.equal(render(React.createElement(atFrom.KitBox, { item: item() }, 'Текст')), '');
+  assert.equal(atFrom.itemExtentAt(item(), 10, 25), null);
+  const atLastFrame = kitAt(59);
+  assert.equal(render(React.createElement(atLastFrame.KitBox, { item: item() }, 'Текст')), '');
+  assert.equal(atLastFrame.itemExtentAt(item(), 59, 25), null);
+});
+
+test('KitBox refuses a raw plan item: needs compiled from/until frame numbers, not plan seconds', () => {
+  assert.throws(() => render(React.createElement(kitAt(30).KitBox, { item: { id: 'title', at: 0.4, until: 2.4 } }, 'Текст')),
+    /KitBox ждёт скомпилированный элемент с кадрами from\/until/);
+});
 ```
+
+Рядом — `bleed`-элемент виден без маркера `data-kit-text`, `transformOrigin: 'center center'` закреплён, а
+`kitBoxStyle` рисует ровно тот габарит, который для того же кадра меряет `itemExtentAt`.
 
 - [ ] **Step 2: Запустить**
 
@@ -1768,10 +1820,20 @@ Expected: FAIL — `kit.KitBox` is undefined (React: element type is invalid).
 
 - [ ] **Step 3: Реализовать**
 
+`motion.js` — один порог видимости для рендера и манифеста:
+
+```js
+export const VISIBLE_MIN = 0.01;
+export function isShown(anim) {
+  return anim.o > VISIBLE_MIN;
+}
+// itemExtentAt: `if (!isShown(a)) return null;` вместо собственного `a.o <= 0.01`.
+```
+
 ```jsx
 // src/motion-kit/KitBox.jsx
 import { useCurrentFrame, useVideoConfig } from 'remotion';
-import { animOf } from './motion.js';
+import { animOf, isShown } from './motion.js';
 
 export function kitBoxStyle(item, frame, fps) {
   const a = animOf(item, frame, fps);
@@ -1785,11 +1847,17 @@ export function kitBoxStyle(item, frame, fps) {
   };
 }
 
-// Любой текст и карточка слоя живут внутри KitBox: тогда гейт safe-zone видит их габарит.
+// Содержимое должно помещаться внутри item.box: гейт safe-zone (G5) видит именно этот
+// прямоугольник, а не то, что текст реально нарисовал внутри.
 export function KitBox({ item, children }) {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
-  if (frame < item.from || frame >= item.until) return null;
+  if (!Number.isFinite(item.from) || !Number.isFinite(item.until)) {
+    throw new Error(`KitBox ждёт скомпилированный элемент с кадрами from/until (compileLayer/compileItems), а получил секунды плана? (item.id=${item.id}, from=${item.from}, until=${item.until})`);
+  }
+  // animOf сам возвращает o:0 вне [from, until); isShown — та же проверка, что у манифеста.
+  const a = animOf(item, frame, fps);
+  if (!isShown(a)) return null;
   const marker = item.kind === 'media' || item.bleed ? {} : { 'data-kit-text': item.id };
   return <div {...marker} style={kitBoxStyle(item, frame, fps)}>{children}</div>;
 }
@@ -1805,7 +1873,7 @@ Expected: PASS.
 - [ ] **Step 5: Коммит**
 
 ```bash
-git add tests/helpers/remotion-stub.js src/motion-kit/KitBox.jsx src/motion-kit/index.js tests/motion-kit-components.test.js
+git add tests/helpers/remotion-stub.js src/motion-kit/KitBox.jsx src/motion-kit/motion.js src/motion-kit/index.js tests/motion-kit-components.test.js
 git commit -m "feat: add motion-kit KitBox"
 ```
 
@@ -1836,6 +1904,12 @@ test('SpeakerLayer renders one muted video with the camera transform, fills side
 });
 ```
 
+Дополнительно закрепить: `speakerFillStyle` перекрывает кадр с запасом ≥ 3σ размытия с каждой стороны;
+точка лица сдвигается ровно на `dx/dy` (то, что читают G1/G2), а планы без заливки не оставляют полосы у
+края; `speakerTransform` — чистая геометрия без `opacity`, `blur`/`brightness` только когда заметны;
+`trimBefore` пробрасывается в видео; `Freeze` смонтирован всегда (переключается `active`, видео не
+перемонтируется на `lastFrame`); прозрачность ухода — одна групповая `opacity` на обе копии.
+
 - [ ] **Step 2: Запустить**
 
 Run: `node --test tests/motion-kit-components.test.js`
@@ -1855,14 +1929,25 @@ export function speakerTransform(state, track) {
   return {
     position: 'absolute', left: 0, top: 0, width: track.width, height: track.height,
     transformOrigin: `${track.face.x}px ${track.face.y}px`,
-    transform: `translate(${state.dx.toFixed(2)}px, ${state.dy.toFixed(2)}px) scale(${state.s.toFixed(4)})`,
+    // translate() ДО scale(): сдвиг точки лица равен ровно dx/dy — то, что читают гейты из манифеста.
+    transform: `translate(${state.dx.toFixed(3)}px, ${state.dy.toFixed(3)}px) scale(${state.s.toFixed(6)})`,
     filter: filters.length ? filters.join(' ') : undefined,
-    opacity: state.opacity,
+  };
+}
+
+// Заливка краёв боковых планов: центрированный оверскан (по 10 % запаса с каждой стороны), иначе
+// blur(5px) съедает края и оставляет тёмную полосу на R- и top-планах.
+export function speakerFillStyle(track) {
+  const { width: w, height: h } = track;
+  return {
+    position: 'absolute', left: -0.1 * w, top: -0.1 * h, width: w / 4, height: h / 4,
+    transform: 'scale(4.8)', transformOrigin: '0 0',
+    filter: 'blur(5px) brightness(0.7)',
   };
 }
 
 // Аватар — один OffthreadVideo muted по глобальному таймкоду (голос идёт из мастер-видео).
-// Хвост после lastFrame заморожен; открытые края боковых планов залиты уменьшенной размытой копией.
+// SpeakerLayer стоит на верхнем уровне композиции, не внутри <Sequence>.
 export function SpeakerLayer({ src, track, lastFrame, trimBefore = 0 }) {
   const frame = useCurrentFrame();
   const state = cameraAt(track, frame);
@@ -1871,25 +1956,26 @@ export function SpeakerLayer({ src, track, lastFrame, trimBefore = 0 }) {
     <OffthreadVideo src={staticFile(src)} muted trimBefore={trimBefore || undefined}
       style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
   );
-  const held = Number.isFinite(lastFrame) && frame > lastFrame ? <Freeze frame={lastFrame}>{video}</Freeze> : video;
+  // lastFrame — кадр композиции (для клипа из N кадров с trimBefore = T это N − 1 − T). Freeze
+  // смонтирован всегда, когда lastFrame конечен; переключается только active.
+  const held = Number.isFinite(lastFrame)
+    ? <Freeze frame={lastFrame} active={frame > lastFrame}>{video}</Freeze>
+    : video;
   return (
-    <AbsoluteFill>
-      {state.fill ? (
-        <div style={{ position: 'absolute', left: 0, top: 0, width: track.width / 4, height: track.height / 4,
-          transform: 'scale(4.4)', transformOrigin: '0 0', filter: 'blur(5px) brightness(0.7)' }}>{held}</div>
-      ) : null}
+    <AbsoluteFill style={{ opacity: state.opacity }}>
+      {state.fill ? <div style={speakerFillStyle(track)}>{held}</div> : null}
       <div style={speakerTransform(state, track)}>{held}</div>
     </AbsoluteFill>
   );
 }
 ```
 
-`index.js`: добавить `export { SpeakerLayer, speakerTransform } from './SpeakerLayer.jsx';`.
+`index.js`: добавить `export { SpeakerLayer, speakerTransform, speakerFillStyle } from './SpeakerLayer.jsx';`.
 
 - [ ] **Step 4: Запустить**
 
 Run: `node --test tests/motion-kit-components.test.js`
-Expected: PASS (2 теста).
+Expected: PASS.
 
 - [ ] **Step 5: Коммит**
 
@@ -1900,10 +1986,16 @@ git commit -m "feat: add motion-kit SpeakerLayer with live camera"
 
 ### Task 15: Полноэкранная вставка и сток с Ken Burns
 
+Тайминг вставки — чистые функции в `inserts.js` (их же видит манифест и камера), компонент только
+рисует. Стартовая карточка раскрытия — safe-зона кадра (`revealCard`), а не константа под 1080×1920:
+для 9:16 это инсеты `{top: 250, right: 130, bottom: 420, left: 70}`, для 16:9 — `{60, 80, 60, 80}`.
+Спикер полностью возвращается (резкий и непрозрачный) к началу закрытия вставки, чтобы сворачивающаяся
+карточка не открывала размытое лицо.
+
 **Files:**
 - Create: `src/motion-kit/Inserts.jsx`
-- Modify: `src/motion-kit/index.js`
-- Test: `tests/motion-kit-components.test.js` (дописать)
+- Modify: `src/motion-kit/inserts.js`, `src/motion-kit/index.js`
+- Test: `tests/motion-kit-components.test.js`, `tests/motion-kit-inserts.test.js` (дописать)
 
 - [ ] **Step 1: Дописать тест**
 
@@ -1918,56 +2010,130 @@ test('FullscreenReveal opens from a safe-zone card to the full frame and closes 
   const html = render(React.createElement(kitAt(70).StockInsert, { insert }));
   assert.match(html, /data-kit-bleed="stock-1"/);
   assert.match(html, /data-sequence-from="50"/);
+  assert.match(html, /data-sequence-duration="50"/);
   assert.match(html, /<video src="\/static\/stock\/a\.mp4" muted=""/);
   assert.equal(render(React.createElement(kitAt(120).StockInsert, { insert })), '');
 });
+
+test('revealCard derives its card insets from the safe-zone rect for both aspect ratios', () => {
+  const kit = kitAt(0);
+  const safe = kit.safeRect(1080, 1920);
+  assert.deepEqual(kit.revealCard(1080, 1920), { top: safe.top, right: 1080 - safe.right, bottom: 1920 - safe.bottom, left: safe.left });
+});
 ```
+
+```js
+// tests/motion-kit-inserts.test.js (дописать)
+test('covering inserts send the speaker away and bring it back before the insert closes', () => {
+  const aways = kit.awaysFromInserts(kit.compileInserts([
+    { kind: 'stock', from: 2, to: 4 }, { kind: 'donor', from: 5, to: 6 },
+  ], { fps: 25 }));
+  assert.deepEqual(aways, [{ from: 50, to: 84 }]);
+});
+```
+
+Дополнительно закрепить: на 25/30/50 fps спикер резкий и непрозрачный на всём close и не гаснет, пока
+виден зазор карточки; cover-вставка короче `close + exit + 1` кадра отклоняется с минимумом в кадрах и
+секундах (и пометкой, если её обрезал конец ролика), donor под это правило не попадает; `kb` не пара
+чисел ≥ 1 — ошибка с id вставки; close заканчивается на последнем отрисованном кадре (`to − 1`), где
+`FullscreenReveal` уже ничего не рисует; радиус карточки масштабируется с разрешением; сырой insert из
+`plan.js` (секунды) — явная ошибка компонента.
 
 - [ ] **Step 2: Запустить**
 
-Run: `node --test tests/motion-kit-components.test.js`
+Run: `node --test tests/motion-kit-components.test.js tests/motion-kit-inserts.test.js`
 Expected: FAIL — `kit.revealProgress is not a function`.
 
 - [ ] **Step 3: Реализовать**
 
-```jsx
-// src/motion-kit/Inserts.jsx
-import { AbsoluteFill, OffthreadVideo, Sequence, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
-import { EASE, prog } from './motion.js';
-import { ref25 } from './time.js';
+`inserts.js` — константы, проверки и кривые (кадры — эталонных 25 fps, `ref25` переводит под fps):
 
+```js
 export const REVEAL_FRAMES = 9;
 export const CLOSE_FRAMES = 6;
-const CARD = { top: 420, right: 56, bottom: 420, left: 130 };
+export const KB_DEFAULT = Object.freeze([1.03, 1.1]);
 
-// 0 — вставка ещё карточкой внутри safe-зоны, 1 — на весь кадр; null — вставки нет.
-// REVEAL/CLOSE — кадры эталонных 25 fps, пересчитываются под fps композиции.
+// compileInserts(inserts, {fps, durationInFrames}) дополнительно:
+//  - kb = insert.kb ?? KB_DEFAULT, иначе ошибка «inserts[i] (id): kb должен быть парой чисел ≥ 1»;
+//  - cover = insert.cover ?? kind !== 'donor'; cover-вставка короче
+//    ref25(CLOSE_FRAMES) + ref25(CAMERA_DEFAULTS.away.exitFrames) + 1 кадров (17 кадров = 0,68 с при 25 fps)
+//    — ошибка: камера не успеет вернуть спикера в фокус до начала закрытия.
+
+// Спикер уходит на входе и полностью возвращается к началу close.
+export function awaysFromInserts(inserts, { fps = 25 } = {}) {
+  const close = ref25(CLOSE_FRAMES, fps);
+  const exit = ref25(CAMERA_DEFAULTS.away.exitFrames, fps);
+  return inserts.filter((insert) => insert.cover)
+    .map((insert) => ({ from: insert.from, to: Math.max(insert.from + 1, insert.to - close - exit) }));
+}
+
+// Инсеты карточки от той же safe-зоны, что и текст (подходят и 9:16, и 16:9).
+export function revealCard(width, height) {
+  const safe = safeRect(width, height);
+  return { top: safe.top, right: width - safe.right, bottom: height - safe.bottom, left: safe.left };
+}
+
+// Одно close-окно на revealProgress и insertOpacity; close заканчивается на to − 1.
+export function closeWindow(insert, fps = 25) {
+  const end = insert.to - 1;
+  const start = Math.min(insert.to - ref25(CLOSE_FRAMES, fps), end - 1);
+  return { start, end };
+}
+
+// 0 — карточка внутри safe-зоны, 1 — весь кадр; null — вставки нет.
 export function revealProgress(frame, insert, fps = 25) {
   if (frame < insert.from || frame >= insert.to) return null;
   const reveal = ref25(REVEAL_FRAMES, fps);
-  const close = ref25(CLOSE_FRAMES, fps);
-  return prog(frame, insert.from, reveal) * (1 - prog(frame, insert.to - close, close, EASE.inOut));
+  const { start, end } = closeWindow(insert, fps);
+  return prog(frame, insert.from, reveal) * (1 - prog(frame, start, end - start, EASE.inOut));
 }
+
+// Угасание вставки: 1 до начала close, 0 на последнем кадре (to − 1).
+export function insertOpacity(frame, insert, fps = 25) {
+  if (frame < insert.from || frame >= insert.to) return null;
+  const { start, end } = closeWindow(insert, fps);
+  return 1 - prog(frame, start, end - start, EASE.inOut);
+}
+
+// Для всех компонентов вставок: from/to — целые кадры compileInserts, а не секунды plan.js.
+export function assertCompiledInsert(insert, component) { /* иначе Error «<component> ждёт скомпилированную вставку…» */ }
+```
+
+`RETURN_FRAMES` удалён: окно возврата теперь выводится из `CLOSE_FRAMES` и `CAMERA_DEFAULTS.away.exitFrames`.
+
+```jsx
+// src/motion-kit/Inserts.jsx
+import { AbsoluteFill, OffthreadVideo, Sequence, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
+import { assertCompiledInsert, insertOpacity, KB_DEFAULT, revealCard, revealProgress } from './inserts.js';
+import { isShown } from './motion.js';
 
 export function FullscreenReveal({ insert, children }) {
+  assertCompiledInsert(insert, 'FullscreenReveal');
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
+  const { fps, width, height } = useVideoConfig();
   const p = revealProgress(frame, insert, fps);
   if (p === null) return null;
+  const opacity = insertOpacity(frame, insert, fps);
+  if (!isShown({ o: opacity })) return null; // тот же порог, что у KitBox
+  const card = revealCard(width, height);
   const inset = (value) => (value * (1 - p)).toFixed(1);
-  const clipPath = `inset(${inset(CARD.top)}px ${inset(CARD.right)}px ${inset(CARD.bottom)}px ${inset(CARD.left)}px round ${(28 * (1 - p)).toFixed(1)}px)`;
-  return <AbsoluteFill data-kit-bleed={insert.id} style={{ clipPath }}>{children}</AbsoluteFill>;
+  const radius = 28 * (width / (height > width ? 1080 : 1920));
+  const clipPath = `inset(${inset(card.top)}px ${inset(card.right)}px ${inset(card.bottom)}px ${inset(card.left)}px round ${(radius * (1 - p)).toFixed(1)}px)`;
+  return <AbsoluteFill data-kit-bleed={insert.id} style={{ clipPath, opacity }}>{children}</AbsoluteFill>;
 }
 
-// Сток играет с собственного нуля (Sequence), в отличие от аватара; звук стока всегда выключен.
+// Скомпилированная вставка, компонент на верхнем уровне композиции (глобальный кадр для Ken Burns и
+// revealProgress). Внутренняя Sequence нужна только видео стока: оно играет с собственного нуля.
 export function StockInsert({ insert, children = null }) {
+  assertCompiledInsert(insert, 'StockInsert');
   const frame = useCurrentFrame();
+  const kb = insert.kb || KB_DEFAULT;
   const t = Math.min(1, Math.max(0, (frame - insert.from) / Math.max(1, insert.to - insert.from)));
-  const zoom = insert.kb[0] + (insert.kb[1] - insert.kb[0]) * t;
+  const zoom = kb[0] + (kb[1] - kb[0]) * t;
   return (
     <FullscreenReveal insert={insert}>
       <AbsoluteFill style={{ transform: `scale(${zoom.toFixed(4)})` }}>
-        <Sequence from={insert.from} layout="none">
+        <Sequence from={insert.from} durationInFrames={insert.to - insert.from} layout="none">
           <OffthreadVideo src={staticFile(insert.src)} muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
         </Sequence>
       </AbsoluteFill>
@@ -1977,118 +2143,176 @@ export function StockInsert({ insert, children = null }) {
 }
 ```
 
-`index.js`: добавить `export { CLOSE_FRAMES, FullscreenReveal, REVEAL_FRAMES, StockInsert, revealProgress } from './Inserts.jsx';`.
+Полноэкранные вставки `screen`/`scene` (тоже `cover`) проект рисует сам: `<FullscreenReveal insert={insert}>`
+со своим содержимым — иначе спикер уходит под вставку, а кадр остаётся чёрным (шаблон, Task 29).
+
+`index.js`: добавить `export { FullscreenReveal, StockInsert } from './Inserts.jsx';` (чистые
+`revealProgress`, `revealCard`, `closeWindow`, `insertOpacity`, `REVEAL_FRAMES`, `CLOSE_FRAMES`, `KB_DEFAULT`
+приходят через `core.js`).
 
 - [ ] **Step 4: Запустить**
 
-Run: `node --test tests/motion-kit-components.test.js`
-Expected: PASS (3 теста).
+Run: `node --test tests/motion-kit-components.test.js tests/motion-kit-inserts.test.js tests/motion-kit-compile.test.js`
+Expected: PASS (в `motion-kit-compile.test.js` окно ухода стока 4–6 с теперь `{from: 100, to: 134}`).
 
 - [ ] **Step 5: Коммит**
 
 ```bash
-git add src/motion-kit/Inserts.jsx src/motion-kit/index.js tests/motion-kit-components.test.js
+git add src/motion-kit/Inserts.jsx src/motion-kit/inserts.js src/motion-kit/index.js tests/motion-kit-components.test.js tests/motion-kit-inserts.test.js tests/motion-kit-compile.test.js
 git commit -m "feat: add motion-kit fullscreen reveal and stock insert"
 ```
 
 ### Task 16: Скриншот-карточка: окно браузера, прокрутка, вспышка
 
+Прокрутка задаётся долей страницы (`scroll` 0..1), а не пикселями: `plan.js` не знает натуральную высоту
+скриншота, и фиксированный `maxScroll` упирался в белый низ картинки. Длительность вспышки — эталонные
+кадры 25 fps, одинаковое время на любом fps.
+
 **Files:**
-- Create: `src/motion-kit/Screen.jsx`
-- Modify: `src/motion-kit/index.js`
+- Create: `src/motion-kit/screen.js` (чистая математика), `src/motion-kit/Screen.jsx`
+- Modify: `src/motion-kit/core.js` (`export * from './screen.js';`), `src/motion-kit/index.js`
 - Test: `tests/motion-kit-components.test.js` (дописать)
 
 - [ ] **Step 1: Дописать тест**
 
 ```js
-test('screenshot card shows the URL, scrolls smoothly and flashes once', () => {
+test('scrollShare eases smoothly from 0 at from to the full share at to, and clamps', () => {
   const kit = kitAt(0);
-  assert.equal(kit.scrollOffset(10, 10, 60, 900), 0);
-  assert.equal(kit.scrollOffset(60, 10, 60, 900), 900);
-  assert.ok(kit.scrollOffset(35, 10, 60, 900) > 300 && kit.scrollOffset(35, 10, 60, 900) < 600);
+  assert.equal(kit.scrollShare(10, 10, 60, 1), 0);
+  assert.equal(kit.scrollShare(60, 10, 60, 1), 1);
+  assert.equal(kit.scrollShare(35, 10, 60, 1), 0.5);
+  assert.equal(kit.scrollShare(70, 10, 60, 1), 1);
+  assert.equal(kit.scrollShare(35, 10, 60, 1.5), kit.scrollShare(35, 10, 60, 1));
+});
+
+test('ScrollShot fills the window via objectPosition, and the card shows the URL', () => {
+  const html = render(React.createElement(kitAt(35).BrowserFrame, { url: 'example.com/page' },
+    React.createElement(kitAt(35).ScrollShot, { src: 'shots/page.png', from: 10, to: 60, scroll: 1 })));
+  assert.match(html, /example\.com\/page/);
+  assert.match(html, /<img src="\/static\/shots\/page\.png"/);
+  assert.match(html, /object-position:50% 50\.00%/);
+  assert.match(html, /object-fit:cover/);
+  assert.doesNotMatch(html, /translateY/);
+});
+
+test('flashOpacity keeps its values at 25 fps and ShutterFlash lasts the same time at 50 fps', () => {
+  const kit = kitAt(0);
   assert.equal(kit.flashOpacity(9, 10), 0);
   assert.ok(kit.flashOpacity(10, 10) > kit.flashOpacity(13, 10));
   assert.equal(kit.flashOpacity(16, 10), 0);
-  const html = render(React.createElement(kitAt(35).BrowserFrame, { url: 'example.com/page' },
-    React.createElement(kitAt(35).ScrollShot, { src: 'shots/page.png', from: 10, to: 60, maxScroll: 900 })));
-  assert.match(html, /example\.com\/page/);
-  assert.match(html, /<img src="\/static\/shots\/page\.png"/);
-  assert.match(html, /translateY\(-/);
+  assert.notEqual(render(React.createElement(kitAt(21, { fps: 50 }).ShutterFlash, { at: 10 })), '');
+  assert.equal(render(React.createElement(kitAt(22, { fps: 50 }).ShutterFlash, { at: 10 })), '');
 });
 ```
+
+Дополнительно закрепить: хром `BrowserFrame` масштабируется с `k = короткая сторона / 1080` (`scale`
+переопределяет), частичные `colors` сливаются с `BROWSER_COLORS`, адрес в «таблетке» — `sans-serif` по
+умолчанию и обрезается многоточием (`display: block`).
 
 - [ ] **Step 2: Запустить**
 
 Run: `node --test tests/motion-kit-components.test.js`
-Expected: FAIL — `kit.scrollOffset is not a function`.
+Expected: FAIL — `kit.scrollShare is not a function`.
 
 - [ ] **Step 3: Реализовать**
 
+```js
+// src/motion-kit/screen.js
+import { EASE, prog } from './motion.js';
+import { ref25 } from './time.js';
+
+export const BROWSER_COLORS = Object.freeze({ bar: '#1f2328', text: '#c9d1d9', page: '#ffffff' });
+export const FLASH_FRAMES = 6; // эталонные кадры 25 fps
+
+// Доля страницы 0..1 к концу окна [from, to]; scroll клэмпится в [0, 1].
+export function scrollShare(frame, from, to, scroll = 1) {
+  const share = Math.min(1, Math.max(0, scroll));
+  return share * prog(frame, from, Math.max(1, to - from), EASE.inOut);
+}
+
+// frame/at — кадры композиции; frames — эталонные кадры 25 fps, переводятся через fps здесь же.
+export function flashOpacity(frame, at, fps = 25, frames = FLASH_FRAMES) {
+  const span = ref25(frames, fps);
+  if (frame < at || frame >= at + span) return 0;
+  return 0.6 * (1 - (frame - at) / span);
+}
+```
+
 ```jsx
 // src/motion-kit/Screen.jsx
-import { AbsoluteFill, Img, staticFile, useCurrentFrame } from 'remotion';
-import { EASE, prog } from './motion.js';
+import { AbsoluteFill, Img, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
+import { BROWSER_COLORS, FLASH_FRAMES, flashOpacity, scrollShare } from './screen.js';
 
 const DOTS = ['#ff5f57', '#febc2e', '#28c840'];
 
-// Нейтральное окно браузера для настоящих скриншотов; цвета задаёт дизайн ролика.
-export function BrowserFrame({ url, children, colors = { bar: '#1f2328', text: '#c9d1d9', page: '#ffffff' }, radius = 22 }) {
+// Нейтральное окно браузера для настоящих скриншотов. Размеры хрома (radius, полоса, точки, адрес)
+// заданы в px эталона 1080 и умножаются на k = короткая сторона / 1080; scale — явный override.
+export function BrowserFrame({ url, children, colors = {}, radius = 22, scale, fontFamily = 'sans-serif' }) {
+  const { width, height } = useVideoConfig();
+  const k = scale ?? Math.min(width, height) / 1080;
+  const c = { ...BROWSER_COLORS, ...colors };
+  const px = (value) => Math.round(value * k * 10) / 10;
   return (
-    <div style={{ width: '100%', height: '100%', borderRadius: radius, overflow: 'hidden', background: colors.page,
-      boxShadow: '0 24px 60px rgba(0,0,0,.35)', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ height: 64, flexShrink: 0, background: colors.bar, display: 'flex', alignItems: 'center', gap: 12, padding: '0 20px' }}>
-        {DOTS.map((c) => <span key={c} style={{ width: 16, height: 16, borderRadius: 8, background: c }} />)}
-        <span style={{ marginLeft: 16, flex: 1, height: 36, borderRadius: 18, background: 'rgba(255,255,255,.08)', color: colors.text,
-          fontSize: 22, display: 'flex', alignItems: 'center', padding: '0 18px', whiteSpace: 'nowrap', overflow: 'hidden' }}>{url}</span>
+    <div style={{ width: '100%', height: '100%', borderRadius: px(radius), overflow: 'hidden', background: c.page,
+      boxShadow: `0 ${px(24)}px ${px(60)}px rgba(0,0,0,.35)`, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ height: px(64), flexShrink: 0, background: c.bar, display: 'flex', alignItems: 'center', gap: px(12), padding: `0 ${px(20)}px` }}>
+        {DOTS.map((color) => <span key={color} style={{ width: px(16), height: px(16), borderRadius: px(8), background: color }} />)}
+        <span style={{ marginLeft: px(16), flex: 1, height: px(36), borderRadius: px(18), background: 'rgba(255,255,255,.08)', color: c.text,
+          fontFamily, fontSize: px(22), display: 'block', lineHeight: `${px(36)}px`, padding: `0 ${px(18)}px`,
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{url}</span>
       </div>
       <div style={{ position: 'relative', flex: 1, overflow: 'hidden' }}>{children}</div>
     </div>
   );
 }
 
-export function scrollOffset(frame, from, to, maxScroll) {
-  return maxScroll * prog(frame, from, Math.max(1, to - from), EASE.inOut);
-}
-
-// Длинный скриншот страницы прокручивается внутри окна — это «действие» на экране, а не pan/zoom картинки.
-export function ScrollShot({ src, from, to, maxScroll = 0 }) {
+// Скриншот заполняет окно (cover) и едет долей страницы через objectPosition — физически не может
+// уехать мимо своего низа. Широкий скриншот по вертикали не прокручивается, а обрезается по бокам.
+export function ScrollShot({ src, from, to, scroll = 1 }) {
   const frame = useCurrentFrame();
-  const offset = scrollOffset(frame, from, to, maxScroll);
-  return <Img src={staticFile(src)} style={{ width: '100%', display: 'block', transform: `translateY(-${offset.toFixed(1)}px)` }} />;
+  const p = scrollShare(frame, from, to, scroll);
+  return (
+    <Img src={staticFile(src)} style={{
+      position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover',
+      objectPosition: `50% ${(100 * p).toFixed(2)}%`,
+    }} />
+  );
 }
 
-export function flashOpacity(frame, at, frames = 6) {
-  if (frame < at || frame >= at + frames) return 0;
-  return 0.6 * (1 - (frame - at) / frames);
-}
-
-export function ShutterFlash({ at, frames = 6 }) {
+// at — кадр композиции; в слое это hitFrame звука затвора (см. шаблон, Task 29).
+export function ShutterFlash({ at, frames = FLASH_FRAMES }) {
   const frame = useCurrentFrame();
-  const opacity = flashOpacity(frame, at, frames);
+  const { fps } = useVideoConfig();
+  const opacity = flashOpacity(frame, at, fps, frames);
   return opacity > 0 ? <AbsoluteFill style={{ background: '#ffffff', opacity }} /> : null;
 }
 ```
 
-`index.js`: добавить `export { BrowserFrame, ScrollShot, ShutterFlash, flashOpacity, scrollOffset } from './Screen.jsx';`.
+`core.js`: добавить `export * from './screen.js';`. `index.js`: добавить
+`export { BrowserFrame, ScrollShot, ShutterFlash } from './Screen.jsx';`.
 
 - [ ] **Step 4: Запустить**
 
 Run: `node --test tests/motion-kit-components.test.js`
-Expected: PASS (4 теста).
+Expected: PASS.
 
 - [ ] **Step 5: Коммит**
 
 ```bash
-git add src/motion-kit/Screen.jsx src/motion-kit/index.js tests/motion-kit-components.test.js
+git add src/motion-kit/screen.js src/motion-kit/Screen.jsx src/motion-kit/core.js src/motion-kit/index.js tests/motion-kit-components.test.js
 git commit -m "feat: add motion-kit screenshot card parts"
 ```
 
 ### Task 17: Звуковая дорожка `SfxTrack`
 
+Громкость — чистая функция в `sfx.js`: хвост затухает одно и то же время на любом fps, `cue.vol` не
+поднимает уровень выше самого звука, неверный `sfxMasterDb` останавливает рендер на кадре 0, а не на
+первом звуке.
+
 **Files:**
 - Create: `src/motion-kit/SfxTrack.jsx`
-- Modify: `src/motion-kit/index.js`
-- Test: `tests/motion-kit-components.test.js` (дописать)
+- Modify: `src/motion-kit/sfx.js` (`dbToGain`, `cueVolume`, `assertMasterDb`), `src/motion-kit/index.js`
+- Test: `tests/motion-kit-components.test.js`, `tests/motion-kit-sfx.test.js` (дописать)
 
 - [ ] **Step 1: Дописать тест**
 
@@ -2104,35 +2328,63 @@ test('SfxTrack plays each kept cue at -5 dB by default and fades its tail', () =
   assert.match(html, /data-sequence-from="90" data-sequence-duration="30"/);
   assert.match(html, /src="\/static\/sfx\/whoosh-in\.wav"/);
 });
+
+test('cueVolume clamps cue.vol, rejects a bad masterDb, and SfxTrack fails on render before any cue plays', () => {
+  const kit = kitAt(0);
+  const cue = { id: 'x@0', file: 'sfx/x.wav', startFrame: 0, durationFrames: 30, vol: 1.8 };
+  assert.ok(Math.abs(kit.cueVolume(cue, 0, 0) - 1) < 1e-9);
+  for (const bad of [3, null, NaN]) assert.throws(() => kit.cueVolume(cue, 0, bad), /layer\.json → sfxMasterDb/);
+  assert.throws(() => render(React.createElement(kit.SfxTrack, { cues: [], masterDb: 3 })), /sfxMasterDb/);
+});
 ```
+
+Дополнительно закрепить: на 50 fps хвост 60-кадрового звука затухает за последние 10 кадров (то же
+время, что 5 кадров на 25 fps); `SfxTrack` передаёт в `cueVolume` и `masterDb`, и fps композиции.
 
 - [ ] **Step 2: Запустить**
 
-Run: `node --test tests/motion-kit-components.test.js`
+Run: `node --test tests/motion-kit-components.test.js tests/motion-kit-sfx.test.js`
 Expected: FAIL — `kit.cueVolume is not a function`.
 
 - [ ] **Step 3: Реализовать**
 
-```jsx
-// src/motion-kit/SfxTrack.jsx
-import { Audio, Sequence, staticFile } from 'remotion';
-
+```js
+// src/motion-kit/sfx.js (дописать)
 export const dbToGain = (db) => 10 ** (db / 20);
 
-// masterDb −5 — утверждённый уровень эффектов относительно «горячих» громкостей в плане;
-// движок затем подмешивает звук слоя ещё на −18 dB (audioMode "mix").
-export function cueVolume(cue, localFrame, masterDb = -5) {
-  const fade = Math.max(1, Math.min(5, Math.floor(cue.durationFrames / 3)));
-  const tail = Math.min(1, Math.max(0, (cue.durationFrames - localFrame) / fade));
-  return cue.vol * dbToGain(masterDb) * tail;
+// masterDb −5 — утверждённый уровень эффектов; движок затем подмешивает звук слоя ещё на −18 dB
+// (audioMode "mix", D5/D6). undefined держит дефолт −5; null и всё, что не конечное число ≤ 0, — ошибка.
+export function assertMasterDb(masterDb) {
+  if (!(Number.isFinite(masterDb) && masterDb <= 0)) {
+    throw new Error(`layer.json → sfxMasterDb должен быть конечным числом ≤ 0 (по умолчанию −5 дБ) — получено ${String(masterDb)}`);
+  }
 }
 
+// fade — ref25(5, fps) эталонных кадров: одинаковое время затухания на любом fps.
+export function cueVolume(cue, localFrame, masterDb = -5, fps = 25) {
+  assertMasterDb(masterDb);
+  const vol = Math.min(1, Math.max(0, cue.vol));
+  const fade = Math.max(1, Math.min(ref25(5, fps), Math.floor(cue.durationFrames / 3)));
+  const tail = Math.min(1, Math.max(0, (cue.durationFrames - localFrame) / fade));
+  return vol * dbToGain(masterDb) * tail;
+}
+```
+
+```jsx
+// src/motion-kit/SfxTrack.jsx
+import { Audio, Sequence, staticFile, useVideoConfig } from 'remotion';
+import { assertMasterDb, cueVolume } from './sfx.js';
+
+// Одна Sequence на каждый звук из compiled.cues.kept. masterDb проверяется сразу: в Remotion volume()
+// зовётся только пока Sequence звука активна, и ошибка иначе всплыла бы через минуты рендера.
 export function SfxTrack({ cues, masterDb = -5 }) {
+  assertMasterDb(masterDb);
+  const { fps } = useVideoConfig();
   return (
     <>
       {cues.map((cue) => (
         <Sequence key={cue.id} from={cue.startFrame} durationInFrames={cue.durationFrames} layout="none">
-          <Audio src={staticFile(cue.file)} volume={(f) => cueVolume(cue, f, masterDb)} />
+          <Audio src={staticFile(cue.file)} volume={(f) => cueVolume(cue, f, masterDb, fps)} />
         </Sequence>
       ))}
     </>
@@ -2140,26 +2392,32 @@ export function SfxTrack({ cues, masterDb = -5 }) {
 }
 ```
 
-`index.js`: добавить `export { SfxTrack, cueVolume, dbToGain } from './SfxTrack.jsx';`.
+`index.js`: добавить `export { SfxTrack } from './SfxTrack.jsx';` (`cueVolume`, `dbToGain`,
+`assertMasterDb` — через `core.js`).
 
 - [ ] **Step 4: Запустить**
 
-Run: `node --test tests/motion-kit-components.test.js`
-Expected: PASS (5 тестов).
+Run: `node --test tests/motion-kit-components.test.js tests/motion-kit-sfx.test.js`
+Expected: PASS.
 
 - [ ] **Step 5: Коммит**
 
 ```bash
-git add src/motion-kit/SfxTrack.jsx src/motion-kit/index.js tests/motion-kit-components.test.js
+git add src/motion-kit/SfxTrack.jsx src/motion-kit/sfx.js src/motion-kit/index.js tests/motion-kit-components.test.js tests/motion-kit-sfx.test.js
 git commit -m "feat: add motion-kit SfxTrack"
 ```
 
 ### Task 18: Субтитры и загрузка шрифтов
 
+Видимость субтитра — по кадру, одной чистой функцией `captionSpans` для `Subtitles` и `buildManifest`:
+гейт видит ровно те кадры, где текст нарисован, включая вырезанные окна `hide`. Строка всегда одна
+(`nowrap`), кегль подгоняется по ширине полосы только после загрузки шрифта. `FontLoader` — гейт: он
+оборачивает весь слой и не пускает детей в кадр, пока шрифты не загрузились.
+
 **Files:**
-- Create: `src/motion-kit/Subtitles.jsx`, `src/motion-kit/FontLoader.jsx`
-- Modify: `src/motion-kit/index.js`
-- Test: `tests/motion-kit-components.test.js` (дописать)
+- Create: `src/motion-kit/Subtitles.jsx`, `src/motion-kit/FontLoader.jsx`, `tests/motion-kit-render.test.js` (по флагу)
+- Modify: `src/motion-kit/captions.js`, `src/motion-kit/manifest.js`, `src/motion-kit/compile.js`, `src/motion-kit/index.js`
+- Test: `tests/motion-kit-components.test.js`, `tests/motion-kit-captions.test.js`, `tests/motion-kit-manifest.test.js`, `tests/motion-kit-compile.test.js` (дописать)
 
 - [ ] **Step 1: Дописать тест**
 
@@ -2167,97 +2425,138 @@ git commit -m "feat: add motion-kit SfxTrack"
 test('Subtitles show the active chunk with karaoke dimming and respect hide windows', () => {
   const kit = kitAt(0);
   const chunks = [{ units: [{ t: 'Раз', s: 0, e: 0.3 }, { t: 'два', s: 0.4, e: 0.6 }], s: 0, e: 0.6, show: 1, text: 'Раз два' }];
-  assert.equal(kit.activeChunk(chunks, 0.5).text, 'Раз два');
-  assert.equal(kit.activeChunk(chunks, 1.2), null);
-  assert.equal(kit.activeChunk(chunks, 0.5, [{ from: 0.4, to: 0.9 }]), null);
+  assert.equal(kit.activeChunk(chunks, 0.5, [], 25).text, 'Раз два');
+  assert.equal(kit.activeChunk(chunks, 1.2, [], 25), null);
+  assert.equal(kit.activeChunk(chunks, 0.5, [{ from: 0.4, to: 0.9 }], 25), null);
+  assert.throws(() => kit.activeChunk(chunks, 0.5), /activeChunk: fps/);
   const lane = { x: 70, y: 1398, w: 880, h: 84 };
   const html = render(React.createElement(kitAt(5).Subtitles, { chunks, lane }));
   assert.match(html, /data-kit-text="captions"/);
+  assert.match(html, /white-space:nowrap/);
   assert.match(html, /opacity:1">Раз/);
   assert.match(html, /opacity:0\.45">.*два/);
 });
 
-test('FontLoader blocks rendering until fonts load', () => {
+test('FontLoader delays the render and, without a DOM (SSR/tests), renders its children at once', () => {
   const calls = {};
-  const kit = kitAt(0, calls);
-  render(React.createElement(kit.FontLoader, { faces: [{ family: 'KitOnest', file: 'fonts/Onest.ttf' }] }));
+  const html = render(React.createElement(kitAt(0, { calls }).FontLoader, { faces: [{ family: 'KitOnest', file: 'fonts/Onest.ttf' }] },
+    React.createElement('span', null, 'hi')));
   assert.equal(calls.delay, 1);
+  assert.match(html, /<span>hi<\/span>/);
 });
 ```
 
+```js
+// tests/motion-kit-manifest.test.js (дописать; cfg и plan — из теста Task 12)
+test('captions.hide splits a single chunk into caption-N/caption-Nb, and a hide window covering it fully drops it', () => {
+  const words = [{ w: 'Раз', t: 'Раз', s: 0.1, e: 0.3 }, { w: 'два', t: 'два', s: 0.4, e: 0.6 }]; // один chunk
+  const captionsOf = (hide) => kit.buildManifest(kit.compileLayer({ ...plan, items: [], captions: { hide } }, { ...cfg, words }))
+    .texts.filter((t) => t.id.startsWith('caption-'));
+  const [first, second] = captionsOf([{ from: 0.3, to: 0.4 }]);
+  assert.deepEqual([first.id, second.id], ['caption-1', 'caption-1b']);
+  assert.ok(first.until <= second.from);
+  assert.equal(captionsOf([{ from: 0, to: 2 }]).length, 0);
+});
+```
+
+Дополнительно закрепить: `captionSpans(chunks, {hide, fps, durationInFrames})` — `secToFrame`, клэмп
+концом ролика, два chunk никогда не делят кадр, окно `hide` в секундах вставки вырезает ровно её кадры,
+без fps/durationInFrames — явная ошибка; кадры `Subtitles` совпадают с `caption-*` манифеста на 25 и
+30 fps; первое слово горит с первого видимого кадра; кегль и тень — от разрешения (`44·k`), а не от
+высоты полосы; `accentWords` сравниваются через `normWord`; `compileLayer` отклоняет `captions.hide` с
+`from ≥ to` или нечисловыми границами; `FontLoader` без детей в браузере бросает ошибку, регистрирует
+`FontFace` в `document.fonts` синхронно (до `load()`), не добавляет одинаковое лицо повторно при
+ремаунте и отпускает `delayRender`, если размонтирован до загрузки шрифтов.
+
 - [ ] **Step 2: Запустить**
 
-Run: `node --test tests/motion-kit-components.test.js`
-Expected: FAIL — `kit.activeChunk is not a function`.
+Run: `node --test tests/motion-kit-components.test.js tests/motion-kit-captions.test.js tests/motion-kit-manifest.test.js`
+Expected: FAIL — `kit.Subtitles` не определён.
 
 - [ ] **Step 3: Реализовать**
 
-```jsx
-// src/motion-kit/Subtitles.jsx
-import { useCurrentFrame, useVideoConfig } from 'remotion';
+`captions.js` — чистые функции (Node, `plan.js`, манифест):
 
-export function activeChunk(chunks, sec, hide = []) {
-  if (hide.some((h) => sec >= h.from && sec < h.to)) return null;
-  return chunks.find((chunk) => sec >= chunk.s && sec < chunk.show) || null;
-}
+```js
+// Кадры видимости: [{index, from, until}] — индекс chunk и его кусок после вырезания hide.
+// fps — положительное конечное число, durationInFrames — конечное число или Infinity, иначе Error.
+export function captionSpans(chunks, { hide = [], fps, durationInFrames } = {}) { /* … */ }
 
-// 1–4 слова в полосе внутри safe-зоны; ещё не сказанные слова приглушены (караоке).
-export function Subtitles({ chunks, lane, hide = [], fontFamily = 'sans-serif', fontSize = 44, color = '#ffffff',
-  dimOpacity = 0.45, accent = null, accentWords = [] }) {
-  const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
-  const sec = frame / fps;
-  const chunk = activeChunk(chunks, sec, hide);
-  if (!chunk) return null;
-  return (
-    <div data-kit-text="captions" style={{ position: 'absolute', left: lane.x, top: lane.y, width: lane.w, height: lane.h,
-      display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', overflow: 'hidden' }}>
-      <span style={{ fontFamily, fontSize, fontWeight: 800, color, lineHeight: 1.1, textShadow: '0 3px 12px rgba(0,0,0,.55)' }}>
-        {chunk.units.map((unit, i) => (
-          <span key={i} style={{ opacity: sec >= unit.s ? 1 : dimOpacity,
-            color: accent && accentWords.includes(unit.t.replace(/[.,!?…:;]+$/u, '')) ? accent : undefined }}>
-            {i ? ' ' : ''}{unit.t}
-          </span>
-        ))}
-      </span>
-    </div>
-  );
-}
+// Секунды → тот же кадр, что видит captionSpans. fps обязателен (без дефолта 25).
+export function activeChunk(chunks, sec, hide = [], fps) { /* … */ }
+
+// Только уменьшает base под тесную полосу: lineHeight 1,1 + запас под тень 12/44.
+export function captionFontSize({ base, laneH }) { /* Math.min(base, laneH / (1.1 + 12 / 44)) */ }
+
+// Ширина одной строки: base влезает — base без лишних замеров; иначе бинарный поиск от 60 % base
+// (round1) до base с шагом 0,25 и результат floor(low·4)/4; даже 60 % не влезает — Error с текстом chunk.
+export function fitCaptionWidth({ base, available, text, measure }) { /* … */ }
+export function narrowFitBounds({ low, high, fits }) { /* один шаг поиска */ }
+export const round1 = (value) => Math.round(value * 10) / 10;
 ```
 
-```jsx
-// src/motion-kit/FontLoader.jsx
-import { useEffect, useState } from 'react';
-import { cancelRender, continueRender, delayRender, staticFile } from 'remotion';
+`manifest.js` — субтитры из `captionSpans(chunks, {hide, fps, durationInFrames})`: первый кусок chunk
+получает `caption-<n>`, следующие после окна `hide` — `caption-<n>b`, `caption-<n>c`…; у всех один
+`static` — прямоугольник полосы. `compile.js` — каждое окно `captions.hide[i]` обязано иметь конечные
+`from < to` в секундах, иначе `Error('captions.hide[i]: нужны конечные from < to в секундах …')`.
 
-// Шрифты слоя из public/fonts (OFL с кириллицей); рендер ждёт их загрузки.
-export function FontLoader({ faces }) {
-  const [handle] = useState(() => delayRender('motion-kit: шрифты'));
-  useEffect(() => {
-    Promise.all(faces.map((face) => new FontFace(face.family, `url(${staticFile(face.file)})`, { weight: face.weight || '100 900' })
-      .load().then((loaded) => document.fonts.add(loaded))))
-      .then(() => continueRender(handle))
-      .catch((error) => cancelRender(error));
-  }, [faces, handle]);
-  return null;
-}
+`src/motion-kit/Subtitles.jsx` — `Subtitles({ chunks, lane, hide = [], fontFamily = 'sans-serif', fontSize,
+color = '#ffffff', dimOpacity = 0.45, accent = null, accentWords = [] })` и `firstFontFamily(fontFamily)`:
+
+- стоит на верхнем уровне композиции (не внутри чужой `<Sequence>`): кадр и `durationInFrames` — глобальные;
+- видимый chunk — `captionSpans(chunks, {hide, fps, durationInFrames})` по текущему кадру; слово горит с
+  кадра `secToFrame(unit.s, fps)`, ещё не сказанные — с `dimOpacity`;
+- `k = width / (height > width ? 1080 : 1920)`, `base = fontSize ?? 44 * k`,
+  `size = round1(captionFontSize({ base, laneH: lane.h }))`, тень `0 size·3/44 size·12/44`;
+- полоса `data-kit-text="captions"` с `overflow: hidden`, текст `whiteSpace: 'nowrap'`, `fontWeight: 800`;
+- `useLayoutEffect` по `[chunk?.text, lane.w, size, shadowBlur, fontFamily]`: синхронно сбрасывает кегль к
+  `size`, берёт `delayRender`, ждёт `document.fonts.load('800 <size>px "<первое семейство>"')`, затем
+  `fitCaptionWidth` с `available = lane.w − 2·shadowBlur`; ошибка — `cancelRender`, `continueRender` в
+  `finally` и в очистке эффекта;
+- `accentWords` сравниваются через `normWord` (регистр, «ё», хвостовая пунктуация).
+
+`src/motion-kit/FontLoader.jsx`:
+
+```jsx
+// Гейт шрифтов: оборачивает всё, что ждёт шрифт. Дети не рисуются, пока faces не загрузились; всё это
+// время Remotion держит кадр через delayRender. Без document (SSR/тесты) дети рисуются сразу.
+// faces — модульная константа: регистрация и загрузка — один раз на монтирование.
+export function FontLoader({ faces, children }) { /* в браузере без children — Error «FontLoader: не передан children…» */ }
+
+// Синхронно: каждый FontFace сразу в fontSet (до load()), затем load() — из инициализатора useState, до
+// любого layout-эффекта в дереве. Реестр по fontSet (ключ family+file+weight) отдаёт уже
+// зарегистрированное лицо: ремаунт не добавляет дубликат. Один family без явного weight дважды — Error.
+export function registerFontFaces(faces, { FontFaceImpl, fontSet, toUrl }) { /* → [{face, promise}] */ }
+export function settleFontFaces(registered) { /* ждёт все load(), ошибка — с family и file */ }
+export function loadFontFaces(faces, deps) { /* register + settle одним промисом */ }
+// Эффект монтирования: готово → onReady, сбой → onError; очистка отменяет оба и зовёт release —
+// размонтированный до загрузки гейт отпускает delayRender.
+export function watchFontFaces(registered, { onReady, onError, release }) { /* → cleanup */ }
+export function settleOnce() { /* continueRender на один handle — только один раз */ }
 ```
 
-`index.js`: добавить
-`export { Subtitles, activeChunk } from './Subtitles.jsx';` и `export { FontLoader } from './FontLoader.jsx';`.
+Использование в слое — `<FontLoader faces={FONTS}>…весь слой…</FontLoader>`, где
+`const FONTS = [{ family: 'KitOnest', file: 'fonts/Onest.ttf' }, …]` объявлен на уровне модуля.
 
-Во втором `span` субтитров пробел идёт внутри того же элемента, поэтому шаблон `opacity:0\.45">.*два`
-совпадает с `opacity:0.45"> два`.
+`tests/motion-kit-render.test.js` — настоящий бандл и headless Chromium, включается
+`AUTOMONTAGE_TEST_MOTION_RENDER=1` (по умолчанию `skipped`): concurrent-рендер 40 кадров с chunk от кадра 2
+для заглавной фразы и для строчной при `fontSize: 60` — кегль одинаков на каждом кадре, текст не обрезан,
+а кегль совпадает с независимым эталонным поиском в пределах 0,1 px; `FontLoader` рядом с `Subtitles`
+(без детей) валит настоящий рендер явной ошибкой.
+
+`index.js`: добавить `export { Subtitles, firstFontFamily } from './Subtitles.jsx';` и
+`export { FontLoader, loadFontFaces, registerFontFaces, settleFontFaces, settleOnce, watchFontFaces } from './FontLoader.jsx';`
+(`captionSpans`, `activeChunk`, `fitCaptionWidth`, `captionFontSize` — через `core.js`).
 
 - [ ] **Step 4: Запустить**
 
-Run: `node --test tests/motion-kit-components.test.js`
-Expected: PASS (7 тестов).
+Run: `node --test tests/motion-kit-*.test.js`, затем `AUTOMONTAGE_TEST_MOTION_RENDER=1 node --test tests/motion-kit-render.test.js`
+Expected: PASS; тест по флагу — 3 теста примерно за 10 с.
 
 - [ ] **Step 5: Коммит**
 
 ```bash
-git add src/motion-kit/Subtitles.jsx src/motion-kit/FontLoader.jsx src/motion-kit/index.js tests/motion-kit-components.test.js
+git add src/motion-kit/Subtitles.jsx src/motion-kit/FontLoader.jsx src/motion-kit/captions.js src/motion-kit/manifest.js src/motion-kit/compile.js src/motion-kit/index.js tests/motion-kit-components.test.js tests/motion-kit-captions.test.js tests/motion-kit-manifest.test.js tests/motion-kit-compile.test.js tests/motion-kit-render.test.js
 git commit -m "feat: add motion-kit subtitles and font loader"
 ```
 
@@ -2317,6 +2616,9 @@ test('broken layers explain what is missing or failing', (t) => {
   assert.throws(() => buildLayerManifest(dir), /не собирается plan\.js/);
 });
 ```
+
+Субтитры манифеста считает `captionSpans` (Task 18): единственный кусок фикстуры (слово 0,2–0,6 с, без
+`hide`) даёт ровно `caption-1` на кадрах 5–25, поэтому `texts[0].id === 'caption-1'` (карточек нет).
 
 - [ ] **Step 2: Запустить**
 
@@ -2609,6 +2911,17 @@ git commit -m "feat: add QA gate profiles and reports"
 поэтому слабые срабатывания ближе `punchWindow` к настоящему событию отбрасываются.
 План — непрерывный отрезок резкого видимого спикера между событиями.
 
+**Уточнения после ревью пакета 1:**
+- Под cover-вставкой спикер возвращается резким и непрозрачным уже к началу её закрытия (Task 15): в
+  манифесте kit `opacity = 1`, `blur = 0` с кадра `to − ref25(CLOSE_FRAMES)` (сток 2–4 с при 25 fps — с
+  кадра 94, а не 100). Поэтому план после вставки начинается за 0,24 с до её конца и в G1 до 0,24 с
+  длиннее, чем «от конца вставки». Это верно — лицо уже видно под сворачивающейся карточкой; эти кадры
+  из плана не вычитать.
+- Закрепить тестом на настоящем манифесте kit (`loadKitCore` из Task 19, тест ниже): сток 2–4 с, один
+  статичный план — `speakerPlans` начинает план после вставки с кадра 94.
+- При калибровке порогов 2,2/2,5 с (пробный слой, Task 49) учитывать эту добавку: план после вставки,
+  упёршийся в порог, чинится событием (джамп-кат, панч-ин), а не порогом.
+
 **Files:**
 - Create: `scripts/qa/timeline-gates.js`
 - Create: `tests/helpers/manifest-fixtures.js`
@@ -2676,6 +2989,17 @@ test('a 2.3 s plan warns, and a 6 % cut is a weak cut that does not reset the pl
   const weak = manifestFixture({ seconds: 4, camera: (f) => ({ s: f < 60 ? 1 : 1.08 }) });
   assert.equal(gateWeakCuts(weak, avatar).status, 'warn');
   assert.equal(gateRhythm(weak, avatar).value, 4);
+});
+
+test('the plan after a cover insert starts when the insert begins to close, not at its end', () => {
+  const { speakerPlans } = require('../scripts/qa/timeline-gates');
+  const kit = require('../scripts/motion-kit-node').loadKitCore();
+  const cfg = { fps: 25, width: 1080, height: 1920, durationInFrames: 150, words: [], sfxLibrary: { sounds: {} } };
+  const m = kit.buildManifest(kit.compileLayer({ captions: false, items: [],
+    camera: { face: { x: 540, y: 787 }, shots: [{ at: 0, preset: 'W', drift: 'none' }] },
+    inserts: [{ kind: 'stock', from: 2, to: 4, src: 'stock/a.mp4' }] }, cfg));
+  const plans = speakerPlans(m.camera, detectCameraEvents(m.camera, avatar.camera), 25);
+  assert.ok(plans.some((plan) => plan.from === 94), JSON.stringify(plans));
 });
 ```
 
@@ -2766,7 +3090,7 @@ module.exports = { detectCameraEvents, gateRhythm, gateWeakCuts, speakerPlans };
 - [ ] **Step 4: Запустить**
 
 Run: `node --test tests/qa-timeline-gates.test.js`
-Expected: PASS (4 теста).
+Expected: PASS (5 тестов).
 
 - [ ] **Step 5: Коммит**
 
@@ -2777,9 +3101,18 @@ git commit -m "feat: add speaker rhythm and weak cut gates"
 
 ### Task 22: G3 «Масштаб», G4 «Спикер в первые 3 с», G10 «Сток», G11 «Чужое видео»
 
+**Уточнения после ревью пакета 1:**
+- Cover-вставка с 0 с закрывает лицо карточкой, а G4 без правки проходит: уход камеры гаснет не мгновенно
+  (`CAMERA_DEFAULTS.away.enterFrames` = 8 кадров), и `opacity > 0.01` первых кадров засчитывается как
+  «спикер виден». Правило: кадр внутри `[from, to)` вставки с `cover: true` — «спикер не виден», какой бы ни
+  была `camera.opacity`.
+- Для этого манифест несёт `cover` у вставок, а заодно `src` (его читает предупреждение о коротком стоке в
+  Task 38): одно изменение `buildManifest` и контракта манифеста.
+
 **Files:**
 - Modify: `scripts/qa/timeline-gates.js`
-- Test: `tests/qa-timeline-gates.test.js` (дописать)
+- Modify: `src/motion-kit/manifest.js` (`cover` и `src` у вставок)
+- Test: `tests/qa-timeline-gates.test.js` (дописать), `tests/motion-kit-manifest.test.js` (дописать)
 
 - [ ] **Step 1: Дописать тест**
 
@@ -2813,14 +3146,42 @@ test('a donor clip longer than 3 s in a row stops the layer', () => {
   assert.equal(g.status, 'fail');
   assert.equal(g.value, 4);
 });
+
+test('BAD CASE: a cover insert from 0 s hides the speaker even while the camera is still fading out', () => {
+  const insert = (cover, to = 80) => [{ id: 'stock-1', kind: 'stock', from: 0, to, cover }];
+  assert.equal(gateHook(manifestFixture({ inserts: insert(true) }), avatar).status, 'fail');
+  assert.equal(gateHook(manifestFixture({ inserts: insert(false) }), avatar).status, 'pass');
+  assert.equal(gateHook(manifestFixture({ inserts: insert(true, 25) }), avatar).status, 'pass');
+});
+```
+
+```js
+// tests/motion-kit-manifest.test.js (дописать)
+test('manifest inserts carry cover and src for the gates', () => {
+  const m = kit.buildManifest(kit.compileLayer({ ...plan, inserts: [
+    { kind: 'stock', from: 1, to: 2, src: 'stock/a.mp4' }, { kind: 'donor', from: 2.5, to: 3, src: 'donor.mp4' },
+  ] }, cfg));
+  assert.deepEqual(m.inserts, [
+    { id: 'stock-1', kind: 'stock', from: 25, to: 50, cover: true, src: 'stock/a.mp4' },
+    { id: 'donor-2', kind: 'donor', from: 63, to: 75, cover: false, src: 'donor.mp4' },
+  ]);
+});
 ```
 
 - [ ] **Step 2: Запустить**
 
-Run: `node --test tests/qa-timeline-gates.test.js`
-Expected: FAIL — `gateScale is not a function`.
+Run: `node --test tests/qa-timeline-gates.test.js tests/motion-kit-manifest.test.js`
+Expected: FAIL — `gateScale is not a function`; в манифесте у вставок нет `cover`/`src`.
 
 - [ ] **Step 3: Реализовать (дописать в `timeline-gates.js` и в `module.exports`)**
+
+`src/motion-kit/manifest.js` — вставки в манифесте:
+
+```js
+inserts: compiled.inserts.map((insert) => ({ id: insert.id, kind: insert.kind, from: insert.from, to: insert.to, cover: insert.cover, src: insert.src })),
+```
+
+`timeline-gates.js`:
 
 ```js
 function gateScale(manifest, profile) {
@@ -2839,7 +3200,9 @@ function gateScale(manifest, profile) {
 function gateHook(manifest, profile) {
   const frames = Math.min(manifest.durationInFrames, Math.round(profile.hook.sec * manifest.fps));
   const threshold = `спикер виден до ${fmt(profile.hook.sec)} с`;
-  if (manifest.camera.opacity.slice(0, frames).some((o) => o > 0.01)) return gate('G4', 'Спикер в первые 3 с', { threshold });
+  // Под cover-вставкой лицо закрыто карточкой, даже пока уход камеры ещё гаснет.
+  const covered = (f) => manifest.inserts.some((i) => i.cover && f >= i.from && f < i.to);
+  if (manifest.camera.opacity.slice(0, frames).some((o, f) => o > 0.01 && !covered(f))) return gate('G4', 'Спикер в первые 3 с', { threshold });
   if (manifest.hook === 'enumeration') {
     return gate('G4', 'Спикер в первые 3 с', { threshold, hint: 'хук-перечисление: спикер появляется после объектов' });
   }
@@ -2874,13 +3237,13 @@ function gateDonor(manifest, profile) {
 
 - [ ] **Step 4: Запустить**
 
-Run: `node --test tests/qa-timeline-gates.test.js`
-Expected: PASS (8 тестов).
+Run: `node --test tests/qa-timeline-gates.test.js tests/motion-kit-manifest.test.js`
+Expected: PASS (10 тестов в `qa-timeline-gates.test.js`).
 
 - [ ] **Step 5: Коммит**
 
 ```bash
-git add scripts/qa/timeline-gates.js tests/qa-timeline-gates.test.js
+git add scripts/qa/timeline-gates.js src/motion-kit/manifest.js tests/qa-timeline-gates.test.js tests/motion-kit-manifest.test.js
 git commit -m "feat: add scale, hook, stock and donor gates"
 ```
 
@@ -2919,6 +3282,9 @@ test('static caption lanes are checked once and pass inside the safe zone', () =
   assert.equal(gateSafeZone(m).status, 'pass');
 });
 ```
+
+Субтитры в манифесте — `caption-<n>`, а кусок после окна `hide` — `caption-<n>b`, `caption-<n>c`… (Task 18):
+у каждого свой `from/until` и тот же `static`; гейт проверяет их одинаково и называет в `spans` по id.
 
 - [ ] **Step 2: Запустить**
 
@@ -2959,7 +3325,7 @@ function gateSafeZone(manifest) {
 - [ ] **Step 4: Запустить**
 
 Run: `node --test tests/qa-timeline-gates.test.js`
-Expected: PASS (11 тестов). Первый видимый кадр влёта — 26-й (1,04 с): на 25-м прозрачность 0.
+Expected: PASS (13 тестов). Первый видимый кадр влёта — 26-й (1,04 с): на 25-м прозрачность 0.
 
 - [ ] **Step 5: Коммит**
 
@@ -3041,7 +3407,7 @@ function runTimelineGates(manifest, profile) {
 - [ ] **Step 4: Запустить**
 
 Run: `node --test tests/qa-timeline-gates.test.js`
-Expected: PASS (13 тестов).
+Expected: PASS (15 тестов).
 
 - [ ] **Step 5: Коммит**
 
@@ -3516,6 +3882,14 @@ git commit -m "feat: measure voice and music balance on real preview stems"
 
 ### Task 28: Подкоманда `layer` в CLI и общие помощники
 
+**Уточнения после ревью пакета 1:**
+- `readLayerJson(layerDir)` сразу проверяет `sfxMasterDb` общей проверкой kit:
+  `loadKitCore().assertMasterDb(layer.sfxMasterDb)` (Task 17, сообщение «layer.json → sfxMasterDb должен быть
+  конечным числом ≤ 0 …» — одно с `SfxTrack`). Поле обязательно: `layer new` всегда пишет −5. Без этого
+  неверное значение всплывает только на рендере слоя.
+- Тест в `tests/layer-cli.test.js`: `readLayerJson` на `layer.json` с `sfxMasterDb: 3`, `null` и без поля
+  бросает ошибку с `layer.json` и `sfxMasterDb`; с `-5` — возвращает объект.
+
 **Files:**
 - Create: `scripts/layer/cli.js`, `scripts/layer/common.js`
 - Modify: `scripts/cli.js` (справка + маршрут до перехода в `build.js`)
@@ -3638,6 +4012,7 @@ module.exports = { USAGE, main, parseArgs };
 const fs = require('node:fs');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
+const { loadKitCore } = require('../motion-kit-node');
 const { readProjectManifest, resolveProjectPath } = require('../project/workspace');
 
 const LAYER_NAME = /^motion-v\d{2,3}$/u;
@@ -3664,7 +4039,13 @@ function nextLayerName(projectDir) {
 }
 
 const readJson = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
-const readLayerJson = (layerDir) => readJson(path.join(layerDir, 'layer.json'));
+
+// Неверный sfxMasterDb ловится при чтении, а не на рендере: та же проверка, что в SfxTrack.
+function readLayerJson(layerDir) {
+  const layer = readJson(path.join(layerDir, 'layer.json'));
+  loadKitCore().assertMasterDb(layer.sfxMasterDb);
+  return layer;
+}
 const sha256File = (file) => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 
 function writeJson(file, value) {
@@ -3716,8 +4097,22 @@ git commit -m "feat: add automontage layer command group"
 ### Task 29: Шаблон слоя
 
 Шаблон нейтральный: без медиа в Git, стиль и цвета — только заглушки, которые ролик заменяет своим
-дизайном. В нём уже работают живая камера, звуковая дорожка, вставка стока, скриншот-карточка,
-субтитры; на любом исходнике он проходит гейты (проверяется в Task 33).
+дизайном. В нём уже работают живая камера, звуковая дорожка, вставка стока, скриншот-карточка со
+вспышкой затвора, субтитры; на любом исходнике он проходит гейты (проверяется в Task 33).
+
+**Уточнения после ревью пакета 1:**
+- `FontLoader` — гейт (Task 18): `<FontLoader faces={FONTS}>…весь слой…</FontLoader>`, а не соседний
+  пустой элемент (без детей в браузере он бросает ошибку). `FONTS` — модульная константа.
+- `ScrollShot` принимает `scroll` — долю страницы 0..1, а не `maxScroll` в px (Task 16). Окно прокрутки
+  карточки — от конца входа до начала выхода: `from + ref25(8, fps)` … `until − ref25(5, fps)`.
+- Вспышка — после входа карточки и ровно на ударе звука затвора: `plan.js` ставит затвор отдельным
+  `sfx` через 0,32 с (вход `mask` — 8 эталонных кадров) после начала карточки, `Root.jsx` рисует
+  `<ShutterFlash at={cue.hitFrame} />` для каждого оставшегося после `thinCues` звука с ролью `shutter`.
+- Вставки `screen`/`scene` имеют `cover: true`: `Root.jsx` рисует их через `FullscreenReveal` с содержимым
+  ролика (`InsertContent` из `scenes.jsx`), иначе спикер уходит под вставку, а кадр остаётся чёрным.
+  Полноэкранный `screen` в 9:16 — окно браузера внутри safe-зоны (`revealCard`), не от края до края.
+- `activeChunk` требует fps: если `plan.js` сверяет режиссуру с субтитрами —
+  `activeChunk(chunks, sec, hide, fps)`.
 
 **Files:**
 - Create: `templates/motion-layer/src/index.jsx`, `Root.jsx`, `plan.js`, `scenes.jsx`, `templates/motion-layer/README.md`
@@ -3742,10 +4137,16 @@ test('template imports only the kit, never another reel or an absolute path', ()
   }
   assert.match(read('src/plan.js'), /from '@automontage\/motion-kit\/core'/);
   assert.doesNotMatch(read('src/plan.js'), /from '@automontage\/motion-kit'[;\n]/);
-  for (const part of ['SpeakerLayer', 'StockInsert', 'KitBox', 'Subtitles', 'SfxTrack', 'FontLoader']) {
-    assert.match(read('src/Root.jsx'), new RegExp(`<${part}`));
+  const root = read('src/Root.jsx');
+  for (const part of ['SpeakerLayer', 'StockInsert', 'FullscreenReveal', 'KitBox', 'ShutterFlash', 'Subtitles', 'SfxTrack', 'FontLoader']) {
+    assert.match(root, new RegExp(`<${part}`));
   }
+  // FontLoader — гейт: оборачивает весь слой, а не стоит рядом пустым элементом.
+  assert.match(root, /<FontLoader faces=\{FONTS\}>[\s\S]*<SpeakerLayer[\s\S]*<Subtitles[\s\S]*<\/FontLoader>/);
+  assert.doesNotMatch(root, /<FontLoader[^>]*\/>/);
   assert.match(read('src/scenes.jsx'), /BrowserFrame/);
+  assert.match(read('src/scenes.jsx'), /scroll=\{/);
+  assert.doesNotMatch(read('src/scenes.jsx') + read('src/plan.js'), /maxScroll/);
   assert.match(read('src/plan.js'), /kind: 'stock'/);
 });
 ```
@@ -3775,31 +4176,45 @@ registerRoot(Root);
 
 ```jsx
 // templates/motion-layer/src/Root.jsx
-// Сборка слоя из деталей motion-kit. Режиссура — в plan.js, дизайн карточек — в scenes.jsx.
+// Сборка слоя из деталей motion-kit. Режиссура — в plan.js, дизайн карточек и вставок — в scenes.jsx.
 import { useMemo } from 'react';
 import { AbsoluteFill } from 'remotion';
-import { FontLoader, KitBox, SfxTrack, SpeakerLayer, StockInsert, Subtitles, compileLayer } from '@automontage/motion-kit';
+import { FontLoader, FullscreenReveal, KitBox, SfxTrack, ShutterFlash, SpeakerLayer, StockInsert, Subtitles,
+  compileLayer } from '@automontage/motion-kit';
 import layer from '../layer.json';
 import buildPlan from './plan.js';
-import { SceneContent } from './scenes.jsx';
+import { InsertContent, SceneContent } from './scenes.jsx';
 import sfxLibrary from './sfx-library.js';
 import words from './words.js';
 
+// Модульная константа: FontLoader регистрирует шрифты один раз при монтировании.
 const FONTS = [{ family: 'KitOnest', file: 'fonts/Onest.ttf' }, { family: 'KitOswald', file: 'fonts/Oswald.ttf' }];
+
+// Сток — StockInsert; остальные полноэкранные (cover) вставки — FullscreenReveal с содержимым ролика,
+// иначе спикер уходит под вставку, а кадр остаётся чёрным. Вставку без cover (donor) ролик рисует сам.
+function Insert({ insert }) {
+  if (insert.kind === 'stock') return <StockInsert insert={insert} />;
+  if (insert.cover) return <FullscreenReveal insert={insert}><InsertContent insert={insert} /></FullscreenReveal>;
+  return <InsertContent insert={insert} />;
+}
 
 export function LayerComposition() {
   const compiled = useMemo(() => {
     const ctx = { ...layer, words, sfxLibrary };
     return compileLayer(buildPlan(ctx), ctx);
   }, []);
+  // FontLoader — гейт: ничего из слоя не попадает в кадр, пока шрифты не загрузились.
+  // Вспышка — на ударе каждого оставшегося звука затвора: звук и свет не расходятся.
   return (
     <AbsoluteFill style={{ backgroundColor: '#000000' }}>
-      <FontLoader faces={FONTS} />
-      <SpeakerLayer src={layer.speaker.src} track={compiled.camera} lastFrame={layer.speaker.lastFrame} />
-      {compiled.inserts.filter((insert) => insert.kind === 'stock').map((insert) => <StockInsert key={insert.id} insert={insert} />)}
-      {compiled.items.map((item) => <KitBox key={item.id} item={item}><SceneContent item={item} /></KitBox>)}
-      {compiled.captions ? <Subtitles {...compiled.captions} fontFamily="KitOnest" /> : null}
-      <SfxTrack cues={compiled.cues.kept} masterDb={layer.sfxMasterDb} />
+      <FontLoader faces={FONTS}>
+        <SpeakerLayer src={layer.speaker.src} track={compiled.camera} lastFrame={layer.speaker.lastFrame} />
+        {compiled.inserts.map((insert) => <Insert key={insert.id} insert={insert} />)}
+        {compiled.items.map((item) => <KitBox key={item.id} item={item}><SceneContent item={item} /></KitBox>)}
+        {compiled.cues.kept.filter((cue) => cue.role === 'shutter').map((cue) => <ShutterFlash key={cue.id} at={cue.hitFrame} />)}
+        {compiled.captions ? <Subtitles {...compiled.captions} fontFamily="KitOnest" /> : null}
+        <SfxTrack cues={compiled.cues.kept} masterDb={layer.sfxMasterDb} />
+      </FontLoader>
     </AbsoluteFill>
   );
 }
@@ -3819,6 +4234,9 @@ export default function buildPlan({ words, face, fps, width, durationInFrames, s
   const at = (share) => Number((duration * share).toFixed(2));
   const title = words.slice(0, 3).map((w) => w.t).join(' ').replace(/[.,!?…:;]+$/u, '').toUpperCase();
   const shotAt = at(0.3);
+  // Затвор — после входа карточки (mask длится 0,32 с); вспышку Root.jsx ставит на его удар.
+  const shutter = pickSound(sfxLibrary, 'shutter');
+  const flashAt = Number((shotAt + 0.32).toFixed(2));
   const stockAt = at(0.6);
   return {
     hook: 'speaker',
@@ -3832,10 +4250,10 @@ export default function buildPlan({ words, face, fps, width, durationInFrames, s
       { id: 'title', kind: 'text', at: 0.2, until: Math.min(2.4, duration), box: box(120, 300, 780, 220),
         enter: { kind: 'pop' }, sfx: pickSound(sfxLibrary, 'pop'), props: { view: 'title', text: title } },
       { id: 'screenshot', kind: 'card', at: shotAt, until: shotAt + 2.6, box: box(90, 300, 840, 900),
-        enter: { kind: 'mask' }, sfx: pickSound(sfxLibrary, 'shutter'),
-        props: { view: 'browser', url: 'example.com', src: 'shots/placeholder.png', maxScroll: Math.round(600 * k) } },
+        enter: { kind: 'mask' }, props: { view: 'browser', url: 'example.com', src: 'shots/placeholder.png', scroll: 1 } },
     ],
     inserts: [{ id: 'stock-1', kind: 'stock', from: stockAt, to: stockAt + 2, src: 'stock/placeholder.mp4', sfx: pickSound(sfxLibrary, 'whoosh') }],
+    sfx: shutter ? [{ at: flashAt, name: shutter }] : [],
     captions: { hide: [{ from: stockAt, to: stockAt + 2 }] },
   };
 }
@@ -3843,10 +4261,15 @@ export default function buildPlan({ words, face, fps, width, durationInFrames, s
 
 ```jsx
 // templates/motion-layer/src/scenes.jsx
-// Дизайн карточек этого ролика: палитра, шрифты и композиции — свои для каждой темы.
-import { BrowserFrame, ScrollShot } from '@automontage/motion-kit';
+// Дизайн карточек и полноэкранных вставок этого ролика: палитра, шрифты и композиции — свои для каждой темы.
+import { AbsoluteFill, useVideoConfig } from 'remotion';
+import { BrowserFrame, REVEAL_FRAMES, ScrollShot, closeWindow, ref25, revealCard } from '@automontage/motion-kit';
+
+// id вставки screen → адрес страницы в окне браузера (у скомпилированной вставки нет props).
+const SCREEN_URLS = {};
 
 export function SceneContent({ item }) {
+  const { fps } = useVideoConfig();
   const { view } = item.props;
   if (view === 'title') {
     return (
@@ -3856,13 +4279,33 @@ export function SceneContent({ item }) {
     );
   }
   if (view === 'browser') {
+    // Прокрутка — после входа карточки (mask, 8 эталонных кадров) и до начала выхода (5 кадров).
     return (
       <BrowserFrame url={item.props.url}>
-        <ScrollShot src={item.props.src} from={item.from} to={item.until} maxScroll={item.props.maxScroll || 0} />
+        <ScrollShot src={item.props.src} from={item.from + ref25(8, fps)} to={item.until - ref25(5, fps)} scroll={item.props.scroll ?? 1} />
       </BrowserFrame>
     );
   }
   return null;
+}
+
+// Содержимое полноэкранных вставок screen/scene (сток StockInsert рисует сам). Скриншот на весь кадр —
+// окно браузера внутри safe-зоны (revealCard), иначе в 9:16 хром окна уходит под интерфейс площадки.
+export function InsertContent({ insert }) {
+  const { fps, width, height } = useVideoConfig();
+  if (insert.kind === 'screen' && insert.src) {
+    const card = revealCard(width, height);
+    return (
+      <AbsoluteFill style={{ backgroundColor: '#0c1018' }}>
+        <div style={{ position: 'absolute', top: card.top, right: card.right, bottom: card.bottom, left: card.left }}>
+          <BrowserFrame url={SCREEN_URLS[insert.id] || ''}>
+            <ScrollShot src={insert.src} from={insert.from + ref25(REVEAL_FRAMES, fps)} to={closeWindow(insert, fps).start} scroll={1} />
+          </BrowserFrame>
+        </div>
+      </AbsoluteFill>
+    );
+  }
+  return <AbsoluteFill style={{ backgroundColor: '#0c1018' }} />;
 }
 ```
 
@@ -3874,7 +4317,7 @@ export function SceneContent({ item }) {
 Собран командой `automontage layer new` из деталей motion-kit движка.
 
 - `src/plan.js` — режиссура: планы камеры, карточки на словах, вставки, звуки, субтитры.
-- `src/scenes.jsx` — дизайн карточек этого ролика.
+- `src/scenes.jsx` — дизайн карточек и полноэкранных вставок этого ролика.
 - `public/` — speaker.mp4, шрифты, звуки, сток (`stock/`), скриншоты (`shots/`); источники — `public/SOURCE.md`.
 - Заглушки `stock/placeholder.mp4` и `shots/placeholder.png` замените настоящими материалами.
 
@@ -4230,6 +4673,13 @@ git commit -m "feat: scaffold motion layers with automontage layer new"
 
 ### Task 32: `layer check`
 
+**Уточнения после ревью пакета 1:**
+- `readLayerJson` (с проверкой `sfxMasterDb` из Task 28) вызывается внутри `try`: испорченный `layer.json`
+  даёт отчёт с `error` и код 2, а не «❌ layer check отменён». Профиль до чтения — `options.profile ||
+  'avatar'`, после — `options.profile || layer.profile || 'avatar'`.
+- Тест: `BAD CASE: a bad sfxMasterDb in layer.json exits 2 and names the field` — `sfxMasterDb: 3` → код 2,
+  `report.error` содержит `layer.json` и `sfxMasterDb`.
+
 **Files:**
 - Create: `scripts/layer/check.js`
 - Test: `tests/layer-check.test.js`
@@ -4298,10 +4748,11 @@ const FLAGS = { 'project-dir': 'value', layer: 'value', profile: 'value' };
 
 async function run(options) {
   const { projectDir, layerDir, layerName } = resolveLayer(options);
-  const profileName = options.profile || readLayerJson(layerDir).profile || 'avatar';
-  const profile = getProfile(profileName);
+  let profileName = options.profile || 'avatar';
   let report;
   try {
+    profileName = options.profile || readLayerJson(layerDir).profile || 'avatar';
+    const profile = getProfile(profileName);
     const manifest = buildLayerManifest(layerDir);
     writeJson(path.join(layerDir, 'out', 'manifest.json'), manifest);
     report = buildReport({ kind: 'layer-check', layer: layerName, profile: profileName, gates: runTimelineGates(manifest, profile) });
@@ -4844,6 +5295,15 @@ git commit -m "feat: import only checked motion layers and register them"
 
 ### Task 37: `layer brief`
 
+**Уточнения после ревью пакета 1:**
+- Слой — ровно одна сцена `broll` на весь хронометраж; тест закрепляет `brief.scenes.length === 1`. Резать слой
+  на несколько сцен нельзя: `brollEnvelope` (`src/scenes/BrollMedia.jsx`) приглушает звук слоя
+  `round(0,12·fps)` кадров на входе и выходе каждой сцены, и эффекты на стыках сцен частично глохнут.
+- Даже одна сцена приглушает первые и последние 0,12 с: звук хука на t = 0 в preview звучит тише задуманного.
+  `layer brief` после публикации печатает подсказку «звук слоя в первые и последние 0,12 с приглушён
+  огибающей сцены — эффект хука ставьте не раньше 0,12 с»; то же правило — в `motion-layer-brief.md`
+  (Task 44), на пробе (Task 49) эффект хука проверить на слух.
+
 **Files:**
 - Create: `scripts/layer/brief.js`
 - Test: `tests/layer-brief.test.js`
@@ -4867,6 +5327,7 @@ test('layer brief is one full-length broll scene without overlay, with preview-r
   assert.equal(brief.status, 'draft');
   assert.equal(brief.brollReviewPolicy, 'preview-required');
   assert.deepEqual(brief.output, { aspect: 'vertical', width: 1080, height: 1920, fps: 25, durationInFrames: 2109 });
+  assert.equal(brief.scenes.length, 1, 'слой — одна сцена: brollEnvelope глушит звук слоя на стыках сцен');
   const [scene] = brief.scenes;
   assert.deepEqual([scene.scene, scene.start, scene.end], ['broll', 0, 84.36]);
   assert.deepEqual(scene.brollMedia, { kind: 'video', src: entry.reference, sha256: entry.canonicalSha256, trimStartSec: 0, fit: 'cover', audioMode: 'mix', overlay: 'none' });
@@ -4944,6 +5405,7 @@ async function run(options) {
   const workspace = createOrOpenProject({ projectDir });
   const result = publishBriefRevision(workspace, { brief, markdown: formatBriefMarkdown(brief) });
   console.log(`✅ черновик ${result.relativePath}`);
+  console.log('Звук слоя в первые и последние 0,12 с приглушён огибающей сцены — эффект хука ставьте не раньше 0,12 с.');
   console.log(`Дальше: automontage preview --project-dir ${projectDir} --brief ${result.relativePath}`);
   return 0;
 }
@@ -4966,9 +5428,21 @@ git commit -m "feat: publish a draft brief for a checked motion layer"
 
 ### Task 38: `layer stock` — сток Pexels в слой
 
+**Уточнения после ревью пакета 1:**
+- Сток короче окна вставки замирает на последнем кадре (`StockInsert` держит видео своей `Sequence` до `to`).
+  Новый флаг `--insert <id>`: длина клипа по умолчанию — длина этой вставки `(to − from)/fps` из
+  `buildLayerManifest(layerDir).inserts`, округлённая вверх до 0,1 с; явный `--sec` важнее; без `--insert` —
+  2,5 с, как раньше. Неизвестный id — ошибка со списком id stock-вставок. `FLAGS` += `insert: 'value'`.
+- `layer check` предупреждает о коротком стоке: для каждой `kind: 'stock'` вставки с `src` (поле манифеста из
+  Task 22) меряет `probeVideo(public/<src>).duration`; клип короче окна больше чем на кадр — G10 получает `warn`
+  (если был `pass`) и span «сток <src> короче вставки <id> на X с — последний кадр замрёт»; нет файла — тот же
+  `warn` с «нет public/<src>». Тест: сток 1 с на вставку 2 с → G10 `warn`, код 0.
+- Тест `layer stock`: `--insert stock-1` без `--sec` даёт клип длиной вставки шаблона (≈ 2 с).
+
 **Files:**
 - Create: `scripts/layer/stock.js`
-- Test: `tests/layer-stock.test.js`
+- Modify: `scripts/layer/check.js` (предупреждение о коротком стоке)
+- Test: `tests/layer-stock.test.js`, `tests/layer-check.test.js` (дописать)
 
 - [ ] **Step 1: Написать падающий тест**
 
@@ -5087,7 +5561,7 @@ Expected: PASS (2 теста).
 - [ ] **Step 5: Коммит**
 
 ```bash
-git add scripts/layer/stock.js tests/layer-stock.test.js
+git add scripts/layer/stock.js scripts/layer/check.js tests/layer-stock.test.js tests/layer-check.test.js
 git commit -m "feat: fetch Pexels stock into motion layers with provenance"
 ```
 
@@ -5426,6 +5900,16 @@ git commit -m "feat: block publishing kit previews that fail the voice-music gat
 
 ### Task 41: Настоящий кадр шаблона (глубокая проверка, по флагу)
 
+**Уточнения после ревью пакета 1:**
+- На полосе субтитров `[data-kit-text="captions"]` дополнительно проверять `scrollWidth ≤ clientWidth &&
+  scrollHeight ≤ clientHeight` (как unbroken-caption в `tests/motion-render.test.js`): кегль подогнан в одну
+  строку, и `overflow: hidden` полосы ничего не срезал.
+- Мерить в том же кадре, который снимается: `renderStill` ждёт все `delayRender` — гейт `FontLoader`, которым
+  шаблон оборачивает весь слой, и подгонку кегля `Subtitles`; до этого `[data-kit-text]` в DOM ещё нет.
+  Как это делается в настоящем браузере — `tests/motion-kit-render.test.js` (Task 18).
+- Кадры для 10-секундного шаблона: 5 и 40 — титул и субтитры, 90 — середина скриншот-карточки (3,0–5,6 с),
+  160 — сток (6–8 с, раскрытие закончилось к кадру 159).
+
 **Files:**
 - Test: `tests/layer-render-still.test.js`
 
@@ -5537,8 +6021,10 @@ Expected: FAIL — `ENOENT … docs/MOTION-KIT.md`.
 3. **Контракт слоя** — дерево `motion-vNN/` и `LayerPlan` из этого плана (раздел «Контракт слоя»).
 4. **API kit.** Импорт: `plan.js` — только `@automontage/motion-kit/core`; `Root.jsx`/`scenes.jsx` —
    `@automontage/motion-kit`. Таблица: `autoShots`, `makeAnchors`, `pickSound`, пресеты камеры W/M/L/R/top,
-   входы pop/fly/mask/cut, `typed`, `SpeakerLayer`, `KitBox`, `StockInsert`, `FullscreenReveal`,
-   `BrowserFrame`/`ScrollShot`/`ShutterFlash`, `SfxTrack`, `Subtitles`, `FontLoader`.
+   входы pop/fly/mask/cut, `typed`, `SpeakerLayer`, `KitBox`, `StockInsert`, `FullscreenReveal` (`revealCard`),
+   `BrowserFrame`/`ScrollShot({src, from, to, scroll})`/`ShutterFlash({at})`, `SfxTrack({cues, masterDb})`,
+   `Subtitles`, `FontLoader` (гейт, оборачивает весь слой), чистые `captionSpans`, `activeChunk(chunks, sec,
+   hide, fps)`, `cueVolume`.
 5. **Гейты G1–G12**: таблица «что проверяет → порог → где считается (check/render/preview/sheet) → стоп или
    предупреждение → как чинить»; исключения `waivers` только для G1, G4, G11 и только с причиной.
 6. **Профили** `avatar` и `live`, коридор «голос − музыка» и откуда он взят (DECISIONS).
@@ -5546,6 +6032,21 @@ Expected: FAIL — `ENOENT … docs/MOTION-KIT.md`.
    префиксу имени (`whoosh-in` → `whoosh`), громкость `sfxMasterDb`.
 8. **Ограничения**: слой должен лежать вне `node_modules` (npm-установка движка не транспилирует JSX оттуда);
    анимации заданы в пикселях кадра 1080×1920; проверка safe-zone видит только текст внутри `KitBox` и `Subtitles`.
+
+**Уточнения после ревью пакета 1** (в разделы 4 и 8 `docs/MOTION-KIT.md`):
+- `ScrollShot`: `scroll` — доля страницы 0..1 (не пиксели); прокрутка карточки — от конца входа
+  `from + ref25(8)` до начала выхода `until − ref25(5)`. `ShutterFlash`: `at` — `hitFrame` звука затвора, после
+  входа карточки. `FontLoader` — `<FontLoader faces={FONTS}>…весь слой…</FontLoader>`. `Subtitles` — одна строка,
+  кегль подгоняется по ширине полосы. `StockInsert`/`FullscreenReveal`/`KitBox` принимают только
+  скомпилированные элементы; cover-вставка не короче 0,68 с (при 25 fps); `screen`/`scene` проект рисует через
+  `FullscreenReveal`.
+- Вспышки — не чаще раза в секунду: затвор — заметный звук, `thinCues` держит такие звуки ≥ 1 с друг от друга,
+  а шаблон ставит вспышку только на оставшийся звук.
+- Скриншоты — не выше ~16k px. Широкий скриншот не прокручивается и обрезается по бокам (cover): брать
+  карточку близкой пропорции или высокий full-page.
+- `radius` и `scale` у `BrowserFrame` — в px эталона 1080 (умножаются на короткую сторону кадра / 1080).
+- G5 видит `item.box`, а не вылезающий текст: содержимое карточки обязано помещаться в свой box.
+- Звук слоя в первые и последние 0,12 с приглушает огибающая сцены preview (`brollEnvelope`, Task 37).
 
 `README.md` — в раздел команд добавить блок:
 
@@ -5592,7 +6093,7 @@ git commit -m "docs: document motion-kit layers and QA gates"
 
 **Files:**
 - Modify: `ARCHITECTURE.md` (новый подраздел `### 3.5 Motion-kit слой и гейты`, строки в §5, §6, §7)
-- Modify: `DECISIONS.md` (D-034 … D-036)
+- Modify: `DECISIONS.md` (D-034 … D-037)
 - Modify: `TESTING.md` (новый раздел `## 12. Motion-kit и гейты`)
 - Modify: `CHANGELOG.md` (`[Unreleased]`)
 
@@ -5619,6 +6120,14 @@ git commit -m "docs: document motion-kit layers and QA gates"
   `avatar` откалиброван по утверждённому эталонному preview: R = `<значение из Task 47>` dB.
 - **D-036 – Звук слоя kit: только эффекты, `audioMode: "mix"`, громкость `sfxMasterDb`.** Почему не поле
   brief (D-014: громкость — подготовка медиа; Review не меняется); почему библиотека вне Git (лицензия).
+- **D-037 – Вставка раскрывается из карточки safe-зоны, спикер возвращается до её закрытия.** См. уточнение ниже.
+
+**Уточнения после ревью пакета 1** (D-037): стартовая карточка `FullscreenReveal` — safe-зона кадра
+(`revealCard`): для 9:16 инсеты `{top: 250, right: 130, bottom: 420, left: 70}` вместо плановой константы
+`{420, 56, 420, 130}` под один формат, 16:9 работает той же формулой. Спикер полностью возвращается (резкий,
+непрозрачный) к началу закрытия вставки (`away.to = to − close − exit`), поэтому cover-вставка не короче
+`close + exit + 1` кадра (0,68 с при 25 fps). Отклонено: константа под 1080×1920 (неверная карточка на 16:9) и
+возврат к самому концу вставки (на стыке видно размытое тёмное кольцо вместо лица).
 
 - [ ] **Step 3: TESTING.md**
 
@@ -5702,13 +6211,19 @@ Expected: FAIL — `ENOENT … motion-layer-brief.md`.
 
 - Живая камера: `camera.shots` (пресеты W/M/L/R/top, стартовая раскадровка `autoShots`), `punches`, `blurs`,
   `aways`; аватар — один `OffthreadVideo muted` в `SpeakerLayer` по глобальному таймкоду.
-- Карточки: `items` с входом pop/fly/mask/cut, жизнью и выходом; весь текст — внутри `KitBox`.
-- Вставки: `inserts` stock/screen/donor/scene; сток с Ken Burns (`StockInsert`), раскрытие на весь кадр
-  (`FullscreenReveal`); спикер уходит под полноэкранную вставку сам.
-- Скриншот-карточка: `BrowserFrame` + `ScrollShot` (прокрутка длинного скрина) + `ShutterFlash`.
+- Карточки: `items` с входом pop/fly/mask/cut, жизнью и выходом; весь текст — внутри `KitBox` и помещается в
+  свой `box` (safe-zone проверяется по box, а не по тексту).
+- Вставки: `inserts` stock/screen/donor/scene; сток с Ken Burns (`StockInsert`), раскрытие на весь кадр из
+  карточки safe-зоны (`FullscreenReveal`); спикер уходит под полноэкранную вставку сам и возвращается к началу
+  её закрытия; полноэкранная вставка — не короче 0,68 с; `screen`/`scene` рисуются в `scenes.jsx`
+  (`InsertContent`) через `FullscreenReveal`.
+- Скриншот-карточка: `BrowserFrame` + `ScrollShot` (`scroll` — доля страницы 0..1, прокрутка между входом и
+  выходом карточки) + `ShutterFlash` на ударе звука затвора после входа карточки (шаблон делает это сам).
 - Звук: `sfx` у элемента или вставки, `type` для набора текста; kit ставит пик whoosh на удар, держит
-  заметные звуки ≥ 1 с друг от друга и любые ≥ 0,3 с; громкость эффектов — `sfxMasterDb` в `layer.json`.
-- Субтитры: `captions` — 1–4 слова в полосе safe-зоны, `hide` на полноэкранных сценах.
+  заметные звуки ≥ 1 с друг от друга и любые ≥ 0,3 с; громкость эффектов — `sfxMasterDb` в `layer.json`;
+  первый эффект — не раньше 0,12 с (огибающая сцены preview приглушает начало и конец слоя).
+- Субтитры: `captions` — 1–4 слова одной строкой в полосе safe-зоны, кегль подгоняется по ширине; `hide` на
+  полноэкранных сценах. Шрифты — только через `<FontLoader faces={FONTS}>`, который оборачивает весь слой.
 
 ## Правила, которые проверяет `automontage layer check`
 
