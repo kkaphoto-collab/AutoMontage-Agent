@@ -8,6 +8,11 @@ export function normWord(value) {
 // w — как услышал Whisper (по нему ищутся якоря), t — написание на экране.
 export function flattenTranscript(segments, { spelling = {} } = {}) {
   if (!Array.isArray(segments)) throw new Error('transcript: ожидается массив сегментов');
+  // Ключи spelling пишут как удобно человеку («CloudCode», «Ёлка»), а не в normWord-форме —
+  // строим таблицу один раз, чтобы искать по той же нормализации, что и сами слова.
+  const spellingByNorm = Object.fromEntries(
+    Object.entries(spelling).map(([key, value]) => [normWord(key), value]),
+  );
   const words = [];
   for (const segment of segments) {
     for (const word of segment.words || []) {
@@ -15,7 +20,7 @@ export function flattenTranscript(segments, { spelling = {} } = {}) {
       if (!normWord(w) || !Number.isFinite(word.s) || !Number.isFinite(word.e)) continue;
       const key = normWord(w);
       const tail = w.match(TAIL)?.[0] || '';
-      const t = Object.hasOwn(spelling, key) ? `${spelling[key]}${tail}` : w;
+      const t = Object.hasOwn(spellingByNorm, key) ? `${spellingByNorm[key]}${tail}` : w;
       words.push({ w, t, s: word.s, e: Math.max(word.s, word.e) });
     }
   }
@@ -28,7 +33,9 @@ export function makeAnchors(words, { tolerance = 1.2 } = {}) {
   let cursor = 0;
   const matches = (word, key) => {
     const n = normWord(word.w);
-    return n === key || (key.length > 2 && n.startsWith(key));
+    // Точное совпадение — всегда. Совпадение по началу слова — только для ключей от 4 символов:
+    // короткий ключ («это») иначе цепляет соседнее слово («этот») и сбивает курсор якорей.
+    return n === key || (key.length >= 4 && n.startsWith(key));
   };
   function locate(spec, near) {
     const key = normWord(spec);
