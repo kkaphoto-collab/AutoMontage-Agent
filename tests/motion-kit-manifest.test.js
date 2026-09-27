@@ -35,3 +35,24 @@ test('a layer with no items and captions off still builds a manifest with empty 
   assert.deepEqual(m.texts, []);
   assert.equal(m.camera.s.length, cfg.durationInFrames);
 });
+
+// Task 18: captions.hide режет один chunk на несколько независимых видимых окон. buildManifest
+// обязан отдать столько же caption-* записей, сколько отдаёт captionSpans, с детерминированной,
+// уникальной схемой id (caption-<n>, caption-<n>b, caption-<n>c…) — иначе гейт G5 (safe-zone по
+// текстам) увидит меньше окон, чем реально рисует Subtitles.
+test('captions.hide splits a single chunk into caption-N/caption-Nb, and a hide window covering it fully drops it', () => {
+  const words = [
+    { w: 'Раз', t: 'Раз', s: 0.1, e: 0.3 },
+    { w: 'два', t: 'два', s: 0.4, e: 0.6 },
+  ]; // пауза 0.1с < hardGap(0.3с) — buildChunks склеит их в один chunk.
+  const splitPlan = { ...plan, items: [], captions: { hide: [{ from: 0.3, to: 0.4 }] } };
+  const split = kit.buildManifest(kit.compileLayer(splitPlan, { ...cfg, words }));
+  const captionIds = split.texts.filter((t) => t.id.startsWith('caption-')).map((t) => t.id);
+  assert.deepEqual(captionIds, ['caption-1', 'caption-1b']);
+  const [first, second] = split.texts.filter((t) => t.id.startsWith('caption-'));
+  assert.ok(first.until <= second.from, 'вырезанное окно hide не должно попасть ни в один span');
+
+  const droppedPlan = { ...plan, items: [], captions: { hide: [{ from: 0, to: 2 }] } };
+  const dropped = kit.buildManifest(kit.compileLayer(droppedPlan, { ...cfg, words }));
+  assert.equal(dropped.texts.filter((t) => t.id.startsWith('caption-')).length, 0, 'окно hide, целиком накрывающее chunk, не должно оставить ни одной записи');
+});

@@ -1,4 +1,5 @@
 import { cameraAt } from './camera.js';
+import { captionSpans } from './captions.js';
 import { itemExtentAt } from './motion.js';
 
 const r3 = (value) => Math.round(value * 1000) / 1000;
@@ -25,14 +26,20 @@ export function buildManifest(compiled) {
     return { id: item.id, from: item.from, frames };
   });
   if (compiled.captions) {
-    const { lane, chunks } = compiled.captions;
-    chunks.forEach((chunk, i) => {
-      const from = Math.round(chunk.s * fps);
-      const until = Math.min(durationInFrames, Math.round(chunk.show * fps));
-      if (until > from) {
-        texts.push({ id: `caption-${i + 1}`, from, until, static: [r3(lane.x), r3(lane.y), r3(lane.x + lane.w), r3(lane.y + lane.h)] });
-      }
-    });
+    const { lane, chunks, hide } = compiled.captions;
+    // Один источник видимости с Subtitles (captionSpans) — гейт видит ровно те кадры, где рендер
+    // рисует текст. Окно hide может разрезать chunk на несколько span: первому достаётся
+    // caption-<n>, следующим — caption-<n>b, caption-<n>c… (детерминированная схема, id остаются
+    // уникальными и стабильными между запусками).
+    const staticBox = [r3(lane.x), r3(lane.y), r3(lane.x + lane.w), r3(lane.y + lane.h)];
+    let lastIndex = null;
+    let piece = 0;
+    for (const span of captionSpans(chunks, hide, fps, durationInFrames)) {
+      piece = span.index === lastIndex ? piece + 1 : 0;
+      lastIndex = span.index;
+      const id = piece === 0 ? `caption-${span.index + 1}` : `caption-${span.index + 1}${String.fromCharCode(97 + piece)}`;
+      texts.push({ id, from: span.from, until: span.until, static: staticBox });
+    }
   }
   return {
     version: 1, kitVersion: compiled.kitVersion, fps, width, height, durationInFrames,

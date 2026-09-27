@@ -584,3 +584,143 @@ test('SfxTrack rejects a bad sfxMasterDb immediately on render, even with no cue
   // undefined — «использовать дефолт −5 дБ», не ошибка.
   assert.doesNotThrow(() => render(React.createElement(kit.SfxTrack, { cues: [] })));
 });
+
+test('Subtitles show the active chunk with karaoke dimming and respect hide windows', () => {
+  const kit = kitAt(0);
+  const chunks = [{ units: [{ t: 'Раз', s: 0, e: 0.3 }, { t: 'два', s: 0.4, e: 0.6 }], s: 0, e: 0.6, show: 1, text: 'Раз два' }];
+  assert.equal(kit.activeChunk(chunks, 0.5).text, 'Раз два');
+  assert.equal(kit.activeChunk(chunks, 1.2), null);
+  assert.equal(kit.activeChunk(chunks, 0.5, [{ from: 0.4, to: 0.9 }]), null);
+  const lane = { x: 70, y: 1398, w: 880, h: 84 };
+  const html = render(React.createElement(kitAt(5).Subtitles, { chunks, lane }));
+  assert.match(html, /data-kit-text="captions"/);
+  assert.match(html, /opacity:1">Раз/);
+  assert.match(html, /opacity:0\.45">.*два/);
+});
+
+// Отклонение от плана: манифест решает видимость субтитра по кадру (Math.round(s*fps) — как
+// buildManifest всегда делал), а не по секундам. Раньше Subtitles сверял sec (frame/fps) с
+// chunk.s/chunk.show напрямую — на дробном s*fps это на кадр расходится с манифестом (например,
+// s=0.204 при fps=25: round(0.204*25)=5, но frame/25>=0.204 верно только с кадра 6). captionSpans —
+// общая чистая функция, которую использует и buildManifest, и сам компонент, поэтому кадр, где
+// Subtitles что-то рисует, обязан буквально совпадать с кадрами caption-* в манифесте, включая
+// вырезанное окно hide, на обоих fps.
+test('Subtitles renders on exactly the frames captionSpans marks visible, at fps 25 and 30, with a hide window cut out', () => {
+  // s=0.21 при fps=30 даёт 6.3 — дробный кадр, ключевой случай для этой проверки.
+  const chunks = [{ units: [{ t: 'Раз', s: 0.21, e: 0.5 }], s: 0.21, e: 0.5, show: 0.9, text: 'Раз' }];
+  const hide = [{ from: 0.5, to: 0.7 }];
+  const lane = { x: 70, y: 1398, w: 880, h: 84 };
+  for (const fps of [25, 30]) {
+    const kit = kitAt(0);
+    // Кадры, где по captionSpans субтитр обязан быть виден — то же durationInFrames (100000), что
+    // отдаёт remotionStub по умолчанию (kitAt его не пробрасывает), чтобы клэмп не разошёлся.
+    const spans = kit.captionSpans(chunks, hide, fps, 100000);
+    const manifestFrames = new Set();
+    for (const span of spans) for (let f = span.from; f < span.until; f += 1) manifestFrames.add(f);
+    assert.ok(manifestFrames.size > 0, `fps ${fps}: ожидали хотя бы один видимый кадр`);
+    for (let frame = 0; frame <= 30; frame += 1) {
+      const html = render(React.createElement(kitAt(frame, { fps }).Subtitles, { chunks, lane, hide }));
+      assert.equal(html !== '', manifestFrames.has(frame), `fps ${fps} frame ${frame}: shown=${html !== ''}, ожидали ${manifestFrames.has(frame)}`);
+    }
+  }
+});
+
+// То же самое, но по полному конвейеру: слова → buildChunks → compileLayer → buildManifest, с
+// окном hide, разрезающим единственный chunk пополам. Кадры, на которых Subtitles рисует
+// data-kit-text="captions", обязаны совпасть с объединением диапазонов caption-1/caption-1b из
+// настоящего манифеста — гейт видит ровно то, что нарисовано (принцип D2), не только на
+// синтетических chunks выше.
+test('Subtitles frames match the real manifest caption-* ranges end to end, across a hide-window split', () => {
+  const words = [
+    { w: 'Раз', t: 'Раз', s: 0.1, e: 0.3 },
+    { w: 'два', t: 'два', s: 0.4, e: 0.6 },
+  ];
+  const hide = [{ from: 0.3, to: 0.4 }];
+  for (const fps of [25, 30]) {
+    const kit = kitAt(0);
+    // durationInFrames = 100000 — то же значение, что подставляет remotionStub по умолчанию для
+    // Subtitles ниже (kitAt его не пробрасывает), иначе клэмп у buildManifest и у компонента
+    // разойдётся не из-за самого кода, а из-за разных входов теста.
+    const cfg = { fps, width: 1080, height: 1920, durationInFrames: 100000, words, sfxLibrary: { sounds: {} } };
+    const layer = kit.compileLayer({
+      camera: { face: { x: 540, y: 787 }, shots: [{ at: 0, preset: 'W' }] },
+      items: [],
+      captions: { hide },
+    }, cfg);
+    const manifest = kit.buildManifest(layer);
+    const ids = manifest.texts.filter((t) => t.id.startsWith('caption-')).map((t) => t.id).sort();
+    assert.deepEqual(ids, ['caption-1', 'caption-1b'], `fps ${fps}: hide должен был разрезать единственный chunk на два span`);
+    const manifestFrames = new Set();
+    for (const t of manifest.texts) if (t.id.startsWith('caption-')) for (let f = t.from; f < t.until; f += 1) manifestFrames.add(f);
+    const { chunks, lane } = layer.captions;
+    for (let frame = 0; frame <= 30; frame += 1) {
+      const html = render(React.createElement(kitAt(frame, { fps }).Subtitles, { chunks, lane, hide }));
+      assert.equal(html !== '', manifestFrames.has(frame), `fps ${fps} frame ${frame}`);
+    }
+  }
+});
+
+// fontSize=44 и тень «0 3px 12px» были константами, посчитанными под lane.h=84 (1080x1920). На
+// другом разрешении (720x1280 → k=56/84=2/3) полоса субтитров ниже, и текст того же визуального
+// размера должен уменьшиться вместе с ней — иначе на маленьком разрешении подписи будут выглядеть
+// непропорционально крупными и вылезать за полосу. Явный fontSize остаётся аварийным люком.
+test('Subtitles font size and text-shadow scale with the caption lane height; an explicit fontSize overrides it', () => {
+  const chunks = [{ units: [{ t: 'Раз', s: 0, e: 0.3 }], s: 0, e: 0.3, show: 1, text: 'Раз' }];
+  const lane1080 = { x: 70, y: 1398, w: 880, h: 84 };
+  const html1080 = render(React.createElement(kitAt(0).Subtitles, { chunks, lane: lane1080 }));
+  assert.match(html1080, /font-size:44px/);
+  assert.match(html1080, /text-shadow:0 3px 12px rgba\(0,0,0,\.55\)/);
+
+  // k = 56/84 = 2/3: 44*2/3 ≈ 29.3, 3*2/3 = 2, 12*2/3 = 8.
+  const lane720 = { x: 47, y: 932, w: 587, h: 56 };
+  const html720 = render(React.createElement(kitAt(0).Subtitles, { chunks, lane: lane720 }));
+  assert.match(html720, /font-size:29\.3px/);
+  assert.match(html720, /text-shadow:0 2px 8px rgba\(0,0,0,\.55\)/);
+
+  const overridden = render(React.createElement(kitAt(0).Subtitles, { chunks, lane: lane1080, fontSize: 60 }));
+  assert.match(overridden, /font-size:60px/);
+});
+
+test('FontLoader blocks rendering until fonts load', () => {
+  const calls = {};
+  const kit = kitAt(0, { calls });
+  render(React.createElement(kit.FontLoader, { faces: [{ family: 'KitOnest', file: 'fonts/Onest.ttf' }] }));
+  assert.equal(calls.delay, 1);
+});
+
+test('loadFontFaces adds every face to fontSet and resolves once all of them load', async () => {
+  const kit = kitAt(0);
+  const added = [];
+  class FakeFontFace {
+    constructor(family, source, descriptors) { this.family = family; this.source = source; this.descriptors = descriptors; }
+    load() { return Promise.resolve(this); }
+  }
+  const faces = [{ family: 'KitOnest', file: 'fonts/Onest.ttf' }, { family: 'KitMono', file: 'fonts/Mono.ttf', weight: '400' }];
+  await kit.loadFontFaces(faces, { FontFaceImpl: FakeFontFace, fontSet: { add: (f) => added.push(f) }, toUrl: (f) => `/static/${f}` });
+  assert.equal(added.length, 2);
+  assert.equal(added[0].family, 'KitOnest');
+  assert.equal(added[0].source, 'url(/static/fonts/Onest.ttf)');
+  assert.deepEqual(added[0].descriptors, { weight: '100 900' });
+  assert.deepEqual(added[1].descriptors, { weight: '400' });
+});
+
+test('loadFontFaces rejects when any face fails to load', async () => {
+  const kit = kitAt(0);
+  class FailingFontFace {
+    load() { return Promise.reject(new Error('шрифт не загрузился')); }
+  }
+  await assert.rejects(
+    () => kit.loadFontFaces([{ family: 'KitOnest', file: 'fonts/Onest.ttf' }],
+      { FontFaceImpl: FailingFontFace, fontSet: { add: () => {} }, toUrl: (f) => f }),
+    /шрифт не загрузился/,
+  );
+});
+
+test('loadFontFaces resolves immediately with an empty face list, without touching FontFaceImpl', () => {
+  const kit = kitAt(0);
+  let constructed = false;
+  class UnexpectedFontFace { constructor() { constructed = true; } }
+  const result = kit.loadFontFaces([], { FontFaceImpl: UnexpectedFontFace, fontSet: { add: () => {} }, toUrl: (f) => f });
+  assert.ok(result instanceof Promise);
+  return result.then(() => assert.equal(constructed, false));
+});

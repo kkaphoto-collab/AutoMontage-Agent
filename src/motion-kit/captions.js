@@ -45,6 +45,35 @@ export function buildChunks(words, { maxWords = 4, maxChars = 20, hardGap = 0.3,
   }));
 }
 
+// Кадры видимости субтитра в композиции — общее правило и для рендера (Subtitles), и для
+// манифеста (buildManifest): гейт обязан видеть ровно то, что нарисовано. from/until считаются
+// тем же округлением, что раньше делал только buildManifest (Math.round(s*fps)/Math.round(show*fps)),
+// и клэмпятся под durationInFrames; окна hide переводятся в кадры тем же округлением и вырезаются
+// из диапазона — окно, попавшее в середину chunk, режет его на два независимых span с общим index.
+export function captionSpans(chunks, hide = [], fps, durationInFrames) {
+  const hideFrames = hide
+    .map((h) => [Math.round(h.from * fps), Math.round(h.to * fps)])
+    .filter(([from, to]) => to > from);
+  const spans = [];
+  chunks.forEach((chunk, index) => {
+    const from = Math.round(chunk.s * fps);
+    const until = Math.min(durationInFrames, Math.round(chunk.show * fps));
+    if (!(until > from)) return;
+    let pieces = [[from, until]];
+    for (const [hFrom, hTo] of hideFrames) {
+      const next = [];
+      for (const [s, e] of pieces) {
+        if (hTo <= s || hFrom >= e) { next.push([s, e]); continue; }
+        if (hFrom > s) next.push([s, hFrom]);
+        if (hTo < e) next.push([hTo, e]);
+      }
+      pieces = next;
+    }
+    for (const [s, e] of pieces) if (e > s) spans.push({ index, from: s, until: e });
+  });
+  return spans;
+}
+
 export function captionLane(width, height) {
   const safe = safeRect(width, height);
   const k = width / (height > width ? 1080 : 1920);
