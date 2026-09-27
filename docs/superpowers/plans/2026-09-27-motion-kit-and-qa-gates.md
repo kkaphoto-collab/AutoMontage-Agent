@@ -67,7 +67,7 @@ motion-vNN/
   src/scenes.jsx      содержимое карточек ролика                          (шаблон, дизайн ролика)
   src/words.js        export default [{w,t,s,e}]                          (генерирует layer new/words)
   src/sfx-library.js  export default {sounds:{name:{file,lengthSec,peakSec,role,notable,volume,sha256}}}
-  public/             speaker.mp4, fonts/, sfx/, broll/, shots/, SOURCE.md
+  public/             speaker.mp4, fonts/, sfx/, stock/, shots/, SOURCE.md
   out/manifest.json   манифест для гейтов (пишет layer check)
   renders/            layer-NN.mp4 (пишет layer render)
 ```
@@ -1065,7 +1065,7 @@ const kit = loadEsm('src/motion-kit/core.js');
 
 test('inserts compile to frames, default ids, cover and Ken Burns range', () => {
   const inserts = kit.compileInserts([
-    { kind: 'stock', from: 2, to: 4, src: 'broll/a.mp4', sfx: 'whoosh' },
+    { kind: 'stock', from: 2, to: 4, src: 'stock/a.mp4', sfx: 'whoosh' },
     { kind: 'donor', from: 1.3, to: 3.4, src: 'donor.mp4' },
   ], { fps: 25 });
   assert.deepEqual(inserts.map((i) => [i.id, i.from, i.to, i.cover]), [['stock-1', 50, 100, true], ['donor-2', 33, 85, false]]);
@@ -1448,7 +1448,7 @@ const cfg = { fps: 25, width: 1080, height: 1920, durationInFrames: 250,
 const plan = {
   camera: { face: { x: 540, y: 787 }, shots: [{ at: 0, preset: 'W' }, { at: 2, preset: 'M' }] },
   items: [{ id: 'title', kind: 'text', at: 0.2, until: 2, box: { x: 90, y: 300, w: 840, h: 200 }, sfx: 'whoosh' }],
-  inserts: [{ kind: 'stock', from: 4, to: 6, src: 'broll/a.mp4' }],
+  inserts: [{ kind: 'stock', from: 4, to: 6, src: 'stock/a.mp4' }],
 };
 
 test('compileLayer turns seconds into frames and wires inserts into the camera', () => {
@@ -1886,7 +1886,7 @@ git commit -m "feat: add motion-kit SpeakerLayer with live camera"
 ```js
 test('FullscreenReveal opens from a safe-zone card to the full frame and closes before the end', () => {
   const kit = kitAt(0);
-  const insert = { id: 'stock-1', kind: 'stock', from: 50, to: 100, src: 'broll/a.mp4', kb: [1.03, 1.1], cover: true };
+  const insert = { id: 'stock-1', kind: 'stock', from: 50, to: 100, src: 'stock/a.mp4', kb: [1.03, 1.1], cover: true };
   assert.equal(kit.revealProgress(49, insert), null);
   assert.equal(kit.revealProgress(50, insert), 0);
   assert.equal(kit.revealProgress(70, insert), 1);
@@ -1894,7 +1894,7 @@ test('FullscreenReveal opens from a safe-zone card to the full frame and closes 
   const html = render(React.createElement(kitAt(70).StockInsert, { insert }));
   assert.match(html, /data-kit-bleed="stock-1"/);
   assert.match(html, /data-sequence-from="50"/);
-  assert.match(html, /<video src="\/static\/broll\/a\.mp4" muted=""/);
+  assert.match(html, /<video src="\/static\/stock\/a\.mp4" muted=""/);
   assert.equal(render(React.createElement(kitAt(120).StockInsert, { insert })), '');
 });
 ```
@@ -3803,7 +3803,7 @@ export default function buildPlan({ words, face, fps, width, durationInFrames, s
         enter: { kind: 'mask' }, sfx: pickSound(sfxLibrary, 'shutter'),
         props: { view: 'browser', url: 'example.com', src: 'shots/placeholder.png', maxScroll: Math.round(600 * k) } },
     ],
-    inserts: [{ id: 'stock-1', kind: 'stock', from: stockAt, to: stockAt + 2, src: 'broll/placeholder.mp4', sfx: pickSound(sfxLibrary, 'whoosh') }],
+    inserts: [{ id: 'stock-1', kind: 'stock', from: stockAt, to: stockAt + 2, src: 'stock/placeholder.mp4', sfx: pickSound(sfxLibrary, 'whoosh') }],
     captions: { hide: [{ from: stockAt, to: stockAt + 2 }] },
   };
 }
@@ -3843,8 +3843,8 @@ export function SceneContent({ item }) {
 
 - `src/plan.js` — режиссура: планы камеры, карточки на словах, вставки, звуки, субтитры.
 - `src/scenes.jsx` — дизайн карточек этого ролика.
-- `public/` — speaker.mp4, шрифты, звуки, сток (`broll/`), скриншоты (`shots/`); источники — `public/SOURCE.md`.
-- Заглушки `broll/placeholder.mp4` и `shots/placeholder.png` замените настоящими материалами.
+- `public/` — speaker.mp4, шрифты, звуки, сток (`stock/`), скриншоты (`shots/`); источники — `public/SOURCE.md`.
+- Заглушки `stock/placeholder.mp4` и `shots/placeholder.png` замените настоящими материалами.
 
 Цикл: правка `plan.js` → `automontage layer check` (секунды) → `automontage layer render` →
 `automontage layer import` → `automontage layer brief` → `automontage preview`.
@@ -4051,7 +4051,7 @@ test('layer new scaffolds a renderable layer that matches the source geometry', 
   assert.equal(layer.speaker.lastFrame, 149);
   for (const file of ['src/index.jsx', 'src/Root.jsx', 'src/plan.js', 'src/scenes.jsx', 'src/words.js', 'src/sfx-library.js',
     'spelling.json', 'README.md', 'public/speaker.mp4', 'public/fonts/Onest.ttf', 'public/fonts/OFL-Onest.txt',
-    'public/broll/placeholder.mp4', 'public/shots/placeholder.png', 'public/SOURCE.md']) {
+    'public/stock/placeholder.mp4', 'public/shots/placeholder.png', 'public/SOURCE.md']) {
     assert.ok(fs.existsSync(path.join(dir, file)), file);
   }
   assert.match(fs.readFileSync(path.join(dir, 'src/words.js'), 'utf8'), /"t":"Привет,"/);
@@ -4135,10 +4135,10 @@ function copyTemplate(layerDir) {
 
 function placeholders(layerDir, { width, height, fps }) {
   const quiet = ['-hide_banner', '-loglevel', 'error', '-y'];
-  fs.mkdirSync(path.join(layerDir, 'public', 'broll'), { recursive: true });
+  fs.mkdirSync(path.join(layerDir, 'public', 'stock'), { recursive: true });
   fs.mkdirSync(path.join(layerDir, 'public', 'shots'), { recursive: true });
   runTool('ffmpeg', [...quiet, '-f', 'lavfi', '-i', `gradients=s=${width}x${height}:r=${fps}:d=4:speed=0.03`,
-    '-an', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', path.join(layerDir, 'public', 'broll', 'placeholder.mp4')], { stage: 'layer placeholder stock' });
+    '-an', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', path.join(layerDir, 'public', 'stock', 'placeholder.mp4')], { stage: 'layer placeholder stock' });
   runTool('ffmpeg', [...quiet, '-f', 'lavfi', '-i', 'color=c=0xF4F6FA:s=1080x2400',
     '-vf', 'drawbox=x=60:y=60:w=960:h=140:color=0xDDE3EC:t=fill,drawbox=x=60:y=260:w=640:h=60:color=0xC7D0DC:t=fill,drawbox=x=60:y=380:w=960:h=900:color=0xE7ECF3:t=fill',
     '-frames:v', '1', path.join(layerDir, 'public', 'shots', 'placeholder.png')], { stage: 'layer placeholder screenshot' });
@@ -4174,7 +4174,7 @@ async function run(options) {
     `| \`speaker.mp4\` | исходник проекта | \`${manifest.source.localPath}\` | копия исходника |`,
     '| `fonts/Onest.ttf`, `fonts/Oswald.ttf` | SIL OFL 1.1 (`fonts/OFL-*.txt`) | Google Fonts | копия из движка |',
     ...sfx.sourceRows,
-    '| `broll/placeholder.mp4`, `shots/placeholder.png` | заглушки, заменить | ffmpeg lavfi | automontage layer new |', '',
+    '| `stock/placeholder.mp4`, `shots/placeholder.png` | заглушки, заменить | ffmpeg lavfi | automontage layer new |', '',
   ].join('\n'));
   console.log(`✅ слой ${name}: ${durationInFrames} кадров ${probe.width}×${probe.height}@${probe.fps}, звуков в библиотеке: ${Object.keys(sfx.library.sounds).length}`);
   console.log(`Дальше: правка ${name}/src/plan.js → automontage layer check --project-dir ${projectDir} --layer ${name}`);
@@ -4979,12 +4979,12 @@ test('a picked Pexels clip is cropped to the layer, muted and recorded with its 
     createProvider: () => ({ search: async (input) => { assert.equal(input.orientation, 'portrait'); return { candidates: [candidate] }; } }),
     request: async (req) => { assert.equal(req.url, candidate.downloadUrl); return { bytes: fs.readFileSync(downloaded) }; } };
   assert.equal(await stock.run({ 'project-dir': projectDir, layer: 'motion-v01', query: 'people laptop', 'query-original': 'люди за ноутбуком', sec: '2' }, deps), 0);
-  const clip = path.join(projectDir, 'motion-v01', 'public', 'broll', 'pexels-12345.mp4');
+  const clip = path.join(projectDir, 'motion-v01', 'public', 'stock', 'pexels-12345.mp4');
   const probe = probeVideo(clip);
   assert.deepEqual([probe.width, probe.height, probe.fps], [540, 960, 25]);
   assert.ok(Math.abs(probe.duration - 2) < 0.1);
   const source = fs.readFileSync(path.join(projectDir, 'motion-v01', 'public', 'SOURCE.md'), 'utf8');
-  assert.match(source, /\| `broll\/pexels-12345\.mp4` \| Pexels License, Автор \| https:\/\/www\.pexels\.com\/video\/12345\/ \| [a-f0-9]{64} \|/);
+  assert.match(source, /\| `stock\/pexels-12345\.mp4` \| Pexels License, Автор \| https:\/\/www\.pexels\.com\/video\/12345\/ \| [a-f0-9]{64} \|/);
 });
 ```
 
@@ -5009,7 +5009,7 @@ const FLAGS = { 'project-dir': 'value', layer: 'value', query: 'value', 'query-o
 async function run(options, deps = {}) {
   const env = deps.env || process.env;
   if (!env.PEXELS_API_KEY) {
-    throw new Error('PEXELS_API_KEY не задан: поиск стока необязателен — положите клип в public/broll/ вручную или добавьте ключ в .env');
+    throw new Error('PEXELS_API_KEY не задан: поиск стока необязателен — положите клип в public/stock/ вручную или добавьте ключ в .env');
   }
   const { layerDir } = resolveLayer(options);
   if (!options.query) throw new Error('нужен --query (английский запрос для Pexels)');
@@ -5029,18 +5029,18 @@ async function run(options, deps = {}) {
     maxBytes: LIMITS.video, timeoutMs: 120_000, expectedMimeTypes: ['video/mp4'] });
   const outDir = path.join(layerDir, 'out');
   fs.mkdirSync(outDir, { recursive: true });
-  fs.mkdirSync(path.join(layerDir, 'public', 'broll'), { recursive: true });
+  fs.mkdirSync(path.join(layerDir, 'public', 'stock'), { recursive: true });
   const download = path.join(outDir, `pexels-${candidate.providerAssetId}.download.mp4`);
   fs.writeFileSync(download, response.bytes);
   const name = `pexels-${candidate.providerAssetId}.mp4`;
-  const target = path.join(layerDir, 'public', 'broll', name);
+  const target = path.join(layerDir, 'public', 'stock', name);
   runTool('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-i', download, '-t', String(sec),
     '-vf', `scale=${layer.width}:${layer.height}:force_original_aspect_ratio=increase,crop=${layer.width}:${layer.height},fps=${layer.fps}`,
     '-an', '-c:v', 'libx264', '-crf', '18', '-pix_fmt', 'yuv420p', target], { stage: 'layer stock normalize' });
   fs.rmSync(download, { force: true });
-  const row = `| \`broll/${name}\` | ${candidate.license.name}, ${candidate.author.name} | ${candidate.sourcePage} | ${sha256File(target)} | «${options['query-original'] || options.query}», ${candidate.retrievedAt} |`;
+  const row = `| \`stock/${name}\` | ${candidate.license.name}, ${candidate.author.name} | ${candidate.sourcePage} | ${sha256File(target)} | «${options['query-original'] || options.query}», ${candidate.retrievedAt} |`;
   fs.appendFileSync(path.join(layerDir, 'public', 'SOURCE.md'), `${row}\n`);
-  console.log(`✅ сток broll/${name}: вставка { kind: 'stock', src: 'broll/${name}' } в plan.js`);
+  console.log(`✅ сток stock/${name}: вставка { kind: 'stock', src: 'stock/${name}' } в plan.js`);
   return 0;
 }
 
