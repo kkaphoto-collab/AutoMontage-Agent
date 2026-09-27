@@ -17,7 +17,10 @@ export function BrowserFrame({ url, children, colors = {}, radius = 22, scale, f
       <div style={{ height: px(64), flexShrink: 0, background: c.bar, display: 'flex', alignItems: 'center', gap: px(12), padding: `0 ${px(20)}px` }}>
         {DOTS.map((color) => <span key={color} style={{ width: px(16), height: px(16), borderRadius: px(8), background: color }} />)}
         <span style={{ marginLeft: px(16), flex: 1, height: px(36), borderRadius: px(18), background: 'rgba(255,255,255,.08)', color: c.text,
-          fontFamily, fontSize: px(22), display: 'flex', alignItems: 'center', padding: `0 ${px(18)}px`,
+          // display:block, а не flex — text-overflow:ellipsis не работает на анонимном
+          // flex-элементе ни в одном браузере. lineHeight равен той же px(36), что и height,
+          // поэтому текст остаётся вертикально отцентрован без display:flex/align-items.
+          fontFamily, fontSize: px(22), display: 'block', lineHeight: `${px(36)}px`, padding: `0 ${px(18)}px`,
           whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{url}</span>
       </div>
       <div style={{ position: 'relative', flex: 1, overflow: 'hidden' }}>{children}</div>

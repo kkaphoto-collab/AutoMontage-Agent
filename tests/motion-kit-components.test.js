@@ -419,6 +419,9 @@ test('ScrollShot fills the window via objectPosition (a page share, never a pixe
   assert.match(html, /<img src="\/static\/shots\/page\.png"/);
   assert.match(html, /object-position:50% 50\.00%/, 'frame 35 is the exact midpoint of the 10..60 window');
   assert.doesNotMatch(html, /translateY/, 'no more pixel translateY — the old overscroll bug lived here');
+  // Пин cover-режима: скриншот обязан заполнять всё окно карточки, а не оставлять поля.
+  assert.match(html, /object-fit:cover/);
+  assert.match(html, /height:100%/);
 });
 
 test('screenshot card renders inside BrowserFrame and shows the URL', () => {
@@ -433,6 +436,11 @@ test('BrowserFrame chrome scales with the composition resolution (short side / 1
   // k = 720/1080 = 0.6667; 64 * k ≈ 42.7 — не 64px, иначе хром окна на нестандартном разрешении
   // рисуется в исходном (для 1080p) масштабе поверх реального кадра.
   assert.match(render(React.createElement(kitAt(0, { width: 720, height: 1280 }).BrowserFrame, { url: 'x' }, 'x')), /height:42\.7px/);
+  // Тот же k = min(w,h)/1080 работает и на landscape: 1920x1080 (k=1) и 1280x720 (k≈0.6667) дают
+  // те же цифры, что и портретные 1080x1920/720x1280 — доказывает, что масштаб зависит от короткой
+  // стороны кадра, а не от того, что width стоит первым в паре.
+  assert.match(render(React.createElement(kitAt(0, { width: 1920, height: 1080 }).BrowserFrame, { url: 'x' }, 'x')), /height:64px/);
+  assert.match(render(React.createElement(kitAt(0, { width: 1280, height: 720 }).BrowserFrame, { url: 'x' }, 'x')), /height:42\.7px/);
   assert.match(render(React.createElement(kitAt(0, { width: 1080, height: 1920 }).BrowserFrame, { url: 'x', scale: 0.5 }, 'x')), /height:32px/);
 });
 
@@ -446,13 +454,25 @@ test('BrowserFrame merges partial colors onto BROWSER_COLORS instead of losing t
   assert.match(html, new RegExp(`color:${kit.BROWSER_COLORS.text}`));
 });
 
-test('BrowserFrame URL pill defaults to a sans-serif font (overridable) and ellipsizes overflow', () => {
+test('BrowserFrame URL pill defaults to a sans-serif font (overridable), ellipsizes overflow via a block layout, and scales with resolution', () => {
   const kit = kitAt(0);
   const html = render(React.createElement(kit.BrowserFrame, { url: 'example.com/very/long/path' }, 'x'));
   assert.match(html, /font-family:sans-serif/);
   assert.match(html, /text-overflow:ellipsis/);
+  // text-overflow:ellipsis не работает на анонимном flex-элементе — только display:block реально
+  // обрезает длинный URL. Проверяем именно стиль пилюли (span с текстом урла), а не всей разметки:
+  // соседние div'ы BrowserFrame остаются display:flex, это ожидаемо.
+  const pillMatch = /<span style="([^"]*)">example\.com\/very\/long\/path<\/span>/.exec(html);
+  assert.ok(pillMatch, `pill span not found: ${html}`);
+  assert.match(pillMatch[1], /display:block/);
+  assert.doesNotMatch(pillMatch[1], /display:flex/);
   const custom = render(React.createElement(kit.BrowserFrame, { url: 'x', fontFamily: 'Georgia, serif' }, 'x'));
   assert.match(custom, /font-family:Georgia, serif/);
+  // На 720x1280 (k=720/1080≈0.6667) шрифт пилюли и диаметр цветных точек масштабируются тем же k,
+  // что и высота бара.
+  const small = render(React.createElement(kitAt(0, { width: 720, height: 1280 }).BrowserFrame, { url: 'x' }, 'x'));
+  assert.match(small, /font-size:14\.7px/);
+  assert.match(small, /width:10\.7px/);
 });
 
 test('flashOpacity keeps the plan-asserted values at the default fps 25', () => {

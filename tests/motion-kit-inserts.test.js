@@ -72,6 +72,24 @@ test('the speaker is fully back before the close starts and never goes dark whil
       }
     }
     assert.ok(sawClose, `fps ${fps}: expected the close phase to actually run for this insert`);
+
+    // Step 0 fix: тот же pipeline на вставке ровно минимальной длины (close + exit + 1 кадр) —
+    // здесь away-окно вырождается в 1 кадр (см. тест «never inverts from/to»), и это самый тесный
+    // случай для возврата спикера в фокус. С closeStart и до конца вставки спикер обязан быть уже
+    // резким и непрозрачным на каждом кадре.
+    const minFrames = kit.ref25(kit.CLOSE_FRAMES, fps) + kit.ref25(kit.CAMERA_DEFAULTS.away.exitFrames, fps) + 1;
+    const minInserts = kit.compileInserts([{ kind: 'stock', from: 0, to: minFrames / fps, src: 'stock/a.mp4' }], { fps, durationInFrames });
+    const [minInsert] = minInserts;
+    const minTrack = kit.withAways(
+      kit.compileCamera({ face: { x: 540, y: 787 }, shots: [{ at: 0, preset: 'W' }] }, { fps, width, height, durationInFrames }),
+      kit.awaysFromInserts(minInserts, { fps }),
+    );
+    const { start: minCloseStart } = kit.closeWindow(minInsert, fps);
+    for (let frame = minCloseStart; frame < minInsert.to; frame += 1) {
+      const cam = kit.cameraAt(minTrack, frame);
+      assert.ok(cam.opacity >= 0.99, `fps ${fps} frame ${frame} (min-length insert): speaker opacity ${cam.opacity} during close`);
+      assert.ok(cam.blur <= 0.05, `fps ${fps} frame ${frame} (min-length insert): speaker blur ${cam.blur} during close`);
+    }
   }
 });
 
