@@ -27,4 +27,18 @@ function includeInstalledSource(config, sourceDirectory) {
   };
 }
 
-module.exports = { includeInstalledSource };
+const MOTION_KIT_ALIAS = '@automontage/motion-kit';
+const MOTION_KIT_DIR = path.join(__dirname, '..', 'src', 'motion-kit');
+
+// Проектные motion-слои импортируют общие детали по стабильному имени, где бы ни лежал слой.
+function withMotionKitAlias(config) {
+  return {
+    ...config,
+    resolve: {
+      ...config.resolve,
+      alias: { ...(config.resolve?.alias || {}), [MOTION_KIT_ALIAS]: MOTION_KIT_DIR },
+    },
+  };
+}
+
+module.exports = { MOTION_KIT_ALIAS, MOTION_KIT_DIR, includeInstalledSource, withMotionKitAlias };
