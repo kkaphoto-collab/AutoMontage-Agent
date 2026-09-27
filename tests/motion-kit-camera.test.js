@@ -205,3 +205,39 @@ test('at 50 fps a punch k=1.15 grows at least 10 % within 12 frames', () => {
     punches: [{ at: 0, until: 5, k: 1.15 }] }, cfg50);
   assert.ok(kit.cameraAt(track, 12).s >= 1.10, `s=${kit.cameraAt(track, 12).s}`);
 });
+
+// Ревью нашло квадратичную стоимость: spring() Remotion заново проигрывает симуляцию от кадра 0
+// до текущего на каждый вызов, а цикл по panches вызывал spring() для КАЖДОГО кадра до конца
+// ролика, даже спустя долгое время после releaseFrames, когда множитель панча уже точно равен 1.
+// На 120 с × 60 fps с одним панчем это ~20 с на манифест вместо десятков мс.
+test('cameraAt does not re-simulate a released punch on every later frame (manifest stays fast)', () => {
+  const fps = 60;
+  const seconds = 120;
+  const durationInFrames = seconds * fps;
+  const items = Array.from({ length: 60 }, (_, i) => ({
+    id: `it${i}`, kind: 'text', at: i * 1.9 + 0.2, until: i * 1.9 + 0.2 + 1.5,
+    box: { x: 90, y: 300, w: 800, h: 160 },
+  }));
+  const shots = [{ at: 0, preset: 'W' }];
+  for (let t = 2; t < seconds; t += 4) shots.push({ at: t, preset: t % 8 < 4 ? 'M' : 'W' });
+  const plan = { captions: false, camera: { face, shots, punches: [{ at: 1, until: 2 }] }, items };
+  const cfg120 = { fps, width: 1080, height: 1920, durationInFrames, sfxLibrary: { sounds: {} } };
+  const t0 = Date.now();
+  const manifest = kit.buildManifest(kit.compileLayer(plan, cfg120));
+  const elapsed = Date.now() - t0;
+  assert.ok(elapsed < 1500, `manifest took ${elapsed} ms (expected < 1500 ms — a released punch must not be re-simulated every later frame)`);
+  assert.equal(manifest.camera.s.length, durationInFrames);
+});
+
+test('skipping a released punch does not change the camera values on a short layer', () => {
+  const track = kit.compileCamera({ face, shots: [{ at: 0, preset: 'W', drift: 'none' }],
+    punches: [{ at: 1, until: 3, k: 1.15 }] }, cfg);
+  // Эталон — точные значения s, снятые с немасштабированного (до фикса) прохода spring() на тех
+  // же кадрах: до панча, во время подъёма, в активном окне и далеко после releaseFrames (10 кадров
+  // на 25 fps после until=75 → окно активности заканчивается на кадре 85). Кадры 90/150/249 —
+  // именно те, где фикс заменяет вызов spring() на константу 1, поэтому равенство здесь и
+  // доказывает, что оптимизация не меняет результат.
+  const expected = [1, 1, 1.1585254886649308, 1.1500000001463953, 1, 1, 1];
+  const samples = [0, 24, 31, 70, 90, 150, 249].map((frame) => kit.cameraAt(track, frame).s);
+  assert.deepEqual(samples, expected);
+});

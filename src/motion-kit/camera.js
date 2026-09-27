@@ -74,7 +74,11 @@ export function cameraAt(track, frame) {
   let s = preset.s * (1 + cfg.drift.amp * grow);
 
   for (const punch of track.punches) {
-    if (frame < punch.from) continue;
+    // После релиза (until + releaseFrames) множитель панча уже точно равен 1 — не вызываем
+    // spring() дальше: Remotion заново проигрывает симуляцию от кадра 0 на каждый вызов, и цикл
+    // по всем кадрам до конца ролика делает манифест квадратичным по длине (120 с × 60 fps с
+    // одним панчем — секунды вместо десятков мс).
+    if (frame < punch.from || frame >= punch.until + ref25(cfg.punch.releaseFrames, fps)) continue;
     // spring() сам переводит кадры в секунды через переданный fps, поэтому реальную скорость
     // подъёма панча масштабировать не нужно — только releaseFrames ниже (это ramp, не spring).
     const on = spring({
