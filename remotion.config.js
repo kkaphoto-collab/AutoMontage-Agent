@@ -5,4 +5,10 @@ const { includeInstalledSource, withMotionKitAlias } = require('./scripts/remoti
 // The Remotion loader evaluates bundled config from its own module; it sets cwd
 // to the selected project root while loading. Capture that root before callbacks.
 const sourceDirectory = path.join(process.cwd(), 'src');
-Config.overrideWebpackConfig(config => withMotionKitAlias(includeInstalledSource(config, sourceDirectory)));
+// MOTION_KIT_DIR (default в withMotionKitAlias) верен только для обычного require из Node;
+// здесь код исполняется через eval из node_modules/@remotion/cli, поэтому каталог считаем от
+// того же process.cwd(), что и sourceDirectory выше.
+Config.overrideWebpackConfig(config => withMotionKitAlias(
+  includeInstalledSource(config, sourceDirectory),
+  path.join(sourceDirectory, 'motion-kit'),
+));

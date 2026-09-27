@@ -4,11 +4,19 @@ const path = require('node:path');
 const { withMotionKitAlias, MOTION_KIT_ALIAS } = require('../scripts/remotion-webpack');
 const { loadEsm } = require('./helpers/load-esm');
 
-test('webpack config resolves @automontage/motion-kit to the engine kit directory', () => {
+test('webpack config resolves @automontage/motion-kit to the engine kit directory by default', () => {
   const config = withMotionKitAlias({ resolve: { alias: { react: 'x' } }, module: { rules: [] } });
   assert.equal(MOTION_KIT_ALIAS, '@automontage/motion-kit');
   assert.equal(config.resolve.alias.react, 'x');
   assert.equal(config.resolve.alias[MOTION_KIT_ALIAS], path.join(__dirname, '..', 'src', 'motion-kit'));
+});
+
+test('webpack config resolves @automontage/motion-kit to an explicit kitDirectory when given', () => {
+  // remotion.config.js передаёт каталог от process.cwd(), потому что __dirname внутри eval
+  // настоящего Remotion CLI указывает в node_modules, а не в scripts/ (см. motion-kit-remotion-alias.test.js).
+  const explicit = path.join('/tmp', 'some-project', 'src', 'motion-kit');
+  const config = withMotionKitAlias({ resolve: { alias: {} }, module: { rules: [] } }, explicit);
+  assert.equal(config.resolve.alias[MOTION_KIT_ALIAS], explicit);
 });
 
 test('kit core converts seconds to frames on the frame grid', () => {
