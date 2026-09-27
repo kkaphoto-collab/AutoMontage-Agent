@@ -947,6 +947,7 @@ Expected: FAIL — `kit.animOf is not a function`.
 ```js
 // src/motion-kit/motion.js
 import { Easing, interpolate, spring } from 'remotion';
+import { ref25 } from './time.js';
 
 export const EASE = Object.freeze({ out: Easing.bezier(0.16, 1, 0.3, 1), inOut: Easing.bezier(0.65, 0, 0.35, 1) });
 const CLAMP = { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' };
@@ -968,32 +969,35 @@ export function animOf(item, frame, fps) {
   if (frame < item.from || frame >= item.until) return { ...out, o: 0 };
   const f = frame - item.from;
   const len = item.until - item.from;
+  // Длительности заданы в кадрах эталонных 25 fps и пересчитываются под fps композиции.
+  const r = (frames) => ref25(frames, fps);
   if (enter.kind === 'pop') {
     const sp = spring({ frame: f, fps, config: SPRINGS.pop });
     out.s = 0.5 + 0.5 * sp;
     out.rot += -10 * (1 - sp);
-    out.blur = interpolate(f, [0, 5], [8, 0], CLAMP);
-    out.o = interpolate(f, [0, 3], [0, 1], CLAMP);
+    out.blur = interpolate(f, [0, r(5)], [8, 0], CLAMP);
+    out.o = interpolate(f, [0, r(3)], [0, 1], CLAMP);
   } else if (enter.kind === 'fly') {
     const sp = spring({ frame: f, fps, config: SPRINGS.fly });
     const [fx, fy] = enter.from || [0, 60];
     out.s = 0.92 + 0.08 * sp;
     out.dx = fx * (1 - sp);
     out.dy = fy * (1 - sp);
-    out.o = interpolate(f, [0, 4], [0, 1], CLAMP);
-    out.blur = interpolate(f, [0, 6], [14, 0], CLAMP);
+    out.o = interpolate(f, [0, r(4)], [0, 1], CLAMP);
+    out.blur = interpolate(f, [0, r(6)], [14, 0], CLAMP);
   } else if (enter.kind === 'mask') {
-    const p = prog(f, 0, 8);
+    const p = prog(f, 0, r(8));
     out.clip = `inset(0 ${((1 - p) * 100).toFixed(2)}% 0 0 round 24px)`;
     out.dy = 24 * (1 - p);
-    out.blur = interpolate(f, [0, 6], [6, 0], CLAMP);
+    out.blur = interpolate(f, [0, r(6)], [6, 0], CLAMP);
   }
   if (enter.kind !== 'cut' && item.life?.parallax !== 0) {
     out.dy += (item.life?.parallax ?? 8) * interpolate(f, [0, len], [0, 1], CLAMP);
   }
   const exit = item.exit || { frames: 5, dir: 'down' };
   if (exit.frames > 0) {
-    const q = interpolate(frame, [item.until - exit.frames, item.until], [0, 1], { ...CLAMP, easing: Easing.in(Easing.quad) });
+    const exitFrames = r(exit.frames);
+    const q = interpolate(frame, [item.until - exitFrames, item.until], [0, 1], { ...CLAMP, easing: Easing.in(Easing.quad) });
     if (q > 0) {
       out.o *= 1 - q;
       out.s *= 1 - 0.06 * q;
@@ -1103,7 +1107,7 @@ Expected: FAIL — `kit.compileInserts is not a function`.
 
 ```js
 // src/motion-kit/inserts.js
-import { secToFrame } from './time.js';
+import { ref25, secToFrame } from './time.js';
 
 export const INSERT_KINDS = Object.freeze(['stock', 'screen', 'donor', 'scene']);
 const RETURN_FRAMES = 10;
@@ -1130,9 +1134,10 @@ export function compileInserts(inserts = [], { fps }) {
 }
 
 // Полноэкранная вставка закрывает спикера: он уходит на входе и возвращается к её концу.
-export function awaysFromInserts(inserts) {
+export function awaysFromInserts(inserts, { fps = 25 } = {}) {
+  const back = ref25(RETURN_FRAMES, fps);
   return inserts.filter((insert) => insert.cover)
-    .map((insert) => ({ from: insert.from, to: Math.max(insert.from + 1, insert.to - RETURN_FRAMES) }));
+    .map((insert) => ({ from: insert.from, to: Math.max(insert.from + 1, insert.to - back) }));
 }
 ```
 
@@ -1530,7 +1535,7 @@ export function compileItems(items = [], { fps, durationInFrames }) {
 // Один вход для рендера (Root.jsx) и для гейтов (buildManifest): всё в кадрах композиции.
 export function compileLayer(plan, { fps, width, height, durationInFrames, words = [], sfxLibrary = { sounds: {} } }) {
   const inserts = compileInserts(plan.inserts, { fps });
-  const camera = withAways(compileCamera(plan.camera, { fps, width, height, durationInFrames }), awaysFromInserts(inserts));
+  const camera = withAways(compileCamera(plan.camera, { fps, width, height, durationInFrames }), awaysFromInserts(inserts, { fps }));
   const items = compileItems(plan.items, { fps, durationInFrames });
   const cues = thinCues(sfxFromItems([...items, ...inserts], plan.sfx, { fps, library: sfxLibrary, durationInFrames }), { fps });
   const captions = plan.captions === false ? null : {
@@ -1916,22 +1921,27 @@ Expected: FAIL — `kit.revealProgress is not a function`.
 
 ```jsx
 // src/motion-kit/Inserts.jsx
-import { AbsoluteFill, OffthreadVideo, Sequence, staticFile, useCurrentFrame } from 'remotion';
+import { AbsoluteFill, OffthreadVideo, Sequence, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
 import { EASE, prog } from './motion.js';
+import { ref25 } from './time.js';
 
 export const REVEAL_FRAMES = 9;
 export const CLOSE_FRAMES = 6;
 const CARD = { top: 420, right: 56, bottom: 420, left: 130 };
 
 // 0 — вставка ещё карточкой внутри safe-зоны, 1 — на весь кадр; null — вставки нет.
-export function revealProgress(frame, insert) {
+// REVEAL/CLOSE — кадры эталонных 25 fps, пересчитываются под fps композиции.
+export function revealProgress(frame, insert, fps = 25) {
   if (frame < insert.from || frame >= insert.to) return null;
-  return prog(frame, insert.from, REVEAL_FRAMES) * (1 - prog(frame, insert.to - CLOSE_FRAMES, CLOSE_FRAMES, EASE.inOut));
+  const reveal = ref25(REVEAL_FRAMES, fps);
+  const close = ref25(CLOSE_FRAMES, fps);
+  return prog(frame, insert.from, reveal) * (1 - prog(frame, insert.to - close, close, EASE.inOut));
 }
 
 export function FullscreenReveal({ insert, children }) {
   const frame = useCurrentFrame();
-  const p = revealProgress(frame, insert);
+  const { fps } = useVideoConfig();
+  const p = revealProgress(frame, insert, fps);
   if (p === null) return null;
   const inset = (value) => (value * (1 - p)).toFixed(1);
   const clipPath = `inset(${inset(CARD.top)}px ${inset(CARD.right)}px ${inset(CARD.bottom)}px ${inset(CARD.left)}px round ${(28 * (1 - p)).toFixed(1)}px)`;
@@ -2675,15 +2685,17 @@ const span = (fromFrame, toFrame, fps, note) => ({ fromSec: r2(fromFrame / fps),
 const factor = (a, b) => (a > b ? a / b : b / a);
 
 // scale — короткая сторона кадра / 1080: порог сдвига лица 85 px задан для кадра 1080×1920.
-function detectCameraEvents(camera, t, scale = 1) {
+// fps — окно панч-ина 6 кадров задано для 25 fps (пружина kit живёт в секундах).
+function detectCameraEvents(camera, t, scale = 1, fps = 25) {
   const n = camera.s.length;
   const shiftPx = t.shiftPx * scale;
+  const punchWindow = Math.max(1, Math.round((6 * fps) / 25));
   const sharp = (f) => camera.opacity[f] >= 0.99 && camera.blur[f] < t.sharpBlurPx;
   const events = [];
   const weak = [];
   for (let f = 1; f < n; f += 1) {
     const b2 = Math.max(0, f - 2);
-    const b6 = Math.max(0, f - 6);
+    const b6 = Math.max(0, f - punchWindow);
     const jump = factor(camera.s[f], camera.s[b2]);
     const shift = Math.max(Math.abs(camera.dx[f] - camera.dx[b2]), Math.abs(camera.dy[f] - camera.dy[b2]));
     if (sharp(f) !== sharp(f - 1)) events.push({ frame: f, kind: 'focus' });
@@ -2693,7 +2705,7 @@ function detectCameraEvents(camera, t, scale = 1) {
   }
   const collapse = (list) => list.filter((e, i) => i === 0 || e.frame - list[i - 1].frame > 2);
   const kept = collapse(events);
-  const nearEvent = (w) => events.some((e) => Math.abs(e.frame - w.frame) <= 6);
+  const nearEvent = (w) => events.some((e) => Math.abs(e.frame - w.frame) <= punchWindow);
   return { events: kept, weak: collapse(weak.filter((w) => !nearEvent(w))), sharp };
 }
 
@@ -2716,7 +2728,7 @@ const frameScale = (manifest) => Math.min(manifest.width, manifest.height) / 108
 
 function gateRhythm(manifest, profile) {
   const { fps } = manifest;
-  const plans = speakerPlans(manifest.camera, detectCameraEvents(manifest.camera, profile.camera, frameScale(manifest)), fps);
+  const plans = speakerPlans(manifest.camera, detectCameraEvents(manifest.camera, profile.camera, frameScale(manifest), manifest.fps), fps);
   const longest = plans[0]?.sec ?? 0;
   const { stopSec, warnSec } = profile.rhythm;
   const status = longest > stopSec + 1e-9 ? 'fail' : longest > warnSec + 1e-9 ? 'warn' : 'pass';
@@ -2728,7 +2740,7 @@ function gateRhythm(manifest, profile) {
 }
 
 function gateWeakCuts(manifest, profile) {
-  const { weak } = detectCameraEvents(manifest.camera, profile.camera, frameScale(manifest));
+  const { weak } = detectCameraEvents(manifest.camera, profile.camera, frameScale(manifest), manifest.fps);
   return gate('G2', 'Слабые джамп-каты', {
     status: weak.length ? 'warn' : 'pass', value: weak.length, unit: 'шт.', threshold: '≥ 15 % или ≥ 85 px',
     spans: weak.slice(0, 5).map((w) => span(w.frame, w.frame + 1, manifest.fps, `скачок ${Math.round((factor(w.ratio, 1) - 1) * 100)} %`)),
