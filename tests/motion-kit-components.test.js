@@ -102,14 +102,23 @@ function fillBoxFromStyle(style) {
   return { left, top, right: left + w * s, bottom: top + h * s };
 }
 
-test('speakerFillStyle overscans the frame with a blur-safe margin (>= 15px, >= 3 sigma of blur 5px) on every side', () => {
+test('speakerFillStyle overscans the frame with a blur-safe margin (>= 3 sigma of the on-screen blur) on every side', () => {
+  // On-screen sigma боку размытия — blurPx * scale, потому что blur(...) применяется ДО scale()
+  // в transform: сам фильтр работает в исходных px копии, а масштаб потом растягивает картинку
+  // (и вместе с ней визуальный радиус размытия) в scale раз.
   const kit = kitAt(0);
   for (const [width, height] of [[1080, 1920], [1920, 1080]]) {
-    const box = fillBoxFromStyle(kit.speakerFillStyle({ width, height }));
-    assert.ok(-box.left >= 15, `${width}x${height}: left margin ${-box.left}`);
-    assert.ok(-box.top >= 15, `${width}x${height}: top margin ${-box.top}`);
-    assert.ok(box.right - width >= 15, `${width}x${height}: right margin ${box.right - width}`);
-    assert.ok(box.bottom - height >= 15, `${width}x${height}: bottom margin ${box.bottom - height}`);
+    const style = kit.speakerFillStyle({ width, height });
+    const blurMatch = /blur\(([\d.]+)px\)/.exec(style.filter);
+    assert.ok(blurMatch, `no blur() in filter: ${style.filter}`);
+    const scaleMatch = /scale\(([-\d.]+)\)/.exec(style.transform);
+    assert.ok(scaleMatch, `no scale() in transform: ${style.transform}`);
+    const minMargin = 3 * Number(blurMatch[1]) * Number(scaleMatch[1]);
+    const box = fillBoxFromStyle(style);
+    assert.ok(-box.left >= minMargin, `${width}x${height}: left margin ${-box.left} < ${minMargin}`);
+    assert.ok(-box.top >= minMargin, `${width}x${height}: top margin ${-box.top} < ${minMargin}`);
+    assert.ok(box.right - width >= minMargin, `${width}x${height}: right margin ${box.right - width} < ${minMargin}`);
+    assert.ok(box.bottom - height >= minMargin, `${width}x${height}: bottom margin ${box.bottom - height} < ${minMargin}`);
   }
 });
 
@@ -139,10 +148,10 @@ test('speakerTransform framing matches what the gates read: face moves by exactl
       if (!state.fill) {
         const [l, t] = map(0, 0);
         const [r, b] = map(width, height);
-        assert.ok(l <= 0.1, `${width}x${height}@${frame}: left gap ${l}`);
-        assert.ok(t <= 0.1, `${width}x${height}@${frame}: top gap ${t}`);
-        assert.ok(width - r <= 0.1, `${width}x${height}@${frame}: right gap ${width - r}`);
-        assert.ok(height - b <= 0.1, `${width}x${height}@${frame}: bottom gap ${height - b}`);
+        assert.ok(l <= 0.01, `${width}x${height}@${frame}: left gap ${l}`);
+        assert.ok(t <= 0.01, `${width}x${height}@${frame}: top gap ${t}`);
+        assert.ok(width - r <= 0.01, `${width}x${height}@${frame}: right gap ${width - r}`);
+        assert.ok(height - b <= 0.01, `${width}x${height}@${frame}: bottom gap ${height - b}`);
       }
     }
   }
@@ -174,10 +183,15 @@ test('SpeakerLayer keeps Freeze mounted and toggles active instead of remounting
   const cfg = { fps: 25, width: 1080, height: 1920, durationInFrames: 250 };
   const track = kitAt(0).compileCamera({ face: { x: 540, y: 787 }, shots: [{ at: 0, preset: 'W' }, { at: 2, preset: 'L' }] }, cfg);
   const atLast = render(React.createElement(kitAt(200).SpeakerLayer, { src: 'speaker.mp4', track, lastFrame: 200 }));
-  assert.doesNotMatch(atLast, /data-freeze/);
+  // Кадр 200 внутри бокового плана L (fill:true) — обе копии смонтированы через Freeze, но ещё
+  // не держат кадр (active=false): data-freeze-active="false" доказывает, что обёртка осталась
+  // на месте, а не пропала вместе с video, как было бы при условном рендере <Freeze> целиком.
+  assert.equal((atLast.match(/data-freeze-active="false"/g) || []).length, 2);
+  assert.doesNotMatch(atLast, /data-freeze="/);
   const afterLast = render(React.createElement(kitAt(201).SpeakerLayer, { src: 'speaker.mp4', track, lastFrame: 200 }));
-  // Кадр 201 внутри бокового плана L (fill:true) — заморожены обе копии: фон и основной кадр.
+  // Кадр 201 внутри того же плана — заморожены обе копии: фон и основной кадр.
   assert.equal((afterLast.match(/data-freeze="200"/g) || []).length, 2);
+  assert.equal((afterLast.match(/data-freeze-active="true"/g) || []).length, 2);
 });
 
 test('SpeakerLayer fades the fill and main copies together via the group opacity, not per-copy geometry', () => {
@@ -189,9 +203,12 @@ test('SpeakerLayer fades the fill and main copies together via the group opacity
   const state = kit.cameraAt(away, frame);
   assert.ok(state.visible && state.opacity > 0.01 && state.opacity < 0.99, `нужен частичный уход, opacity=${state.opacity}`);
   const html = render(React.createElement(kit.SpeakerLayer, { src: 'speaker.mp4', track: away, lastFrame: 200 }));
-  const outer = /<div style="([^"]*)"/.exec(html);
-  assert.ok(outer, `no styled outer div found: ${html}`);
-  assert.match(outer[1], /opacity:0\.5/);
+  const styles = [...html.matchAll(/<div style="([^"]*)"/g)].map((m) => m[1]);
+  // Ровно один styled div на каждую копию (fill + main) плюс внешняя группа; Freeze-обёртки стиля
+  // не несут. opacity должна стоять только на внешней группе — по копиям делать нечего.
+  assert.equal(styles.length, state.fill ? 3 : 2, `unexpected number of styled divs: ${html}`);
+  assert.match(styles[0], /opacity:0\.5/);
+  for (const inner of styles.slice(1)) assert.doesNotMatch(inner, /opacity/);
 });
 
 test('kitBoxStyle draws exactly the box itemExtentAt measures for the same frame (the gate sees what is drawn)', () => {
