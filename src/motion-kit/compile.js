@@ -1,0 +1,50 @@
+import { compileCamera, withAways } from './camera.js';
+import { buildChunks, captionLane } from './captions.js';
+import { awaysFromInserts, compileInserts } from './inserts.js';
+import { sfxFromItems, thinCues } from './sfx.js';
+import { secToFrame } from './time.js';
+
+export const KIT_VERSION = 1;
+const ITEM_KINDS = ['text', 'card', 'media'];
+
+export function compileItems(items = [], { fps, durationInFrames }) {
+  const ids = new Set();
+  return items.map((item, i) => {
+    if (!item.id || ids.has(item.id)) throw new Error(`items[${i}]: нужен уникальный id`);
+    ids.add(item.id);
+    if (!ITEM_KINDS.includes(item.kind)) throw new Error(`items ${item.id}: kind должен быть ${ITEM_KINDS.join('|')}`);
+    const b = item.box;
+    if (!b || ![b.x, b.y, b.w, b.h].every(Number.isFinite)) throw new Error(`items ${item.id}: нужен box {x,y,w,h}`);
+    const from = secToFrame(item.at, fps);
+    const until = Math.min(durationInFrames, secToFrame(item.until, fps));
+    if (!(until > from)) throw new Error(`items ${item.id}: until должен быть больше at`);
+    return {
+      id: item.id, kind: item.kind, from, until, box: { ...b }, rot: item.rot || 0,
+      enter: item.enter || { kind: 'fly' }, exit: item.exit || { frames: 5, dir: 'down' }, life: item.life || {},
+      bleed: Boolean(item.bleed), sfx: item.sfx ?? null,
+      typeFrom: item.type ? secToFrame(item.type.from, fps) : undefined,
+      typeTo: item.type ? secToFrame(item.type.to, fps) : undefined,
+      typeSfx: item.type ? item.type.sfx : undefined,
+      props: item.props || {},
+    };
+  });
+}
+
+// Один вход для рендера (Root.jsx) и для гейтов (buildManifest): всё в кадрах композиции.
+export function compileLayer(plan, { fps, width, height, durationInFrames, words = [], sfxLibrary = { sounds: {} } }) {
+  const inserts = compileInserts(plan.inserts, { fps });
+  const camera = withAways(compileCamera(plan.camera, { fps, width, height, durationInFrames }), awaysFromInserts(inserts, { fps }));
+  const items = compileItems(plan.items, { fps, durationInFrames });
+  const cues = thinCues(sfxFromItems([...items, ...inserts], plan.sfx, { fps, library: sfxLibrary, durationInFrames }), { fps });
+  const captions = plan.captions === false ? null : {
+    chunks: buildChunks(words, plan.captions?.chunk),
+    lane: plan.captions?.lane || captionLane(width, height),
+    hide: (plan.captions?.hide || []).map((h) => ({ from: h.from, to: h.to })),
+  };
+  return {
+    kitVersion: KIT_VERSION, fps, width, height, durationInFrames,
+    camera, items, inserts, cues, captions,
+    hook: plan.hook || 'speaker',
+    waivers: plan.waivers || [],
+  };
+}
