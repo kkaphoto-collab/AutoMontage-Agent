@@ -114,12 +114,14 @@ test('a covering insert at the minimum cover length never inverts from/to in its
 });
 
 test('compileInserts rejects a cover insert shorter than the return-before-close minimum, naming the insert and the minimum in frames and seconds', () => {
+  // Литеральные секунды, а не то же выражение (ceilToHundredths), что использует сам
+  // compileInserts — иначе тест мог бы повторить ошибку формулы и не заметить её. Оба числа
+  // проверены отдельно: minFrames/fps даёт ровно 0.68 при fps 25 (17 кадров) и 0.66 при fps 50
+  // (33 кадра), без скрытого округления вверх.
+  const MIN_SEC = { 25: 0.68, 50: 0.66 };
   for (const fps of [25, 50]) {
     const minFrames = kit.ref25(kit.CLOSE_FRAMES, fps) + kit.ref25(kit.CAMERA_DEFAULTS.away.exitFrames, fps) + 1;
-    // Секунды в сообщении округлены ВВЕРХ (не к ближайшему): plan-автор, который дословно
-    // перепишет это число в plan.js, обязан получить вставку не короче минимума в кадрах — иначе
-    // округление к ближайшему могло показать значение, которое всё ещё не проходит проверку.
-    const minSec = Math.ceil((minFrames / fps) * 100) / 100;
+    const minSec = MIN_SEC[fps];
     // Ровно минимум — проходит.
     assert.doesNotThrow(() => kit.compileInserts([{ kind: 'stock', from: 0, to: minFrames / fps }], { fps }));
     // На один кадр короче — падает с понятной причиной, минимумом в кадрах и в секундах.

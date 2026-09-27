@@ -466,6 +466,9 @@ test('BrowserFrame URL pill defaults to a sans-serif font (overridable), ellipsi
   assert.ok(pillMatch, `pill span not found: ${html}`);
   assert.match(pillMatch[1], /display:block/);
   assert.doesNotMatch(pillMatch[1], /display:flex/);
+  // lineHeight равен той же px(36), что и height пилюли (при k=1 на 1080x1920 это 36px) — так
+  // текст остаётся вертикально отцентрован без display:flex/align-items.
+  assert.match(pillMatch[1], /line-height:36px/);
   const custom = render(React.createElement(kit.BrowserFrame, { url: 'x', fontFamily: 'Georgia, serif' }, 'x'));
   assert.match(custom, /font-family:Georgia, serif/);
   // На 720x1280 (k=720/1080≈0.6667) шрифт пилюли и диаметр цветных точек масштабируются тем же k,
@@ -519,4 +522,40 @@ test('cueVolume fades over the same real time at fps 50: a 60-frame cue fades ov
   assert.ok(Math.abs(kit.cueVolume(cue, 50, -5, 50) - full) < 1e-9, 'local frame 50: fade has not started yet, full volume');
   assert.ok(Math.abs(kit.cueVolume(cue, 55, -5, 50) - full * 0.5) < 1e-9, 'local frame 55: exactly halfway through the 10-frame fade');
   assert.ok(Math.abs(kit.cueVolume(cue, 59, -5, 50) - full * 0.1) < 1e-9, 'local frame 59: one frame before the cue ends, 0.1 of full');
+});
+
+// Ревью code-quality к Task 17 (мутационное тестирование): remotion-stub всегда зовёт volume(0),
+// поэтому предыдущие тесты SfxTrack проверяли cueVolume только как отдельную чистую функцию —
+// сам компонент мог бы молча звать её как cueVolume(cue, f) или cueVolume(cue, f, masterDb),
+// потеряв masterDb и/или fps композиции, и ни один существующий тест этого бы не заметил (обе
+// «урезанные» сигнатуры дают ровно то же значение на localFrame=0, где стаб всё и проверяет).
+// Здесь Audio подменяется так, чтобы captured[0].volume был настоящим callback-ом из SfxTrack, и
+// мы зовём его сами на разных локальных кадрах — а не полагаемся на то, что стаб вызовет его.
+test('SfxTrack forwards both masterDb and the composition fps into cueVolume, not just cue and frame', () => {
+  const captured = [];
+  const stub = { ...remotionStub({ frame: 0, fps: 50 }), Audio: (p) => { captured.push(p); return null; } };
+  const kit = loadEsm('src/motion-kit/index.js', { stubs: { remotion: stub } });
+  const cue = { id: 'a', file: 'sfx/a.wav', startFrame: 0, durationFrames: 60, vol: 0.7 };
+  render(React.createElement(kit.SfxTrack, { cues: [cue], masterDb: 0 }));
+  assert.equal(captured.length, 1);
+  assert.ok(Math.abs(captured[0].volume(0) - 0.7) < 1e-9, `local frame 0: expected full 0.7 (masterDb 0 dB), got ${captured[0].volume(0)}`);
+  assert.ok(Math.abs(captured[0].volume(55) - 0.7 * 0.5) < 1e-9, `local frame 55 at fps 50: expected half (10-frame fade), got ${captured[0].volume(55)}`);
+});
+
+// Ревью code-quality к Task 17: границы уровня. cue.vol > 1 (кто-то поставил громкость плана
+// «на глаз») не должен раздувать итоговую громкость выше исходника — клэмп в [0, 1]. masterDb
+// обязан быть конечным числом ≤ 0: null из layer.json (поле sfxMasterDb не заполнено) не должен
+// тихо стать 0 дБ — это совсем другая громкость, чем «оставить как есть»; undefined — это и есть
+// «оставить как есть», поэтому только он держит дефолт −5.
+test('cueVolume clamps cue.vol into [0,1] and rejects a masterDb that is not a finite number <= 0', () => {
+  const kit = kitAt(0);
+  const hot = { id: 'hot', file: 'sfx/hot.wav', startFrame: 0, durationFrames: 30, vol: 1.5 };
+  assert.equal(kit.cueVolume(hot, 0, 0), 1, 'vol 1.5 at masterDb 0 dB, frame 0 (tail 1) must clamp to 1, not 1.5');
+  const negative = { ...hot, vol: -0.4 };
+  assert.equal(kit.cueVolume(negative, 0, 0), 0, 'a negative vol must clamp to 0, not go negative');
+  const normal = { id: 'n', file: 'sfx/n.wav', startFrame: 0, durationFrames: 30, vol: 0.7 };
+  assert.ok(Math.abs(kit.cueVolume(normal, 0, undefined) - 0.7 * 10 ** (-5 / 20)) < 1e-9, 'explicit undefined masterDb keeps the -5 default');
+  assert.throws(() => kit.cueVolume(normal, 0, null), /masterDb/, 'null must not silently become 0 dB');
+  assert.throws(() => kit.cueVolume(normal, 0, NaN), /masterDb/);
+  assert.throws(() => kit.cueVolume(normal, 0, 3), /masterDb/, 'a positive masterDb (boosting effects) is rejected');
 });
