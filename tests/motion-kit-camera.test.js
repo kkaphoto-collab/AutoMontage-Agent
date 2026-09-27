@@ -72,3 +72,14 @@ test('away hides the speaker after the enter ramp and brings it back', () => {
   assert.equal(kit.cameraAt(track, 115).visible, true);
   assert.equal(kit.cameraAt(track, 60).s <= 1.25, true);
 });
+
+test('autoShots cuts on word ends, keeps every shot within 2.2 s and alternates presets', () => {
+  const words = Array.from({ length: 40 }, (_, i) => ({ w: `слово${i}`, t: i % 7 === 6 ? `слово${i}.` : `слово${i}`, s: i * 0.5, e: i * 0.5 + 0.4 }));
+  const shots = kit.autoShots(words, { endSec: 20.8 });
+  assert.equal(shots[0].at, 0);
+  const bounds = [...shots.map((s) => s.at), 20.8];
+  for (let i = 1; i < bounds.length; i += 1) assert.ok(bounds[i] - bounds[i - 1] <= 2.2 + 1e-9, `shot ${i} ${bounds[i] - bounds[i - 1]}`);
+  for (const shot of shots.slice(1)) assert.ok(words.some((w) => Math.abs(w.e - shot.at) < 1e-9));
+  assert.deepEqual(shots.slice(0, 6).map((s) => s.preset), ['W', 'M', 'W', 'L', 'W', 'R']);
+  assert.ok(shots.every((s) => s.drift === (s.preset === 'W' ? 'in' : 'out')));
+});

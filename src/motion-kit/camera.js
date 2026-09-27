@@ -100,3 +100,26 @@ export function cameraAt(track, frame) {
   const opacity = 1 - gone;
   return { s, requested, dx, dy, blur, dim, opacity, visible: opacity > 0.01, shot: shot.index, fill: Boolean(preset.fill) };
 }
+
+const PUNCT = /[.,!?…:;]$/u;
+
+// Раскадровка по словам: план не длиннее maxSec, режем по концу слова, по возможности на знаке препинания.
+export function autoShots(words, { endSec, maxSec = 2.2, minSec = 1.2, cycle = ['W', 'M', 'W', 'L', 'W', 'R'] } = {}) {
+  const drift = (preset) => (preset === 'W' ? 'in' : 'out');
+  const shots = [{ at: 0, preset: cycle[0], drift: drift(cycle[0]) }];
+  let last = 0;
+  let k = 1;
+  const end = Number.isFinite(endSec) ? endSec : (words.at(-1)?.e ?? 0);
+  for (let i = 0; i < words.length; i += 1) {
+    const cut = words[i].e;
+    const next = i + 1 < words.length ? words[i + 1].e : end;
+    const since = cut - last;
+    if (since >= minSec && (PUNCT.test(words[i].t ?? words[i].w) || next - last > maxSec)) {
+      const preset = cycle[k % cycle.length];
+      shots.push({ at: Number(cut.toFixed(3)), preset, drift: drift(preset) });
+      last = cut;
+      k += 1;
+    }
+  }
+  return shots;
+}
