@@ -246,3 +246,59 @@ test('kitBoxStyle draws exactly the box itemExtentAt measures for the same frame
     }
   }
 });
+
+test('FullscreenReveal opens from a safe-zone card to the full frame and closes before the end', () => {
+  const kit = kitAt(0);
+  const insert = { id: 'stock-1', kind: 'stock', from: 50, to: 100, src: 'stock/a.mp4', kb: [1.03, 1.1], cover: true };
+  assert.equal(kit.revealProgress(49, insert), null);
+  assert.equal(kit.revealProgress(50, insert), 0);
+  assert.equal(kit.revealProgress(70, insert), 1);
+  assert.ok(kit.revealProgress(98, insert) < 1);
+  const html = render(React.createElement(kitAt(70).StockInsert, { insert }));
+  assert.match(html, /data-kit-bleed="stock-1"/);
+  assert.match(html, /data-sequence-from="50"/);
+  assert.match(html, /<video src="\/static\/stock\/a\.mp4" muted=""/);
+  assert.equal(render(React.createElement(kitAt(120).StockInsert, { insert })), '');
+});
+
+// Отклонение от плана (задача 15): CARD больше не жёсткая константа {top:420, right:56, bottom:420,
+// left:130} под 1080x1920 — на 1920x1080 она давала карточку высотой 240px. revealCard(width, height)
+// считает инсеты от той же safe-зоны, что и текст, поэтому подходит под оба соотношения сторон.
+test('revealCard derives its card insets from the safe-zone rect for both aspect ratios', () => {
+  const kit = kitAt(0);
+  const safe9x16 = kit.safeRect(1080, 1920);
+  assert.deepEqual(kit.revealCard(1080, 1920), {
+    top: safe9x16.top, right: 1080 - safe9x16.right, bottom: 1920 - safe9x16.bottom, left: safe9x16.left,
+  });
+  const safe16x9 = kit.safeRect(1920, 1080);
+  assert.deepEqual(kit.revealCard(1920, 1080), {
+    top: safe16x9.top, right: 1920 - safe16x9.right, bottom: 1080 - safe16x9.bottom, left: safe16x9.left,
+  });
+});
+
+test('FullscreenReveal clips to nothing (full frame, no rounding) once revealProgress reaches 1', () => {
+  const insert = { id: 'stock-1', kind: 'stock', from: 50, to: 100, src: 'stock/a.mp4' };
+  const html = render(React.createElement(kitAt(70).FullscreenReveal, { insert }, 'x'));
+  assert.match(html, /clip-path:inset\(0\.0px 0\.0px 0\.0px 0\.0px round 0\.0px\)/);
+});
+
+// Отклонение от плана (задача 15): kb необязателен в контракте (`kb?: [1.03, 1.1]`) — StockInsert
+// сам подставляет дефолт, а не падает на insert.kb[0], если вставка ещё не прошла compileInserts
+// (там дефолт уже есть) или её собрали вручную в тесте/другом месте без него.
+test('StockInsert defaults kb to [1.03, 1.1] and renders without throwing when it is absent', () => {
+  const insert = { id: 'stock-2', kind: 'stock', from: 50, to: 100, src: 'stock/b.mp4' };
+  assert.doesNotThrow(() => render(React.createElement(kitAt(70).StockInsert, { insert })));
+  const html = render(React.createElement(kitAt(50).StockInsert, { insert }));
+  assert.match(html, /scale\(1\.0300\)/);
+});
+
+// Отклонение от плана (задача 15): добавлен тест на fps 50, требуемый ревьюером — REVEAL/CLOSE
+// заданы в кадрах эталонных 25 fps и обязаны пересчитываться под fps композиции без изменения
+// длительности в секундах.
+test('revealProgress keeps the same reveal timing in seconds when fps doubles from 25 to 50', () => {
+  const kit = kitAt(0);
+  const insert = { id: 'stock-3', kind: 'stock', from: 0, to: 1000 };
+  const revealFrames50 = 2 * kit.REVEAL_FRAMES;
+  assert.ok(kit.revealProgress(revealFrames50 - 1, insert, 50) < 1);
+  assert.equal(kit.revealProgress(revealFrames50, insert, 50), 1);
+});
