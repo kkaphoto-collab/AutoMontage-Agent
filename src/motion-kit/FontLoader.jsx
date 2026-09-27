@@ -53,19 +53,56 @@ export function loadFontFaces(faces, { FontFaceImpl, fontSet, toUrl }) {
   });
 }
 
-// Шрифты слоя из public/fonts (OFL с кириллицей); рендер ждёт их загрузки. faces — иммутабельный
-// набор экземпляра: передавайте один и тот же модульный литерал (например, экспортированную
-// константу из layer.json-обёртки), а не новый массив на каждый рендер Root.jsx — эффект грузит
-// шрифты один раз при монтировании ([] в зависимостях, как componentDidMount) и не отслеживает
-// изменения faces.
-export function FontLoader({ faces }) {
+// Шрифты слоя из public/fonts (OFL с кириллицей). FontLoader — ГЕЙТ, а не просто индикатор
+// загрузки: children не рисуются, пока faces не загрузились и не попали в document.fonts (весь
+// это время Remotion держит рендер через delayRender). Корень бага ревью round 2: раньше
+// FontLoader ничего не гейтил, а просто грузил шрифты РЯДОМ с остальным деревом — сосед (Subtitles),
+// который меряет ширину текста в своём собственном layout-эффекте, мог измерить его РАНЬШЕ, чем
+// шрифт был готов; какой кадр Remotion откроет первым — недетерминировано (concurrency > 1, разные
+// вкладки/процессы), поэтому одна и та же композиция на разных прогонах давала разный кегль на
+// соседних кадрах одного chunk. Теперь дети вообще не существуют в дереве до готовности шрифтов, а
+// Subtitles.jsx дополнительно ждёт свой шрифт сам (defence in depth).
+//
+// В SSR/тестах (нет document) — рендерим children сразу: измерять DOM всё равно негде, а блокировка
+// forever сломала бы каждый существующий тест, который рендерит компоненты кита в изоляции. Плановый
+// тест (`calls.delay === 1`) продолжает выполняться — delayRender зовётся всегда, независимо от
+// среды.
+//
+// faces — иммутабельный набор экземпляра: передавайте один и тот же модульный литерал (например,
+// экспортированную константу из layer.json-обёртки), а не новый массив на каждый рендер Root.jsx —
+// эффект грузит шрифты один раз при монтировании ([] в зависимостях, как componentDidMount) и не
+// отслеживает изменения faces.
+//
+// settle создаётся ОДИН раз на инстанс компонента (useState — как handle, а не заново внутри
+// эффекта): под React StrictMode эффект в dev монтируется/размонтируется/снова монтируется на
+// первом рендере — общий на все эти прогоны guard не даёт continueRender/cancelRender выстрелить
+// дважды на один handle. Комментарий про "повторный continueRender бросает" был неверным (в
+// Remotion 4.0.504 повторный continueRender/cancelRender на уже продолженный handle — no-op, а не
+// исключение) — настоящая причина именно StrictMode.
+export function FontLoader({ faces, children = null }) {
   const [handle] = useState(() => delayRender('motion-kit: шрифты'));
+  const [settle] = useState(() => settleOnce());
+  // Лениво: в SSR/тестах document не существует — считаем шрифты «готовыми» сразу же, дети
+  // рисуются в первом же (и единственном для SSR) рендере.
+  const [ready, setReady] = useState(() => typeof document === 'undefined');
   useEffect(() => {
-    const settle = settleOnce();
+    if (typeof document === 'undefined') {
+      settle(() => continueRender(handle));
+      return undefined;
+    }
+    let cancelled = false;
     loadFontFaces(faces, { FontFaceImpl: FontFace, fontSet: document.fonts, toUrl: staticFile })
-      .then(() => settle(() => continueRender(handle)))
+      .then(() => {
+        if (cancelled) return;
+        setReady(true);
+        // Один кадр анимации, чтобы React успел закоммитить ready=true (и React реально отрисовал
+        // children с уже готовым шрифтом) ДО того, как Remotion получит разрешение снять
+        // скриншот — иначе возможна гонка между setState и самим снимком кадра.
+        requestAnimationFrame(() => settle(() => continueRender(handle)));
+      })
       .catch((error) => settle(() => cancelRender(error)));
+    return () => { cancelled = true; settle(() => continueRender(handle)); };
     // [] — намеренно: faces иммутабельны, грузим один раз на mount (см. комментарий выше).
   }, []);
-  return null;
+  return ready ? children : null;
 }

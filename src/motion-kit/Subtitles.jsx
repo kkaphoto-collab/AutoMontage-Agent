@@ -1,10 +1,9 @@
 import { useLayoutEffect, useRef } from 'react';
 import { cancelRender, continueRender, delayRender, useCurrentFrame, useVideoConfig } from 'remotion';
-import { captionFontSize, captionSpans, narrowFitBounds } from './captions.js';
+import { captionFontSize, captionSpans, fitCaptionWidth, round1 } from './captions.js';
 import { secToFrame } from './time.js';
 import { normWord } from './words.js';
 
-const round1 = (value) => Math.round(value * 10) / 10;
 // Тень при кегле 44px — «0 3px 12px», зафиксированные тестами отношения к самому кеглю.
 const SHADOW_Y_RATIO = 3 / 44;
 const SHADOW_BLUR_RATIO = 12 / 44;
@@ -23,11 +22,11 @@ const LINE_HEIGHT_CSS = 1.1;
 //
 // Кегль — от разрешения композиции (тот же k, что captionLane использует под safe-зону), а не от
 // высоты полосы: кастомная полоса не должна раздувать текст. captionFontSize только УМЕНЬШАЕТ base
-// под тесную полосу (высота + запас под тень). Ширина — nowrap с автоподгонкой: как TextBox в
-// src/motion/parts.jsx (useLayoutEffect + delayRender + бинарный поиск по scrollWidth), только
-// подгоняем ширину одной строки, а не перенос. В SSR-тестах layout-эффекты не выполняются, поэтому
-// рендерится непорезанный (до подгонки) размер — captionFontSize уже гарантирует, что он не вылезет
-// по высоте, а перенос строк исключён самим nowrap.
+// под тесную полосу (высота + запас под тень). Ширина — nowrap с автоподгонкой (fitCaptionWidth),
+// как TextBox в src/motion/parts.jsx (useLayoutEffect + delayRender + бинарный поиск по
+// scrollWidth), только подгоняем ширину одной строки, а не перенос. В SSR-тестах layout-эффекты не
+// выполняются, поэтому рендерится непорезанный (до подгонки) размер — captionFontSize уже
+// гарантирует, что он не вылезет по высоте, а перенос строк исключён самим nowrap.
 export function Subtitles({ chunks, lane, hide = [], fontFamily = 'sans-serif', fontSize, color = '#ffffff',
   dimOpacity = 0.45, accent = null, accentWords = [] }) {
   const frame = useCurrentFrame();
@@ -44,31 +43,49 @@ export function Subtitles({ chunks, lane, hide = [], fontFamily = 'sans-serif', 
   const textRef = useRef(null);
   useLayoutEffect(() => {
     const el = textRef.current;
-    if (!el) return; // нечего показывать — подгонять нечего, delayRender не нужен.
+    if (!el) return undefined; // нечего показывать — подгонять нечего, delayRender не нужен.
+    // Отклонение round 2 (детерминизм — реальный баг из ревью): сброс к size ДО замера, синхронно,
+    // раньше любого await. Без этого DOM мог остаться на кегле, подобранном для ПРЕДЫДУЩЕГО chunk
+    // или на предыдущем кадре, пока идёт ожидание шрифта ниже — теперь итог всегда зависит только от
+    // (текст, ширина полосы, size, шрифт), никогда от того, какой кадр Remotion открыл первым.
+    el.style.fontSize = `${size}px`;
     const handle = delayRender('motion-kit: подгонка субтитров');
-    // Измерение синхронно (scrollWidth уже доступен сразу после layout), в отличие от TextBox,
-    // которому нужен await document.fonts.load — поэтому здесь не нужен cancelled-флаг на случай
-    // размонтирования посреди async-паузы: цикл всегда успевает завершиться до commit.
-    try {
-      let low = 1;
-      let high = size;
-      // 0.25px — тот же порог сходимости, что и в TextBox.
-      while (high - low > 0.25) {
-        const mid = (low + high) / 2;
-        el.style.fontSize = `${mid}px`;
-        const fits = el.scrollWidth <= lane.w + 1;
-        ({ low, high } = narrowFitBounds({ low, high, fits }));
+    let cancelled = false;
+    (async () => {
+      try {
+        // Замер обязан идти РЕАЛЬНЫМИ метриками шрифта, а не фолбэка: измерение до готовности
+        // шрифта — корень бага ревью round 2 (одна вкладка рендерит первый кадр до того, как
+        // FontLoader успел догрузить шрифт, другая — после; ширина текста в двух шрифтах разная,
+        // итоговый кегль расходится между вкладками при одинаковом рендере). FontLoader теперь сам
+        // гейт (не пропускает children, пока шрифты не готовы), но Subtitles всё равно ждёт СВОЙ
+        // шрифт сам — defence in depth на случай, если его когда-нибудь используют без гейта.
+        if (typeof document !== 'undefined' && document.fonts) {
+          await document.fonts.load(`800 ${size}px "${fontFamily}"`);
+        }
+        if (cancelled) return;
+        // Запас под тень с обеих сторон, чтобы overflow:hidden полосы не срезал её на подогнанном
+        // кегле; floor 60% и явная ошибка при провале — внутри чистой fitCaptionWidth (тестируется
+        // отдельно, без браузера).
+        const available = lane.w - 2 * shadowBlur;
+        const fitted = fitCaptionWidth({
+          base: size, available, text: chunk.text,
+          measure: (trial) => { el.style.fontSize = `${trial}px`; return el.scrollWidth; },
+        });
+        if (!cancelled) el.style.fontSize = `${fitted}px`;
+      } catch (error) {
+        if (!cancelled) cancelRender(error);
+      } finally {
+        if (!cancelled) continueRender(handle);
       }
-      el.style.fontSize = `${Math.floor(low * 4) / 4}px`;
-    } catch (error) {
-      cancelRender(error);
-    } finally {
-      continueRender(handle);
-    }
+    })();
+    // cancelled/continueRender-в-cleanup — как в TextBox: если этот эффект снимается (новый chunk,
+    // размонтирование) раньше, чем завершился await, Remotion не должен зависнуть на невыполненном
+    // delayRender.
+    return () => { cancelled = true; continueRender(handle); };
     // Подгонка обязана перезапускаться только когда меняется реально видимый текст, доступная
-    // ширина полосы, расчётный (до подгонки) кегль или шрифт — не на каждый кадр внутри одного и
-    // того же chunk (иначе каждый кадр видео ждал бы новый delayRender).
-  }, [chunk?.text, lane.w, size, fontFamily]);
+    // ширина полосы, расчётный (до подгонки) кегль, запас под тень или шрифт — не на каждый кадр
+    // внутри одного и того же chunk (иначе каждый кадр видео ждал бы новый delayRender).
+  }, [chunk?.text, lane.w, size, shadowBlur, fontFamily]);
 
   if (!chunk) return null;
   const accentSet = accent ? new Set(accentWords.map(normWord)) : null;

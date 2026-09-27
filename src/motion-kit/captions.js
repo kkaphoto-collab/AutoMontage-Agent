@@ -51,7 +51,18 @@ export function buildChunks(words, { maxWords = 4, maxChars = 20, hardGap = 0.3,
 // перевод секунд в кадры, что compileItems/compileInserts используют для всех остальных границ
 // плана, поэтому окно hide, заданное теми же секундами, что и вставка (insert.from/to), вырезает
 // ровно её кадры (проверено тестом рядом с compileInserts). until клэмпится под durationInFrames.
+// fps/durationInFrames — обязательные числа не просто по контракту, а потому что раньше их
+// отсутствие (например, опечатка в позиционном вызове) молча давало NaN-границы и captionSpans
+// тихо возвращал пустой список без единой ошибки — Subtitles или buildManifest просто «теряли»
+// субтитры без всякой подсказки почему. durationInFrames: Infinity — легальное значение (см.
+// activeChunk ниже, которому длина ролика не важна), поэтому разрешён явно.
 export function captionSpans(chunks, { hide = [], fps, durationInFrames } = {}) {
+  if (!(Number.isFinite(fps) && fps > 0)) {
+    throw new Error(`captionSpans: fps должен быть положительным конечным числом — получено ${String(fps)}`);
+  }
+  if (!(Number.isFinite(durationInFrames) || durationInFrames === Infinity)) {
+    throw new Error(`captionSpans: durationInFrames должен быть конечным числом или Infinity — получено ${String(durationInFrames)}`);
+  }
   const hideFrames = hide
     .map((h) => [secToFrame(h.from, fps), secToFrame(h.to, fps)])
     .filter(([from, to]) => to > from);
@@ -90,8 +101,12 @@ export function captionSpans(chunks, { hide = [], fps, durationInFrames } = {}) 
 // Секундная развёртка для plan.js и внешних вызовов (миллиметраж режиссуры) — тот же кадр, что
 // видит captionSpans, только на входе секунды. durationInFrames вызывающему не важен: activeChunk
 // смотрит только на границы самих chunks/hide, а не на длину ролика, поэтому клэмп отключён
-// (Infinity).
-export function activeChunk(chunks, sec, hide = [], fps = 25) {
+// (Infinity). fps обязателен (без дефолта 25) — молчаливый дефолт уже один раз маскировал разницу
+// между «забыли передать fps» и «явно хотели 25».
+export function activeChunk(chunks, sec, hide = [], fps) {
+  if (!(Number.isFinite(fps) && fps > 0)) {
+    throw new Error(`activeChunk: fps должен быть положительным конечным числом — получено ${String(fps)}`);
+  }
   const frame = secToFrame(sec, fps);
   const span = captionSpans(chunks, { hide, fps, durationInFrames: Infinity }).find((s) => frame >= s.from && frame < s.until);
   return span ? chunks[span.index] : null;
@@ -116,6 +131,31 @@ export function captionFontSize({ base, laneH }) {
 export function narrowFitBounds({ low, high, fits }) {
   const mid = (low + high) / 2;
   return fits ? { low: mid, high } : { low, high: mid };
+}
+
+export const round1 = (value) => Math.round(value * 10) / 10;
+
+// Стратегия подгонки ширины по инпутам (base, available, text) — НИКОГДА по кадру или по тому,
+// какой DOM остался от предыдущего замера: measure — единственная impure зависимость (реальный
+// scrollWidth в Subtitles.jsx или фейк в тестах), поэтому вся логика решения тестируется без
+// браузера. base уже влезает → возвращаем его без единого лишнего измерения — это тот же размер,
+// что рисует SSR-рендер без layout-эффекта, поэтому подгоняющаяся ширина не меняет то, что уже и
+// так помещалось. Иначе бинарный поиск от floor (60% base) до base; если даже floor не влезает —
+// явная ошибка с текстом chunk, а не молчаливое обрезание или перенос строки.
+export function fitCaptionWidth({ base, available, text, measure }) {
+  if (measure(base) <= available) return base;
+  const floor = round1(base * 0.6);
+  if (measure(floor) > available) {
+    throw new Error(`субтитр «${text}» не помещается в полосу даже на 60% кегля (${floor}px) — сократите фразу в plan.js или расширьте lane`);
+  }
+  let low = floor;
+  let high = base;
+  while (high - low > 0.25) {
+    const mid = (low + high) / 2;
+    const fits = measure(mid) <= available;
+    ({ low, high } = narrowFitBounds({ low, high, fits }));
+  }
+  return Math.floor(low * 4) / 4;
 }
 
 export function captionLane(width, height) {

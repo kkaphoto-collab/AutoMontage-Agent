@@ -600,9 +600,10 @@ test('SfxTrack rejects a bad sfxMasterDb immediately on render, even with no cue
 test('Subtitles show the active chunk with karaoke dimming and respect hide windows', () => {
   const kit = kitAt(0);
   const chunks = [{ units: [{ t: 'Раз', s: 0, e: 0.3 }, { t: 'два', s: 0.4, e: 0.6 }], s: 0, e: 0.6, show: 1, text: 'Раз два' }];
-  assert.equal(kit.activeChunk(chunks, 0.5).text, 'Раз два');
-  assert.equal(kit.activeChunk(chunks, 1.2), null);
-  assert.equal(kit.activeChunk(chunks, 0.5, [{ from: 0.4, to: 0.9 }]), null);
+  // fps=25 явно — отклонение round 2: activeChunk больше не подставляет 25 сам по себе.
+  assert.equal(kit.activeChunk(chunks, 0.5, [], 25).text, 'Раз два');
+  assert.equal(kit.activeChunk(chunks, 1.2, [], 25), null);
+  assert.equal(kit.activeChunk(chunks, 0.5, [{ from: 0.4, to: 0.9 }], 25), null);
   const lane = { x: 70, y: 1398, w: 880, h: 84 };
   const html = render(React.createElement(kitAt(5).Subtitles, { chunks, lane }));
   assert.match(html, /data-kit-text="captions"/);
@@ -770,6 +771,19 @@ test('FontLoader blocks rendering until fonts load', () => {
   const calls = {};
   const kit = kitAt(0, { calls });
   render(React.createElement(kit.FontLoader, { faces: [{ family: 'KitOnest', file: 'fonts/Onest.ttf' }] }));
+  assert.equal(calls.delay, 1);
+});
+
+// Round 2: FontLoader стал гейтом (children не рисуются, пока шрифты не готовы), но в SSR/тестах
+// нет document — измерять всё равно нечего, поэтому дети должны показаться сразу же (иначе каждый
+// существующий тест, рендерящий компоненты кита в изоляции, завис бы). calls.delay остаётся 1 —
+// плановая проверка не должна была сломаться этим отклонением.
+test('FontLoader (as a gate) renders its children immediately when there is no DOM (SSR/tests)', () => {
+  const calls = {};
+  const kit = kitAt(0, { calls });
+  const html = render(React.createElement(kit.FontLoader, { faces: [{ family: 'KitOnest', file: 'fonts/Onest.ttf' }] },
+    React.createElement('span', null, 'hi')));
+  assert.match(html, /<span>hi<\/span>/);
   assert.equal(calls.delay, 1);
 });
 
