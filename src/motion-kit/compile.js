@@ -42,9 +42,17 @@ export function compileItems(items = [], { fps, durationInFrames }) {
     if (from >= durationInFrames) throw new Error(`items ${item.id}: начинается после конца ролика`);
     const until = Math.min(durationInFrames, secToFrame(item.until, fps));
     if (!(until > from)) throw new Error(`items ${item.id}: until должен быть больше at`);
+    const enter = item.enter || { kind: 'fly' };
+    // Корень настоящего бага (ревью задачи 23): from: [-200] (без y) давал enter.from[1] === undefined,
+    // а дальше animOf считал out.dy = undefined * (1 - sp) = NaN — манифест молча получал NaN-габарит,
+    // и safe-zone (G5) сравнивал NaN с порогом (всегда false) вместо того, чтобы упасть здесь явно.
+    if (enter.from !== undefined) {
+      const ok = Array.isArray(enter.from) && enter.from.length === 2 && enter.from.every(Number.isFinite);
+      if (!ok) throw new Error(`items ${item.id}: enter.from должен быть парой конечных чисел [dx, dy]`);
+    }
     return {
       id: item.id, kind: item.kind, from, until, box: { ...b }, rot: item.rot || 0,
-      enter: item.enter || { kind: 'fly' }, exit: item.exit || { frames: 5, dir: 'down' }, life: item.life || {},
+      enter, exit: item.exit || { frames: 5, dir: 'down' }, life: item.life || {},
       bleed: Boolean(item.bleed), sfx: item.sfx ?? null,
       typeFrom: item.type ? secToFrame(item.type.from, fps) : undefined,
       typeTo: item.type ? secToFrame(item.type.to, fps) : undefined,

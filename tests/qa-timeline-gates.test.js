@@ -864,6 +864,19 @@ test('REAL KIT: a punch zone touching a preset zone stays two spans, each with i
   assert.equal(g.spans[0].toSec, g.spans[1].fromSec, 'зоны должны соприкасаться без разрыва между ними');
 });
 
+// Ревью задачи 23 (minor): порог eatenPunch (1,05) пристёгнут через `>=` в ДВУХ местах — самой
+// isEatenFrame и сравнении причины в gateScale — РОВНО на границе (base/s = requested/s = 1,05),
+// а не только строго выше неё. base=1,3125, s=1,25 → base/s = 1,05 ровно; requested тот же (без
+// панча) — причина обязана остаться «пресет».
+test('G3 and isEatenFrame treat base/s exactly at eatenPunch (1.05) as eaten, not only strictly above it', () => {
+  const m = manifestFixture({ camera: (f) => (f === 50
+    ? { s: 1.25, base: 1.3125, requested: 1.3125 }
+    : { s: 1, base: 1, requested: 1 }) });
+  const g = gateScale(m, avatar);
+  assert.equal(g.status, 'warn');
+  assert.match(g.spans[0].note, /пресет крупнее предела/);
+});
+
 // Fail-ветка (camera.maxScale плана выше предела профиля) тоже режет спаны до пяти и называет
 // кадры выше предела в каждом — раньше на это была только одна проверка на непустоту (см. выше).
 test('the overLimit (fail) branch also caps its spans at 5, and each one names the frames above the limit', () => {
@@ -1124,17 +1137,39 @@ test('BAD CASE: text at x=40 stops the layer and names the side', () => {
   const m = manifestFixture({ texts: [{ id: 'title', from: 0, frames: [[40, 300, 440, 400]] }] });
   const g = gateSafeZone(m);
   assert.equal(g.status, 'fail');
-  assert.match(g.spans[0].note, /title: слева \+30 px/);
+  assert.equal(g.value, 1);
+  assert.match(g.spans[0].note, /title: слева до \+30 px/);
 });
 
-test('BAD CASE: an element inside at rest that flies in from the side is caught on entry frames', () => {
+// Ревью задачи 23 (важно): гейт раньше останавливался на ПЕРВОМ нарушившем кадре одного текста
+// (break) — терял весь остаток нарушившей полосы и максимум выхода, если он был не на первом
+// кадре (например перелёт pop). Теперь сканирует всю жизнь текста: span = [first, last+1) кадров,
+// а в note — МАКСИМАЛЬНЫЙ выход по каждой стороне за всё это время, а не выход первого кадра.
+test('BAD CASE: an element inside at rest that flies in from the side is caught on entry frames, reporting the whole violating stretch', () => {
   const cfg = { fps: 25, width: 1080, height: 1920, durationInFrames: 100, words: [], sfxLibrary: { sounds: {} } };
   const plan = (from) => ({ captions: false, camera: { face: { x: 540, y: 787 }, shots: [{ at: 0, preset: 'W' }] },
     items: [{ id: 'card', kind: 'card', at: 1, until: 3, box: { x: 100, y: 300, w: 400, h: 100 }, enter: { kind: 'fly', from } }] });
   const bad = gateSafeZone(kit.buildManifest(kit.compileLayer(plan([-200, 0]), cfg)));
   assert.equal(bad.status, 'fail');
+  assert.equal(bad.value, 1);
   assert.equal(bad.spans[0].fromSec, 1.04);
+  assert.equal(bad.spans[0].toSec, 1.2, 'спан обязан закрывать [first, last+1), а не один первый кадр');
+  assert.match(bad.spans[0].note, /card: слева до \+132 px/);
   assert.equal(gateSafeZone(kit.buildManifest(kit.compileLayer(plan([0, 60]), cfg))).status, 'pass');
+});
+
+// Ревью задачи 23: пресловутый pop может перелетать через safe-зону НЕ на первом видимом кадре
+// (пружина ещё разгоняется), а на пике перелёта несколько кадров спустя — старый break() показал
+// бы выход первого нарушившего кадра, а не настоящий максимум.
+test('BAD CASE: a pop overshoot reports the max overflow at its peak, not the first violating frame', () => {
+  const cfg = { fps: 25, width: 1080, height: 1920, durationInFrames: 100, words: [], sfxLibrary: { sounds: {} } };
+  const plan = { captions: false, camera: { face: { x: 540, y: 787 }, shots: [{ at: 0, preset: 'W' }] },
+    items: [{ id: 'pop', kind: 'text', at: 1, until: 3, box: { x: 70, y: 800, w: 880, h: 100 }, enter: { kind: 'pop' },
+      life: { parallax: 0 }, exit: { frames: 0 } }] };
+  const g = gateSafeZone(kit.buildManifest(kit.compileLayer(plan, cfg)));
+  assert.equal(g.status, 'fail');
+  assert.match(g.spans[0].note, /слева до \+35 px/);
+  assert.match(g.spans[0].note, /справа до \+35 px/);
 });
 
 test('static caption lanes are checked once and pass inside the safe zone', () => {
@@ -1142,13 +1177,25 @@ test('static caption lanes are checked once and pass inside the safe zone', () =
   assert.equal(gateSafeZone(m).status, 'pass');
 });
 
-// caption-<n>b (кусок субтитра после окна hide, Task 18) проверяется той же логикой, что и любой
-// другой текстовый id — свой from/until/static, своё имя в spans.
-test('a caption-<n>b piece after a hide window is checked exactly like any other text id', () => {
-  const m = manifestFixture({ texts: [{ id: 'caption-2b', from: 60, until: 90, static: [40, 1398, 950, 1482] }] });
+// Ревью задачи 23 (minor): все куски субтитров (caption-<n>, caption-<n>b после hide, Task 18)
+// делят один и тот же static-прямоугольник captions.lane — это ОДНА структурная проблема разметки,
+// а не N текстов. Схлопываем их в один элемент отчёта «субтитры (полоса)»: value считает её один
+// раз, и подсказка называет причину (captions.lane), а не общий совет про влёт/box.
+// Первый кусок нарушает СИЛЬНЕЕ (+50 px) второго (+30 px) — схлопка обязана взять МАКСИМУМ среди
+// всех кусков, а не последний по порядку (мутант «max[side] = px» вместо Math.max пережил бы тест
+// с одинаковым выходом у обоих кусков).
+test('caption pieces collapse into a single "субтитры (полоса)" violation, keeping the largest overflow', () => {
+  const m = manifestFixture({ texts: [
+    { id: 'caption-1', from: 0, until: 25, static: [20, 1398, 950, 1482] },
+    { id: 'caption-1b', from: 25, until: 50, static: [40, 1398, 950, 1482] },
+  ] });
   const g = gateSafeZone(m);
   assert.equal(g.status, 'fail');
-  assert.match(g.spans[0].note, /caption-2b: слева \+30 px/);
+  assert.equal(g.value, 1, 'два куска одной и той же полосы считаются одним нарушением');
+  assert.equal(g.spans.length, 1);
+  assert.deepEqual([g.spans[0].fromSec, g.spans[0].toSec], [0, 2]);
+  assert.match(g.spans[0].note, /субтитры \(полоса\): слева до \+50 px/, 'обязан остаться максимум (+50), а не последний кусок (+30)');
+  assert.match(g.hint, /captions\.lane/);
 });
 
 // Порог называет геометрию ЭТОГО кадра, а не хардкод: 9:16 1080×1920 и 16:9 1920×1080 отдают разные
@@ -1158,4 +1205,99 @@ test('the threshold text names the frame\'s own safe-zone insets, not a hardcode
   assert.match(gateSafeZone(portrait).threshold, /слева 70, справа 130, сверху 250, снизу 420 px/);
   const landscape = manifestFixture({ seconds: 0.04, width: 1920, height: 1080 });
   assert.match(gateSafeZone(landscape).threshold, /слева 80, справа 80, сверху 60, снизу 60 px/);
+});
+
+// Ревью задачи 23 (важно): таблица из четырёх боксов, каждый нарушает РОВНО одну сторону — гейт
+// обязан называть именно эту сторону и именно этот px, не путая стороны местами.
+test('a table of four boxes, each crossing exactly one side, names that side and its px', () => {
+  const cases = [
+    { side: 'left', box: [30, 800, 600, 900], note: /left: слева до \+40 px/ },
+    { side: 'right', box: [200, 800, 1000, 900], note: /right: справа до \+50 px/ },
+    { side: 'top', box: [200, 230, 600, 900], note: /top: сверху до \+20 px/ },
+    { side: 'bottom', box: [200, 800, 600, 1560], note: /bottom: снизу до \+60 px/ },
+  ];
+  for (const c of cases) {
+    const m = manifestFixture({ texts: [{ id: c.side, from: 0, frames: [c.box] }] });
+    const g = gateSafeZone(m);
+    assert.equal(g.status, 'fail', c.side);
+    assert.equal(g.value, 1, c.side);
+    assert.match(g.spans[0].note, c.note);
+  }
+});
+
+// Ревью задачи 23 (важно): порог overflow() (safe-rect.js epsilon=0.5) пристёгнут с обеих сторон —
+// 0,4 px ниже эпсилона (шум округления, не настоящий выход) проходит, 0,6 px уже выше него.
+test('the overflow epsilon boundary is exact at 0.5 px: 0.4 px passes, 0.6 px fails', () => {
+  const { safeRect } = require('../scripts/qa/safe-rect');
+  const safe = safeRect(1080, 1920);
+  const mk = (overPx) => manifestFixture({ texts: [{ id: 'edge', from: 0, frames: [[safe.left - overPx, 300, 440, 400]] }] });
+  assert.equal(gateSafeZone(mk(0.4)).status, 'pass');
+  const g = gateSafeZone(mk(0.6));
+  assert.equal(g.status, 'fail');
+  assert.match(g.spans[0].note, /edge: слева до \+1 px/);
+});
+
+// Ревью задачи 23 (важно): текст вне safe-зоны все 125 кадров своей жизни — весь диапазон [1, 6) с
+// обязан попасть в один спан, а не в 125 отдельных кадровых вспышек.
+test('a text outside for all 125 frames of its life reports one span covering the whole stretch', () => {
+  const m = manifestFixture({ seconds: 8,
+    texts: [{ id: 'title', from: 25, frames: Array.from({ length: 125 }, () => [40, 300, 440, 400]) }] });
+  const g = gateSafeZone(m);
+  assert.equal(g.status, 'fail');
+  assert.equal(g.value, 1);
+  assert.deepEqual([g.spans[0].fromSec, g.spans[0].toSec], [1, 6]);
+});
+
+// То же самое на 60 fps: секунды считаются от manifest.fps, а не зашиты под 25.
+test('the same whole-stretch span holds at 60 fps', () => {
+  const m = manifestFixture({ seconds: 8, fps: 60,
+    texts: [{ id: 'title60', from: 60, frames: Array.from({ length: 300 }, () => [40, 300, 440, 400]) }] });
+  const g = gateSafeZone(m);
+  assert.equal(g.status, 'fail');
+  assert.deepEqual([g.spans[0].fromSec, g.spans[0].toSec], [1, 6]);
+});
+
+// Ревью задачи 23 (minor): спаны сортируются по первому нарушившему кадру ДО обрезки до пяти —
+// порядок elements в manifest.texts (порядок items в plan.js) не обязан совпадать с временем на
+// экране. 6 нарушивших текстов, самый ранний из них последний в массиве — value считает все 6,
+// spans показывает 5 самых РАННИХ по времени, а не первые 5 по порядку массива.
+test('6 failing texts are capped at 5 spans, sorted by first frame, while value counts all 6', () => {
+  const items = [];
+  for (let i = 0; i < 6; i += 1) {
+    items.push({ id: `t${i}`, from: (6 - i) * 25, frames: Array.from({ length: 24 }, () => [40, 300, 440, 400]) });
+  }
+  const g = gateSafeZone(manifestFixture({ seconds: 8, texts: items }));
+  assert.equal(g.status, 'fail');
+  assert.equal(g.value, 6);
+  assert.equal(g.spans.length, 5);
+  assert.deepEqual(g.spans.map((s) => s.note.split(':')[0]), ['t5', 't4', 't3', 't2', 't1'], 't0 (самый поздний) обязан выпасть из пятёрки');
+  assert.deepEqual(g.spans.map((s) => s.fromSec), [1, 2, 3, 4, 5]);
+});
+
+// --- Ревью задачи 23 (важно): манифест повреждён — refuse loudly, а не молчаливый NaN мимо overflow ---
+
+test('gateSafeZone refuses a manifest whose texts is not an array', () => {
+  const m = manifestFixture({});
+  assert.throws(() => gateSafeZone({ ...m, texts: null }), /манифест повреждён: texts должен быть массивом/);
+});
+
+test('gateSafeZone refuses a text without a string id', () => {
+  assert.throws(() => gateSafeZone(manifestFixture({ texts: [{ from: 0, frames: [] }] })),
+    /манифест повреждён: texts\[0\] должен иметь строковый id/);
+});
+
+test('gateSafeZone refuses a malformed frames[i] box (wrong length or NaN), naming the text and index', () => {
+  assert.throws(() => gateSafeZone(manifestFixture({ texts: [{ id: 'x', from: 0, frames: [[1, 2, 3]] }] })),
+    /манифест повреждён: texts\[0\] \(x\)\.frames\[0\] должен быть null или массивом из 4 конечных чисел/);
+  assert.throws(() => gateSafeZone(manifestFixture({ texts: [{ id: 'x', from: 0, frames: [[1, 2, 3, NaN]] }] })),
+    /манифест повреждён: texts\[0\] \(x\)\.frames\[0\] должен быть null или массивом из 4 конечных чисел/);
+  // null остаётся легальным «текст не показан в этом кадре» — не бокс, ошибки быть не должно.
+  assert.doesNotThrow(() => gateSafeZone(manifestFixture({ texts: [{ id: 'x', from: 0, frames: [null, [40, 300, 440, 400]] }] })));
+});
+
+test('gateSafeZone refuses a malformed static box and a text missing its frames array', () => {
+  assert.throws(() => gateSafeZone(manifestFixture({ texts: [{ id: 'x', from: 0, until: 10, static: [1, 2, 3] }] })),
+    /манифест повреждён: texts\[0\] \(x\)\.static должен быть массивом из 4 конечных чисел/);
+  assert.throws(() => gateSafeZone(manifestFixture({ texts: [{ id: 'x', from: 0 }] })),
+    /манифест повреждён: texts\[0\] \(x\)\.frames должен быть массивом/);
 });

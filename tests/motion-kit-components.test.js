@@ -37,6 +37,16 @@ test('KitBox hides frames that are inside [from, until) but not yet opaque, usin
   assert.equal(render(React.createElement(atUntil.KitBox, { item: item() }, 'Текст')), '');
 });
 
+// Ревью задачи 23 (minor): на первом кадре маски (p=0) clip закрывает 100% ширины — KitBox
+// обязан рисовать ту же пустоту, что видит манифест (itemExtentAt null), а не полупрозрачный
+// (на деле — полностью закрытый) div с data-kit-text.
+test('KitBox renders nothing on a fully closed mask frame, matching itemExtentAt null', () => {
+  const maskItem = item({ enter: { kind: 'mask' } }); // from: 10, until: 60
+  const atFrom = kitAt(10);
+  assert.equal(render(React.createElement(atFrom.KitBox, { item: maskItem }, 'Текст')), '');
+  assert.equal(atFrom.itemExtentAt(maskItem, 10, 25), null);
+});
+
 test('bleed items stay visible but never get the safe-zone text marker', () => {
   const kit = kitAt(30);
   const html = render(React.createElement(kit.KitBox, { item: item({ bleed: true }) }, 'Текст'));

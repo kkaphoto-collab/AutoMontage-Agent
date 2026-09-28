@@ -109,6 +109,26 @@ test('compileItems rejects a negative at and an at at or after the composition e
   );
 });
 
+// Ревью задачи 23: настоящая причина NaN-габарита в манифесте — enter.from без y ([-200] вместо
+// [-200, 0]). animOf молча считал out.dy = undefined * (1 - sp) = NaN, и safe-zone (G5) сравнивал
+// NaN с порогом (всегда false) вместо явной ошибки. Проверяем на входе компиляции, а не в гейте.
+test('compileItems rejects a malformed enter.from and names the item', () => {
+  const base = { id: 'a', kind: 'text', at: 0, until: 1, box: { x: 0, y: 0, w: 1, h: 1 } };
+  assert.throws(
+    () => kit.compileItems([{ ...base, enter: { kind: 'fly', from: [-200] } }], cfg),
+    /items a: enter\.from должен быть парой конечных чисел/,
+  );
+  assert.throws(
+    () => kit.compileItems([{ ...base, enter: { kind: 'fly', from: [-200, NaN] } }], cfg),
+    /items a: enter\.from должен быть парой конечных чисел/,
+  );
+  assert.throws(
+    () => kit.compileItems([{ ...base, enter: { kind: 'fly', from: 'left' } }], cfg),
+    /items a: enter\.from должен быть парой конечных чисел/,
+  );
+  assert.doesNotThrow(() => kit.compileItems([{ ...base, enter: { kind: 'fly', from: [-200, 0] } }], cfg));
+});
+
 // Task 19 review: единая точка построения плана — Node-манифест (scripts/motion-kit-node.js) и
 // будущий Root.jsx (задача 29) вызывают buildPlan через один и тот же compilePlan, чтобы у гейта
 // и у рендера были одинаковые правила ошибок и один и тот же скомпилированный слой.

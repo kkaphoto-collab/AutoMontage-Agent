@@ -63,6 +63,38 @@ test('mask enter kind clips progressively and does not throw', () => {
   assert.ok(typeof a.clip === 'string' && a.clip.startsWith('inset('));
 });
 
+// Ревью задачи 23 (minor): на самом первом кадре маски (p=0) clip закрывает 100% ширины — реально
+// ничего не нарисовано, хотя o остаётся полным (маска не трогает прозрачность). isShown обязан
+// видеть это через reveal, а не только через o — иначе манифест (itemExtentAt) и рендер (KitBox)
+// «видят» габарит кадра, которого зритель не видит вовсе.
+test('a fully closed mask on its very first frame is not shown (reveal 0), even though opacity stays 1', () => {
+  const item = { id: 'm2', kind: 'text', from: 0, until: 20, box, enter: { kind: 'mask' } };
+  const a = kit.animOf(item, 0, 25);
+  assert.equal(a.o, 1);
+  assert.ok(a.reveal <= 0.001, `reveal ${a.reveal} должен быть практически нулевым на самом первом кадре`);
+  assert.equal(kit.isShown(a), false);
+  assert.equal(kit.itemExtentAt(item, 0, 25), null);
+});
+
+// Пружина Remotion пересчитывает физику от кадра 0 на каждый вызов (O(кадр) внутри) — без клэмпа
+// кадра (settledFrame) манифест из многих долгоживущих items становится квадратичным по длине
+// (ревью задачи 23). measureSpring() определяет момент оседания (within threshold) — после него
+// клэмпнутый и настоящий кадр обязаны давать один и тот же результат (это чистая оптимизация, а
+// не приближение).
+test('the spring clamp used to avoid a quadratic manifest build does not change animOf output for a long-lived item', () => {
+  const { spring } = require('remotion');
+  const longPop = { id: 'p2', kind: 'text', from: 0, until: 100000, box, enter: { kind: 'pop' } };
+  const longFly = { id: 'f2', kind: 'text', from: 0, until: 100000, box, enter: { kind: 'fly', from: [-200, 0] } };
+  for (const [item, config] of [[longPop, kit.SPRINGS.pop], [longFly, kit.SPRINGS.fly]]) {
+    for (const frame of [500, 20000]) {
+      const a = kit.animOf(item, frame, 25);
+      const sp = spring({ frame, fps: 25, config });
+      const expectedS = item === longPop ? 0.5 + 0.5 * sp : 0.92 + 0.08 * sp;
+      assert.ok(Math.abs(a.s - expectedS) < 1e-6, `${item.id} frame ${frame}: s=${a.s} vs unclamped ${expectedS}`);
+    }
+  }
+});
+
 test('exit frames 0 keeps the element fully visible until the very last frame', () => {
   const item = { id: 'e', kind: 'text', from: 0, until: 20, box, exit: { frames: 0 } };
   assert.equal(kit.animOf(item, 19, 25).o, 1);

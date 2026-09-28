@@ -295,6 +295,8 @@ function gateHook(manifest, profile) {
 }
 
 const SAFE_SIDES = { left: 'слева', right: 'справа', top: 'сверху', bottom: 'снизу' };
+const CAPTION_LABEL = 'субтитры (полоса)';
+const isCaptionId = (id) => id.startsWith('caption-');
 
 // Порог в человеческом виде считаем от геометрии САМОГО кадра (safeRect), а не хардкодим
 // «70/130/250/420 px» — эти числа верны только для 1080×1920; на 16:9 (1920×1080) safeRect отдаёт
@@ -308,28 +310,99 @@ function safeZoneThreshold(width, height) {
   return `слева ${left}, справа ${right}, сверху ${top}, снизу ${bottom} px на каждом кадре`;
 }
 
+// Проверка целостности texts: оба гейта G5 читают box по индексу — битый или NaN-бокс (несобранный
+// enter.from в старом manifest.json, ручная правка) не должен молча пройти мимо overflow() (NaN
+// со всем сравнивается как false) — манифест обязан упасть понятной ошибкой, как остальные гейты
+// падают на camera.* (assertCameraArrays). Настоящий корень такого NaN чинит src/motion-kit/
+// compile.js (валидация enter.from) — эта проверка защищает от повреждённого manifest.json.
+function assertTexts(manifest) {
+  const texts = manifest && manifest.texts;
+  if (!Array.isArray(texts)) throw new Error('манифест повреждён: texts должен быть массивом');
+  const isBox = (b) => Array.isArray(b) && b.length === 4 && b.every(Number.isFinite);
+  texts.forEach((text, k) => {
+    if (!text || typeof text.id !== 'string' || !text.id) {
+      throw new Error(`манифест повреждён: texts[${k}] должен иметь строковый id`);
+    }
+    if (text.static !== undefined) {
+      if (!isBox(text.static)) {
+        throw new Error(`манифест повреждён: texts[${k}] (${text.id}).static должен быть массивом из 4 конечных чисел`);
+      }
+      return;
+    }
+    if (!Array.isArray(text.frames)) {
+      throw new Error(`манифест повреждён: texts[${k}] (${text.id}).frames должен быть массивом`);
+    }
+    text.frames.forEach((box, i) => {
+      if (box !== null && !isBox(box)) {
+        throw new Error(`манифест повреждён: texts[${k}] (${text.id}).frames[${i}] должен быть null или массивом из 4 конечных чисел`);
+      }
+    });
+  });
+}
+
 // G5: каждый бокс текста на каждом кадре его жизни обязан помещаться в safe-зону. Статичная полоса
 // субтитров (caption-<n>, а после окна hide — caption-<n>b, caption-<n>c…, Task 18) проверяется
-// один раз по своему static-прямоугольнику — у неё нет покадровых frames. Показываем только первый
-// нарушивший кадр каждого текста (`break`) — остальные почти наверняка тот же самый выход.
+// один раз по своему static-прямоугольнику — у неё нет покадровых frames. Сканируем ВСЮ жизнь
+// текста (не останавливаемся на первом нарушении, Step 0 задачи 23): по каждому тексту запоминаем
+// первый и последний нарушивший кадр и МАКСИМАЛЬНЫЙ выход по каждой стороне — влёт может выйти
+// сильнее всего не на первом видимом кадре (например перелёт pop), а разрыв [first, last+1) один
+// на текст показывает всю нарушившую полосу, а не вспышку в один кадр.
 function gateSafeZone(manifest) {
+  assertTexts(manifest);
   const safe = safeRect(manifest.width, manifest.height);
   const found = [];
   for (const text of manifest.texts) {
     const boxes = text.static ? [text.static] : text.frames;
+    let first = null;
+    let last = null;
+    const max = {};
     for (let i = 0; i < boxes.length; i += 1) {
       const b = boxes[i];
       if (!b) continue;
       const out = overflow({ left: b[0], top: b[1], right: b[2], bottom: b[3] }, safe);
-      if (out) { found.push({ id: text.id, frame: text.from + i, out }); break; }
+      if (out) {
+        if (first === null) first = i;
+        last = i;
+        for (const [side, px] of Object.entries(out)) max[side] = Math.max(max[side] || 0, px);
+      }
     }
+    if (first === null) continue;
+    // Статичная полоса субтитров нарушает всю свою жизнь целиком (один и тот же бокс на каждом
+    // кадре) — спан [from, until), а не [from, from+1) одного проверенного индекса.
+    const fromFrame = text.static ? text.from : text.from + first;
+    const toFrame = text.static ? text.until : text.from + last + 1;
+    found.push({ id: text.id, fromFrame, toFrame, max, caption: isCaptionId(text.id) });
   }
-  const note = (v) => `${v.id}: ${Object.entries(v.out).map(([side, px]) => `${SAFE_SIDES[side]} +${px} px`).join(', ')}`;
+
+  // Все куски субтитров (caption-<n>, caption-<n>b, caption-<n>c…) делят один и тот же static-
+  // прямоугольник captions.lane — это ОДНА структурная проблема разметки, а не N текстов; считаем
+  // её одним элементом в value и в spans, а не по числу кусков (Step 0 задачи 23).
+  const captions = found.filter((v) => v.caption);
+  const items = found.filter((v) => !v.caption);
+  if (captions.length) {
+    const max = {};
+    for (const v of captions) for (const [side, px] of Object.entries(v.max)) max[side] = Math.max(max[side] || 0, px);
+    items.push({
+      id: CAPTION_LABEL,
+      fromFrame: Math.min(...captions.map((v) => v.fromFrame)),
+      toFrame: Math.max(...captions.map((v) => v.toFrame)),
+      max, caption: true,
+    });
+  }
+  // Хронологический порядок: спаны обязаны показывать первые ПО ВРЕМЕНИ нарушения, а не первые по
+  // порядку элементов внутри manifest.texts (порядок items в plan.js не обязан совпадать с
+  // порядком показа на экране, Step 0 задачи 23).
+  items.sort((a, b) => a.fromFrame - b.fromFrame);
+
+  const note = (v) => `${v.id}: ${Object.entries(v.max).map(([side, px]) => `${SAFE_SIDES[side]} до +${px} px`).join(', ')}`;
+  const hint = captions.length
+    ? 'полоса субтитров выходит за safe-зону — поправьте captions.lane или уберите свою lane'
+    : 'держите влёт, перелёт и выход внутри safe-зоны: уменьшите сдвиг входа или переставьте box';
   return gate('G5', 'Safe-zone текста', {
-    status: found.length ? 'fail' : 'pass', value: found.length, unit: 'элем.',
+    status: items.length ? 'fail' : 'pass', value: items.length, unit: 'элем.',
     threshold: safeZoneThreshold(manifest.width, manifest.height),
-    spans: found.slice(0, 5).map((v) => span(v.frame, v.frame + 1, manifest.fps, note(v))),
-    hint: 'держите влёт, перелёт и выход внутри safe-зоны: уменьшите сдвиг входа или переставьте box',
+    spans: items.slice(0, 5).map((v) => span(v.fromFrame, v.toFrame, manifest.fps, note(v))),
+    hint,
   });
 }
 

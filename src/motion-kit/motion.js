@@ -1,4 +1,4 @@
-import { Easing, interpolate, spring } from 'remotion';
+import { Easing, interpolate, measureSpring, spring } from 'remotion';
 import { ref25 } from './time.js';
 
 export const EASE = Object.freeze({ out: Easing.bezier(0.16, 1, 0.3, 1), inOut: Easing.bezier(0.65, 0, 0.35, 1) });
@@ -11,9 +11,20 @@ export const SPRINGS = Object.freeze({
   fly: { damping: 16, stiffness: 160, mass: 0.8 },
 });
 
+// spring() Remotion пересчитывает физику от кадра 0 на каждый вызов (внутренний цикл O(кадр)) —
+// без клэмпа кадр растёт вместе с самим элементом (плашка может жить десятки секунд), и построение
+// манифеста из многих долгоживущих items становится квадратичным по длине (ревью задачи 23: 40 text
+// по 60 с при 60 fps — 4,3 с только на manifest). measureSpring() кеширует результат по (fps,
+// config, threshold), поэтому здесь он практически бесплатен после первого вызова. Порог 1e-9 (не
+// дефолтный 0,005 Remotion) — разница между клэмпнутым и настоящим кадром на этом пороге порядка
+// 1e-9 по sp, то есть в тысячи раз меньше любого практического px, а не просто «в пределах допуска»:
+// клэмп кадра — чистая оптимизация с тем же результатом, а не приближение.
+const SPRING_SETTLE_THRESHOLD = 1e-9;
+const settledFrame = (frame, fps, config) => Math.min(frame, measureSpring({ fps, config, threshold: SPRING_SETTLE_THRESHOLD }));
+
 // Состояние элемента в кадре: прозрачность, масштаб, сдвиг, поворот, размытие, маска.
 export function animOf(item, frame, fps) {
-  const out = { o: 1, s: 1, dx: 0, dy: 0, rot: item.rot || 0, blur: 0, clip: null };
+  const out = { o: 1, s: 1, dx: 0, dy: 0, rot: item.rot || 0, blur: 0, clip: null, reveal: 1 };
   const enter = item.enter || { kind: 'fly' };
   if (!['pop', 'fly', 'mask', 'cut'].includes(enter.kind)) {
     throw new Error(`item ${item.id}: неизвестный вход «${enter.kind}»`);
@@ -24,13 +35,13 @@ export function animOf(item, frame, fps) {
   // Длительности заданы в кадрах эталонных 25 fps и пересчитываются под fps композиции.
   const r = (frames) => ref25(frames, fps);
   if (enter.kind === 'pop') {
-    const sp = spring({ frame: f, fps, config: SPRINGS.pop });
+    const sp = spring({ frame: settledFrame(f, fps, SPRINGS.pop), fps, config: SPRINGS.pop });
     out.s = 0.5 + 0.5 * sp;
     out.rot += -10 * (1 - sp);
     out.blur = interpolate(f, [0, r(5)], [8, 0], CLAMP);
     out.o = interpolate(f, [0, r(3)], [0, 1], CLAMP);
   } else if (enter.kind === 'fly') {
-    const sp = spring({ frame: f, fps, config: SPRINGS.fly });
+    const sp = spring({ frame: settledFrame(f, fps, SPRINGS.fly), fps, config: SPRINGS.fly });
     const [fx, fy] = enter.from || [0, 60];
     out.s = 0.92 + 0.08 * sp;
     out.dx = fx * (1 - sp);
@@ -42,6 +53,10 @@ export function animOf(item, frame, fps) {
     out.clip = `inset(0 ${((1 - p) * 100).toFixed(2)}% 0 0 round 24px)`;
     out.dy = 24 * (1 - p);
     out.blur = interpolate(f, [0, r(6)], [6, 0], CLAMP);
+    // На самом первом кадре маски (p=0) clip закрывает 100% ширины — реально ничего не нарисовано,
+    // хотя o остаётся полным. reveal — доля раскрытия; isShown() ниже требует его тоже, иначе
+    // manifest/G5 «видит» габарит кадра, который зритель не видит вовсе (ревью задачи 23).
+    out.reveal = p;
   }
   if (enter.kind !== 'cut' && item.life?.parallax !== 0) {
     out.dy += (item.life?.parallax ?? 8) * interpolate(f, [0, len], [0, 1], CLAMP);
@@ -73,7 +88,9 @@ export function animOf(item, frame, fps) {
 // видимым элемент, которого KitBox уже не рисует.
 export const VISIBLE_MIN = 0.01;
 export function isShown(anim) {
-  return anim.o > VISIBLE_MIN;
+  // reveal отсутствует у вызовов не из animOf (Inserts.jsx передаёт {o: opacity} без reveal
+  // вовсе) — undefined читаем как «нет своей маски», а не как «скрыто».
+  return anim.o > VISIBLE_MIN && (anim.reveal === undefined || anim.reveal > VISIBLE_MIN);
 }
 
 // Габарит элемента в кадре с учётом масштаба, поворота и сдвига. null — элемент не виден.

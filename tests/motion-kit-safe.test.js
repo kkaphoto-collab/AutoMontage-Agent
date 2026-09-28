@@ -22,3 +22,15 @@ test('overflow reports only the sides that leave the safe rect', () => {
   assert.deepEqual(kit.overflow({ left: 40, top: 300, right: 980, bottom: 400 }, safe), { left: 30, right: 30 });
   assert.deepEqual(cjsOverflow({ left: 40, top: 300, right: 980, bottom: 400 }, safe), { left: 30, right: 30 });
 });
+
+// Ревью задачи 23 (важно): дефолтный epsilon (0,5 px) пристёгнут с обеих сторон в обеих версиях
+// (ESM kit.overflow и CommonJS-двойник) — 0,4 px ниже эпсилона (шум округления) не считается
+// выходом, 0,6 px уже считается.
+test('the default 0.5 px epsilon is exact on both the ESM and CommonJS overflow twins', () => {
+  const safe = kit.safeRect(1080, 1920);
+  const rect = (overPx) => ({ left: safe.left - overPx, top: 300, right: 900, bottom: 400 });
+  assert.equal(kit.overflow(rect(0.4), safe), null);
+  assert.equal(cjsOverflow(rect(0.4), safe), null);
+  assert.deepEqual(kit.overflow(rect(0.6), safe), { left: 1 });
+  assert.deepEqual(cjsOverflow(rect(0.6), safe), { left: 1 });
+});
