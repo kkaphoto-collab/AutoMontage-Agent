@@ -15,11 +15,16 @@ const { execFileSync } = require('node:child_process');
 // 'scripts/cli.js preview' — не голое 'cli.js preview': тот бы совпал и с «remotion-cli.js preview»,
 // v4-алиасом Remotion Studio (ничего не рендерит, ложная занятость — ровно то, чего требует избегать
 // «нет ложных срабатываний от … Studio …»).
-const MARKERS = ['remotion render', 'scripts/cli.js preview', 'scripts/build.js', 'scripts/preview.js', 'scripts/motion/build.js'];
-// «@remotion/cli/<файл>» ИЛИ «/.bin/remotion», затем необязательные флаги (--foo), затем именно
-// «render» на границе слова: не «studio»/«still»/«preview» (алиасы v4 studio), не «…/render-farm/…»
-// (нет якоря перед «render») и не «…-render-01.png» (после «render» не пробел/конец строки).
-const REMOTION_CLI = /(?:@remotion[\\/]cli[\\/]\S+|[\\/]\.bin[\\/]remotion)(?:\s+--\S+)*\s+render(?:\s|$)/u;
+// 'scripts/project/build-master.js' — automontage master: полное перекодирование исходника ffmpeg,
+// такой же тяжёлый процесс, как рендер.
+const MARKERS = ['remotion render', 'scripts/cli.js preview', 'scripts/build.js', 'scripts/preview.js', 'scripts/motion/build.js',
+  'scripts/project/build-master.js'];
+// «@remotion/cli/<файл>» ИЛИ «/.bin/remotion», затем любые токены, затем «render» отдельным словом
+// (пробел до и пробел/конец строки после): не «studio»/«still»/«preview» (алиасы v4 studio), не
+// «…/render-farm/…» и не «src/render.tsx» (перед «render» не пробел), не «…-render-01.png» и не
+// «renderfoo». Любые токены, а не только «--флаги»: путь движка с пробелом («--env-file=…/my projects/…»)
+// разрывал группу флагов, и настоящий рендер слоя не считался занятостью.
+const REMOTION_CLI = /(?:@remotion[\\/]cli[\\/]\S+|[\\/]\.bin[\\/]remotion)\s(?:.*\s)?render(?:\s|$)/u;
 const defaultPs = (args) => execFileSync('ps', args, { encoding: 'utf8', shell: false });
 // «--template» раньше ловился отдельной проверкой снаружи (scripts/cli.js + --template): это просто
 // аргумент build.js (automontage <видео> --template lesson доходит до execFileSync с scripts/build.js),
@@ -87,17 +92,20 @@ function busyRenders({ psImpl = defaultPs, selfPids = null, platform = process.p
     const parsed = parsePidCommand(raw);
     if (!parsed) continue;
     if (MARKERS.some((m) => parsed.command.includes(m)) || REMOTION_CLI.test(parsed.command)) {
-      busy.push({ pid: parsed.pid, command: parsed.command.slice(0, 160) });
+      busy.push({ pid: parsed.pid, command: parsed.command }); // полная строка; укорачивает только показ
     }
   }
   return busy;
 }
 
-// Убирает ведущий исполняемый файл (интерпретатор) из командной строки для лога — пользователю
-// полезен хвост («scripts/preview.js --project-dir p»), а не длинный путь до node.
-function usefulTail(command) {
+// Для человека (лог ожидания и текст таймаута): без ведущего исполняемого файла — пользователю полезен
+// хвост («scripts/preview.js --project-dir p»), а не путь до node; длинный хвост — последние 160
+// символов, там имя скрипта, проект и выходной файл.
+const SHOWN_CHARS = 160;
+function shownCommand(command) {
   const match = /^\S+\s+(.*)$/u.exec(command);
-  return match ? match[1] : command;
+  const tail = match ? match[1] : command;
+  return tail.length > SHOWN_CHARS ? `…${tail.slice(-SHOWN_CHARS)}` : tail;
 }
 
 async function waitUntilFree({
@@ -128,11 +136,11 @@ async function waitUntilFree({
     }
     if (!busy.length) return;
     if (now() - started >= timeoutMs) {
-      throw new Error(`машина занята дольше ${Math.round(timeoutMs / 60_000)} мин: ${busy[0].command}`);
+      throw new Error(`машина занята дольше ${Math.round(timeoutMs / 60_000)} мин: ${shownCommand(busy[0].command)}`);
     }
     if (busy[0].pid !== lastLoggedPid) {
       lastLoggedPid = busy[0].pid;
-      log(`⏳ идёт другой рендер (pid ${busy[0].pid}: ${usefulTail(busy[0].command)}), жду ${Math.round(pollMs / 1000)} с…`);
+      log(`⏳ идёт другой рендер (pid ${busy[0].pid}: ${shownCommand(busy[0].command)}), жду ${Math.round(pollMs / 1000)} с…`);
     }
     await sleep(pollMs);
   }

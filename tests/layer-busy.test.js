@@ -129,7 +129,7 @@ test('waitUntilFree polls until the machine is free and times out with the block
   assert.equal(logs.length, 1);
   let t = 0;
   await assert.rejects(waitUntilFree({ busyImpl: () => [{ pid: 1, command: 'node render' }], sleep: async () => { t += 60_000; }, now: () => t, timeoutMs: 120_000, log: () => {} }),
-    /машина занята дольше 2 мин: node render/);
+    /машина занята дольше 2 мин: render$/u); // в тексте — хвост команды без исполняемого файла
 });
 
 // Ревью: лог не должен повторяться на каждый 30-секундный опрос, если занят тот же самый pid — только
@@ -178,7 +178,7 @@ test('waitUntilFree times out exactly at the timeout boundary (>=), not one poll
     timeoutMs: 60_000,
     pollMs: 30_000,
     log: () => {},
-  }), /машина занята дольше 1 мин: node render/);
+  }), /машина занята дольше 1 мин: render$/u);
   assert.equal(calls, 3);
 });
 
@@ -279,4 +279,63 @@ test('scripts/preview.js and scripts/motion/build.js workers count as busy', () 
     { pid: 93, ppid: 92, comm: 'node', command: 'node scripts/build.js x.mp4 --template lesson' },
   ];
   assert.deepEqual(busyRenders({ psImpl: fakePs(table), selfPids: [] }).map((p) => p.pid), [90, 91, 93]);
+});
+
+// Ревью Task 33: движок из папки с пробелом в пути («…/my projects/AutoMontage-Agent/…»). Группа флагов
+// `(?:\s+--\S+)*` обрывалась внутри `--env-file=…/my projects/…`, и настоящий рендер слоя не считался
+// занятостью. Теперь после якоря — любые токены, затем «render» отдельным словом.
+test('REMOTION_CLI catches the engine Remotion render from a checkout path with a space', () => {
+  const engine = '/work/my projects/AutoMontage-Agent';
+  const table = [
+    { pid: 1, ppid: 0, comm: 'launchd', command: '/sbin/launchd' },
+    { pid: 100, ppid: 1, comm: 'node', command: `node ${engine}/node_modules/@remotion/cli/remotion-cli.js --env-file=${engine}/config/remotion-public.env render ${engine}/projects/p/motion-v01/src/index.jsx Layer /tmp/o.mp4` },
+    { pid: 101, ppid: 1, comm: 'node', command: `node ${engine}/node_modules/@remotion/cli/remotion-cli.js --env-file=${engine}/config/remotion-public.env studio src/render.tsx` },
+    { pid: 102, ppid: 1, comm: 'node', command: `node ${engine}/node_modules/@remotion/cli/remotion-cli.js --env-file=${engine}/config/remotion-public.env studio /work/render-farm/src/index.ts` },
+    { pid: 103, ppid: 1, comm: 'node', command: `node ${engine}/node_modules/@remotion/cli/remotion-cli.js --env-file=${engine}/config/remotion-public.env still src/index.js Lesson /tmp/layer-render-01.png` },
+    { pid: 104, ppid: 1, comm: 'node', command: `node ${engine}/node_modules/@remotion/cli/remotion-cli.js --env-file=${engine}/config/remotion-public.env preview src/index.ts` },
+    { pid: 105, ppid: 1, comm: 'node', command: 'node node_modules/@remotion/cli/remotion-cli.js --log=x renderfoo src/index.ts' },
+  ];
+  assert.deepEqual(busyRenders({ psImpl: fakePs(table), selfPids: [] }).map((p) => p.pid), [100]);
+});
+
+// Ревью Task 33: busyRenders отдаёт ПОЛНУЮ командную строку (по ней можно разобраться, что именно
+// идёт); укорачивается только то, что видит человек — лог ожидания и текст таймаута.
+test('busyRenders keeps the full command; waitUntilFree shows only the last 160 chars of its tail', async () => {
+  const longPath = `/very/long/${'deep/'.repeat(60)}project`;
+  const command = `node ${longPath}/node_modules/@remotion/cli/remotion-cli.js --env-file=x render src/index.jsx Layer out.mp4`;
+  const table = [
+    { pid: 1, ppid: 0, comm: 'launchd', command: '/sbin/launchd' },
+    { pid: 110, ppid: 1, comm: 'node', command },
+  ];
+  const busy = busyRenders({ psImpl: fakePs(table), selfPids: [] });
+  assert.equal(busy[0].command, command);
+
+  const tail = command.slice('node '.length);
+  const shown = `…${tail.slice(-160)}`;
+  const logs = [];
+  let t = 0;
+  await assert.rejects(waitUntilFree({ busyImpl: () => busy, sleep: async () => { t += 60_000; }, now: () => t, timeoutMs: 60_000, log: (m) => logs.push(m) }),
+    (error) => error.message === `машина занята дольше 1 мин: ${shown}`);
+  assert.deepEqual(logs, [`⏳ идёт другой рендер (pid 110: ${shown}), жду 30 с…`]);
+});
+
+// Ревью Task 33: только ENOENT (нет самой команды ps) означает «проверить нельзя, стартуем». Любая
+// другая ошибка опроса — не «свободно»: рендер не должен стартовать вслепую поверх чужого рендера.
+test('a non-ENOENT error from busyImpl rejects waitUntilFree instead of treating the machine as free', async () => {
+  const denied = Object.assign(new Error('ps: operation not permitted'), { code: 'EPERM' });
+  await assert.rejects(waitUntilFree({
+    busyImpl: () => { throw denied; },
+    log: () => {},
+    sleep: async () => { throw new Error('ошибка опроса не должна превращаться в ожидание'); },
+  }), (error) => error === denied);
+});
+
+// automontage master (scripts/project/build-master.js) — полное перекодирование исходника ffmpeg:
+// такой же тяжёлый процесс, как рендер, его нельзя накрывать ещё одним.
+test('scripts/project/build-master.js (full-length re-encode of the master) counts as busy', () => {
+  const table = [
+    { pid: 1, ppid: 0, comm: 'launchd', command: '/sbin/launchd' },
+    { pid: 120, ppid: 1, comm: 'node', command: 'node /repo/scripts/project/build-master.js --project-dir p' },
+  ];
+  assert.deepEqual(busyRenders({ psImpl: fakePs(table), selfPids: [] }).map((p) => p.pid), [120]);
 });
