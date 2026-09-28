@@ -8,7 +8,8 @@ const { writeJson } = require('./common');
 
 const LABEL = 'qa/layer-imports.json';
 const RENDER_REPORT = /^layer-.+-render-(\d+)\.json$/u;
-const broken = (reason) => new Error(`${LABEL} повреждён (${reason}) — восстановите из git/копии или удалите, затем импортируйте заново`);
+// projects/ не в Git, копии реестра нет: битый реестр удаляют и импортируют слои заново.
+const broken = (reason) => new Error(`${LABEL} повреждён (${reason}) — удалите qa/layer-imports.json и импортируйте слои заново`);
 
 // Папка qa/ проекта или null, если её ещё нет. Ссылка или файл на её месте — ошибка: иначе отчёты и
 // реестр читались бы из чужой папки, а запись реестра после импорта упала бы и оставила ассет без записи.

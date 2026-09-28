@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { PassThrough } = require('node:stream');
 const { toolAvailable, runTool } = require('./helpers/media-fixtures');
 const { makeLayerProject } = require('./helpers/layer-project');
 const { sha256File, writeJson } = require('../scripts/layer/common');
@@ -149,6 +150,25 @@ test('a broken bundle of the earlier import is imported again, not reported as a
   assert.deepEqual([bundle.reference, bundle.canonicalSha256], [imports[0].reference, imports[0].canonicalSha256]);
 });
 
+test('a registry entry whose reference or sha256 disagrees with the bundle is imported again', { skip: !hasFfmpeg }, async (t) => {
+  const p = layerProject(t);
+  await p.run();
+  const tamper = (fields) => {
+    const registry = readRegistry(p.projectDir);
+    writeJson(registryPath(p.projectDir), { ...registry, imports: registry.imports.map((e) => ({ ...e, ...fields(e) })) });
+  };
+  // Ассет цел, но запись о нём разошлась с ним: чужой sha256, затем другая ссылка в той же папке ассета.
+  for (const fields of [() => ({ canonicalSha256: '0'.repeat(64) }), (e) => ({ reference: `${path.posix.dirname(e.reference)}/renamed.mp4` })]) {
+    tamper(fields);
+    const logs = [];
+    assert.equal(await p.run(p.file, { log: (line) => logs.push(String(line)) }), 0);
+    assert.ok(!logs.some((line) => /уже импортирован/.test(line)), logs.join('\n'));
+    const [entry] = readRegistry(p.projectDir).imports;
+    const bundle = bundleOf(p.projectDir, entry.reference);
+    assert.deepEqual([bundle.reference, bundle.canonicalSha256], [entry.reference, entry.canonicalSha256]);
+  }
+});
+
 test('regression: the project source is never registered through the source input of a passing report', { skip: !hasFfmpeg }, async (t) => {
   // Настоящий отчёт layer render хранит sha256 исходника во входе role 'source': по нему исходник-аватар
   // выглядел бы «проверенным слоем kit».
@@ -163,7 +183,9 @@ test('regression: a layer rendered for an earlier source is refused after the so
   runTool('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc=s=540x960:r=25:d=2',
     '-f', 'lavfi', '-i', 'sine=frequency=300:duration=2', '-shortest', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-c:a', 'aac', replacement]);
   fs.renameSync(replacement, p.sourcePath);
-  await assert.rejects(p.run(), /слой собран для другого исходника — пересоберите: automontage layer render --project-dir ".+" --layer motion-v01/);
+  // Перерендер того же слоя всегда упал бы на assertLayerSource: подсказка ведёт к новому слою.
+  await assert.rejects(p.run(), (error) => /слой собран для другого исходника .*— создайте новый слой: automontage layer new --project-dir ".+" → layer render → layer import/.test(error.message)
+    && !/--layer motion-v01/.test(error.message));
   p.report({ edit: (report) => ({ ...report, inputs: report.inputs.filter((input) => input.role !== 'source') }) });
   await assert.rejects(p.run(), /qa\/layer-motion-v01-render-01\.json: в отчёте нет sha256 исходника/);
   nothingImported(p.projectDir);
@@ -215,7 +237,8 @@ test('qa/, its reports and the registry are checked before anything is imported'
   fs.mkdirSync(path.join(qa, 'layer-motion-v04-render-02.json'));
   await assert.rejects(p.run(), /qa\/layer-motion-v04-render-02\.json: это не файл отчёта/);
   fs.rmdirSync(path.join(qa, 'layer-motion-v04-render-02.json'));
-  const broken = /qa\/layer-imports\.json повреждён .*— восстановите из git\/копии или удалите, затем импортируйте заново/;
+  // projects/ не в Git — восстанавливать неоткуда: реестр удаляют и импортируют слои заново.
+  const broken = /qa\/layer-imports\.json повреждён .*— удалите qa\/layer-imports\.json и импортируйте слои заново/;
   for (const text of ['{', '{"version":1}']) {
     fs.writeFileSync(registryPath(p.projectDir), text);
     await assert.rejects(p.run(), broken);
@@ -266,11 +289,33 @@ test('the checked descriptor itself is hashed and streamed from the start', { sk
   // fstat дескриптора видит не тот файл, что lstat, — или файл меняется, пока его хешируют.
   const neverImport = async () => { throw new Error('импорт не должен начаться'); };
   const changed = (stat, fields) => Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, fields);
-  for (const changeOn of [1, 2]) {
+  const shiftingOn = (changeOn) => {
     let calls = 0;
-    const shifting = { ...fs, fstatSync: (...args) => { calls += 1; const stat = fs.fstatSync(...args); return calls === changeOn ? changed(stat, { size: stat.size + 1 }) : stat; } };
-    await assert.rejects(p.run(p.file, { ...quiet, fileSystem: shifting, importImpl: neverImport }), /файл изменился во время импорта/);
+    return { ...fs, fstatSync: (...args) => { calls += 1; const stat = fs.fstatSync(...args); return calls === changeOn ? changed(stat, { size: stat.size + 1 }) : stat; } };
+  };
+  for (const changeOn of [1, 2]) {
+    await assert.rejects(p.run(p.file, { ...quiet, fileSystem: shiftingOn(changeOn), importImpl: neverImport }), /файл изменился во время импорта/);
   }
+  // Третья сверка — после импорта: файл, изменившийся пока его читал импорт, не попадает в реестр.
+  const drained = async ({ request }) => {
+    for await (const chunk of request) void chunk;
+    return { reference: 'assets/broll/video/x/media.mp4', canonicalSha256: 'c'.repeat(64) };
+  };
+  await assert.rejects(p.run(p.file, { ...quiet, fileSystem: shiftingOn(3), importImpl: drained }), /файл изменился во время импорта/);
+  nothingImported(p.projectDir);
+});
+
+test('regression: an error while closing the import stream stays handled', { skip: !hasFfmpeg }, async (t) => {
+  const p = layerProject(t);
+  // Поток, чьё закрытие дескриптора завершается ошибкой: без слушателя 'error' она стала бы необработанной.
+  const fileSystem = { ...fs, createReadStream: (file, options) => {
+    const stream = new PassThrough();
+    stream._destroy = (error, callback) => { fs.closeSync(options.fd); callback(new Error('close failed')); };
+    return stream;
+  } };
+  const busy = async () => { throw mediaImportError(409, 'MEDIA_IMPORT_BUSY'); };
+  await assert.rejects(p.run(p.file, { ...quiet, fileSystem, importImpl: busy }), /MEDIA_IMPORT_BUSY/);
+  await new Promise((resolve) => setImmediate(resolve));
   nothingImported(p.projectDir);
 });
 
@@ -318,6 +363,10 @@ test('renderPassed accepts only a whole, consistent layer render report that pas
   assert.equal(renderPassed(report({ error: 'x' })), false);
   assert.equal(renderPassed(report({}, (r) => ({ ...r, error: 'x' }))), false);
   assert.equal(renderPassed(report({ g6: 'fail' }, (r) => ({ ...r, summary: { status: 'pass', fail: 0, warn: 0 } }))), false);
+  // Итог сверяется целиком: верный статус с чужими счётчиками fail/warn — тоже правка руками.
+  assert.equal(renderPassed(report({}, (r) => ({ ...r, summary: { ...r.summary, fail: 1 } }))), false);
+  assert.equal(renderPassed(report({}, (r) => ({ ...r, summary: { ...r.summary, warn: 1 } }))), false);
+  assert.equal(renderPassed(report({ g7: 'warn' }, (r) => ({ ...r, summary: { ...r.summary, warn: 2 } }))), false);
   assert.equal(renderPassed(report({}, (r) => ({ ...r, gates: r.gates.slice(1) }))), false);
   assert.equal(renderPassed(report({}, (r) => ({ ...r, kind: 'layer-check' }))), false);
   assert.equal(renderPassed(report(), { layer: 'motion-v02' }), false);

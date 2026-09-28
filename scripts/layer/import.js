@@ -97,7 +97,11 @@ function checkedReport(projectDir, { renderSha256, relativePath, sourcePath, opt
   const rerender = `пересоберите: automontage layer render --project-dir "${projectDir}" --layer ${report.layer}`;
   const source = report.inputs.find((input) => input?.role === 'source');
   if (typeof source?.sha256 !== 'string') throw new Error(`qa/${report.fileName}: в отчёте нет sha256 исходника — ${rerender}`);
-  if (source.sha256 !== sha256File(sourcePath)) throw new Error(`слой собран для другого исходника — ${rerender} (отчёт qa/${report.fileName})`);
+  // Перерендер того же слоя не поможет: layer render откажет в assertLayerSource — нужен новый слой.
+  if (source.sha256 !== sha256File(sourcePath)) {
+    throw new Error(`слой собран для другого исходника (отчёт qa/${report.fileName}) — создайте новый слой: `
+      + `automontage layer new --project-dir "${projectDir}" → layer render → layer import`);
+  }
   return report;
 }
 
@@ -115,6 +119,7 @@ function bundleIntact(projectDir, entry) {
 
 // Импорт из проверенного дескриптора с начала файла. Поток владеет дескриптором: destroy закрывает его и
 // дожидается незаконченного чтения. Пока дескриптор открыт, после импорта проверяем, что файл не менялся.
+// Ошибка закрытия дескриптора приходит событием error: пустой слушатель не даёт ей стать необработанной.
 async function importLayerFile({ projectDir, sourcePath, file, opened, fileSystem, importImpl }) {
   let request;
   try {
@@ -146,7 +151,13 @@ async function importLayerFile({ projectDir, sourcePath, file, opened, fileSyste
     opened.same();
     return asset;
   } finally {
-    if (!request.closed) await new Promise((resolve) => { request.once('close', resolve); request.destroy(); });
+    if (!request.closed) {
+      await new Promise((resolve) => {
+        request.once('close', resolve);
+        request.on('error', () => {});
+        request.destroy();
+      });
+    }
   }
 }
 
