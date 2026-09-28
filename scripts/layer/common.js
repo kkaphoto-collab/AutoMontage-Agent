@@ -148,9 +148,14 @@ function writeJson(file, value) {
 
 const relative = (projectDir, file) => path.relative(projectDir, file).split(path.sep).join('/');
 
+// Ячейка Markdown-таблицы (SOURCE.md): переносы строк — пробел, прочие управляющие и невидимые символы
+// форматирования (\p{Cc}, \p{Cf}: табуляция, bidi-override) убираются, `|` экранируется — ячейка
+// остаётся одной и не сдвигает столбцы.
+const markdownCell = (value) => String(value).replace(/\r\n|\r|\n/gu, ' ').replace(/[\p{Cc}\p{Cf}]/gu, '').replace(/\|/gu, '\\|');
+
 // Число для сообщений по-русски: до сотых, с запятой (29,97 fps, 6,3 с).
 const formatNumber = (value) => String(Number(Number(value).toFixed(2))).replace('.', ',');
 
 module.exports = {
-  LAYER_NAME, assertLayerSource, formatNumber, nextLayerName, projectFrom, readJson, readLayerJson, relative, resolveLayer, sha256File, writeJson,
+  LAYER_NAME, assertLayerSource, formatNumber, markdownCell, nextLayerName, projectFrom, readJson, readLayerJson, relative, resolveLayer, sha256File, writeJson,
 };

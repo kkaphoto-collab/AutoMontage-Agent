@@ -257,3 +257,45 @@ test('URL cap is checked after canonical percent encoding', async () => {
   assert.ok(new URL(oversized).href.length > 500);
   assert.equal((await fixtureProvider({url:oversized}).search(search)).candidates.length, 0);
 });
+// preferSize — для слоя motion-kit: самый маленький mp4, у которого обе стороны не меньше кадра слоя
+// (короткая к короткой, длинная к длинной); если такого нет — самый большой, как по умолчанию.
+const portraitVideo = {
+  ...video,
+  id: 5,
+  url: 'https://www.pexels.com/video/cat-5/',
+  width: 2160,
+  height: 3840,
+  video_files: [
+    [2160, 3840, 51], [1080, 1920, 52], [720, 1280, 53], [540, 960, 54], [360, 640, 55],
+  ].map(([width, height, id]) => ({ id, width, height, file_type: 'video/mp4', link: `https://videos.pexels.com/video-files/5/${id}.mp4` })),
+};
+const portraitSearch = { queryOriginal: 'кот', queryEnglish: 'cat', mediaKind: 'video', orientation: 'portrait' };
+const videoProvider = (options) => createPexelsProvider({
+  apiKey: 'key',
+  request: async () => ({ bytes: Buffer.from(JSON.stringify({ videos: [portraitVideo] })) }),
+  ...options,
+});
+test('preferSize picks the smallest mp4 rendition that still covers the layer frame', async () => {
+  const [candidate] = (await videoProvider({ preferSize: { width: 600, height: 1000 } }).search(portraitSearch)).candidates;
+  assert.equal(candidate.downloadUrl, 'https://videos.pexels.com/video-files/5/53.mp4');
+  assert.deepEqual([candidate.width, candidate.height, candidate.rendition.id], [720, 1280, '53']);
+  // Сторона к стороне по ориентации: горизонтальный кадр 1000×600 покрывает тот же 720×1280.
+  const [landscape] = (await videoProvider({ preferSize: { width: 1000, height: 600 } }).search(portraitSearch)).candidates;
+  assert.equal(landscape.rendition.id, '53');
+  const [exact] = (await videoProvider({ preferSize: { width: 540, height: 960 } }).search(portraitSearch)).candidates;
+  assert.equal(exact.rendition.id, '54');
+});
+test('preferSize falls back to the largest rendition when none covers the frame', async () => {
+  const [candidate] = (await videoProvider({ preferSize: { width: 4320, height: 7680 } }).search(portraitSearch)).candidates;
+  assert.equal(candidate.rendition.id, '51');
+});
+test('without preferSize the largest rendition is still selected', async () => {
+  const [candidate] = (await videoProvider({}).search(portraitSearch)).candidates;
+  assert.equal(candidate.rendition.id, '51');
+  assert.equal(candidate.previewUrl, 'https://videos.pexels.com/video-files/5/55.mp4');
+});
+test('a malformed preferSize is refused as an invalid search', async () => {
+  for (const preferSize of [{ width: 0, height: 960 }, { width: 540 }, { width: 540.5, height: 960 }, 'big']) {
+    await assert.rejects(videoProvider({ preferSize }).search(portraitSearch), { code: 'BROLL_SEARCH_INVALID' });
+  }
+});

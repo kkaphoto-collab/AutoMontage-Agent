@@ -1,7 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { floatPcmFromFfmpeg } = require('../qa/audio');
-const { readJson, sha256File } = require('./common');
+const { markdownCell, readJson, sha256File } = require('./common');
 
 const ENGINE_ROOT = path.join(__dirname, '..', '..');
 const SOUND_NAME = /^[a-z0-9][a-z0-9-]*\.wav$/u;
@@ -78,12 +78,6 @@ function measure(file) {
     lengthSec: Number((n / MEASURE_SAMPLE_RATE).toFixed(3)),
     peakSec: Number(((bestStart + win / 2) / MEASURE_SAMPLE_RATE).toFixed(3)),
   };
-}
-
-// `|` и переносы строк ломают ячейку Markdown-таблицы SOURCE.md: экранируем `|`, переносы
-// схлопываем в пробел — как обычная однострочная ячейка.
-function escapeCell(value) {
-  return String(value).replace(/\|/g, '\\|').replace(/\r\n|\r|\n/g, ' ');
 }
 
 // library.json необязателен: без него звуки просто копируются без role/notable/volume/peakSec.
@@ -226,7 +220,7 @@ function copySfxLibrary(libraryDir, targetDir) {
           ...(own.notable !== undefined ? { notable: own.notable } : {}),
           ...(own.volume !== undefined ? { volume: own.volume } : {}),
         };
-        sourceRows.push(`| \`sfx/${fileName}\` | ${escapeCell(meta.license || 'лицензия не указана в library.json')} | ${escapeCell(meta.sourceUrl || '—')} | ${sha256} |`);
+        sourceRows.push(`| \`sfx/${fileName}\` | ${markdownCell(meta.license || 'лицензия не указана в library.json')} | ${markdownCell(meta.sourceUrl || '—')} | ${sha256} |`);
       } catch (error) {
         // Ничего битого не остаётся в target: половинная копия хуже отсутствия звука вовсе.
         fs.rmSync(destination, { force: true });

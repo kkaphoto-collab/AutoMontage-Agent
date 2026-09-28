@@ -255,6 +255,30 @@ test('a missing stock file warns in G10 instead of failing the check', { skip: !
   assert.ok(gate.spans.some((s) => s.note === 'нет public/stock/placeholder.mp4 — вставка stock-1 останется пустой'), JSON.stringify(gate));
 });
 
+test('G10 forgives one frame: a 49-frame clip on a 50-frame insert is fine, 48 frames warn', { skip: !hasFfmpeg }, async (t) => {
+  const { layerDir, runCheck, report } = await scaffold(t);
+  const placeholder = path.join(layerDir, 'public', 'stock', 'placeholder.mp4');
+  const frames = (n) => {
+    fs.rmSync(placeholder);
+    runTool('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=540x960:r=25:d=4',
+      '-frames:v', String(n), '-an', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', placeholder]);
+  };
+  // Вставка шаблона stock-1: 3,6–5,6 с при 25 fps = 50 кадров.
+  frames(49);
+  assert.equal(await runCheck(), 0);
+  assert.ok(!g10(report()).spans.some((s) => /сток/.test(s.note)), JSON.stringify(g10(report())));
+  frames(48);
+  assert.equal(await runCheck(), 0);
+  assert.deepEqual(g10(report()).spans.map((s) => s.note), ['сток stock/placeholder.mp4 короче вставки stock-1 на 0,1 с — последний кадр замрёт']);
+});
+
+test('a stock file that is not a video warns in G10 instead of breaking the check', { skip: !hasFfmpeg }, async (t) => {
+  const { layerDir, runCheck, report } = await scaffold(t);
+  fs.writeFileSync(path.join(layerDir, 'public', 'stock', 'placeholder.mp4'), 'не видео');
+  assert.equal(await runCheck(), 0);
+  assert.deepEqual(g10(report()).spans.map((s) => s.note), ['public/stock/placeholder.mp4 не читается как видео — вставка stock-1 останется пустой']);
+});
+
 test('a short stock turns a passing G10 into a warning; a src outside public/ is not probed', { skip: !hasFfmpeg }, async (t) => {
   const { layerDir, runCheck, report, writePlan } = await scaffold(t);
   const plan = (src) => STATIC_PLAN.replace("items: [] }", `items: [], waivers: [{ gate: 'G1', reason: 'статичный план теста' }], inserts: [
