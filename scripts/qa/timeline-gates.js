@@ -1,5 +1,5 @@
 // Гейты по манифесту слоя: считаются до рендера, за доли секунды.
-const { gate } = require('./report');
+const { applyWaivers, gate } = require('./report');
 const { overflow, safeRect } = require('./safe-rect');
 
 const r2 = (value) => Math.round(value * 100) / 100;
@@ -481,6 +481,106 @@ function gateDonor(manifest, profile) {
   });
 }
 
+// Проверка целостности cues: оба поля читают гейты (G9 — kept/dropped, будущий рендер — startFrame/
+// hitFrame по индексу кадра) — battle-tested как assertCameraArrays/assertTexts: ручная правка
+// manifest.json или чужой источник cues не должны молча просочиться NaN'ом или строкой мимо
+// арифметики гейта, а обязаны дать понятную ошибку сразу здесь.
+function assertCues(manifest) {
+  const cues = manifest && manifest.cues;
+  if (!cues || !Array.isArray(cues.kept) || !Array.isArray(cues.dropped)) {
+    throw new Error('манифест повреждён: cues.kept и cues.dropped должны быть массивами');
+  }
+  cues.kept.forEach((cue, k) => {
+    if (!cue || typeof cue.id !== 'string' || !cue.id) {
+      throw new Error(`манифест повреждён: cues.kept[${k}] должен иметь строковый id`);
+    }
+    if (!Number.isFinite(cue.startFrame) || !Number.isFinite(cue.hitFrame)) {
+      throw new Error(`манифест повреждён: cues.kept[${k}] (${cue.id}).startFrame/hitFrame должны быть конечными числами`);
+    }
+  });
+  cues.dropped.forEach((entry, k) => {
+    if (!entry || typeof entry.id !== 'string' || !entry.id) {
+      throw new Error(`манифест повреждён: cues.dropped[${k}] должен иметь строковый id`);
+    }
+  });
+}
+
+// G9: слишком частые звуки накладываются друг на друга и на затухание движка у начала слоя.
+// thinCues (src/motion-kit/sfx.js) уже развела «любые» (minGapSec) и «заметные» (notableGapSec)
+// звуки при сборке cues.kept — этот гейт последняя защита от ручной правки manifest.json или
+// другого источника cues, который такую развязку обошёл. Когда ОДНА И ТА ЖЕ пара соседних звуков
+// нарушает оба правила разом (они соседи и в полном списке, и среди заметных — заметная пара ближе
+// minGapSec автоматически ближе и notableGapSec, раз minGapSec < notableGapSec), показываем её один
+// раз с более строгой «заметной» формулировкой, а не дублируем предупреждение об одной и той же паре
+// (отклонение оркестратора п.1 задачи 24).
+function gateSfxDensity(manifest, profile) {
+  const { fps } = manifest;
+  const t = profile.sfx;
+  const kept = manifest.cues.kept.filter((c) => !c.bed).sort((a, b) => a.hitFrame - b.hitFrame);
+
+  // Пары храним по ключу «id-id»: если и «любые», и «заметные» правила нашли РОВНО одну и ту же
+  // пару, оставляем запись с более высоким приоритетом (2 — заметные, строже) вместо второй записи.
+  const byPair = new Map();
+  const addPair = (a, b, priority, note) => {
+    const key = `${a.id}\u0000${b.id}`;
+    const existing = byPair.get(key);
+    if (existing && existing.priority >= priority) return;
+    byPair.set(key, { frame: a.hitFrame, priority, item: span(a.hitFrame, b.hitFrame, fps, note) });
+  };
+  for (let i = 1; i < kept.length; i += 1) {
+    const gapSec = (kept[i].hitFrame - kept[i - 1].hitFrame) / fps;
+    if (gapSec < t.minGapSec - 1e-9) addPair(kept[i - 1], kept[i], 1, `звуки через ${fmt(gapSec)} с`);
+  }
+  const notable = kept.filter((c) => c.notable);
+  for (let i = 1; i < notable.length; i += 1) {
+    const gapSec = (notable[i].hitFrame - notable[i - 1].hitFrame) / fps;
+    if (gapSec < t.notableGapSec - 1e-9) addPair(notable[i - 1], notable[i], 2, `заметные звуки через ${fmt(gapSec)} с`);
+  }
+
+  // Порог движка — src/scenes/BrollMedia.jsx fadeFramesForFps: Math.round(sceneFadeSec × fps), не
+  // меньше 1 кадра. Звук, ударивший РОВНО на этом кадре, уже полностью проявлен (envelope дошёл до
+  // 1) — граница строго «меньше», а не «меньше или равно» (отклонение оркестратора п.2).
+  const fadeFrames = Math.max(1, Math.round(t.sceneFadeSec * fps));
+  const sceneIssues = kept.filter((c) => c.startFrame < fadeFrames).map((c) => ({
+    frame: c.startFrame,
+    item: span(c.startFrame, c.startFrame + 1, fps, `${c.name} в первые ${fmt(t.sceneFadeSec)} с движок приглушит нарастанием`),
+  }));
+
+  // Хронологический порядок ДО обрезки до пяти: три источника нарушений (любые, заметные, старт
+  // сцены) иначе могли бы отдать пять самых РАННИХ по виду появления в коде, а не по времени на
+  // экране (отклонение оркестратора п.1).
+  const issues = [...byPair.values(), ...sceneIssues].sort((a, b) => a.frame - b.frame).map((i) => i.item);
+  const dropped = manifest.cues.dropped.length;
+  return gate('G9', 'Плотность звуков', {
+    status: issues.length ? 'warn' : 'pass', value: kept.length, unit: 'звук.', threshold: 'любые ≥ 0,3 с, заметные ≥ 1 с',
+    spans: issues.slice(0, 5),
+    hint: dropped ? `kit убрал ${dropped} звук. из-за тесноты; проверьте, что важные остались` : 'разнесите звуки по времени',
+  });
+}
+
+// Все гейты по манифесту в фиксированном порядке (D3 в context.md) — вызывается `layer check`
+// (Task 32). Форма манифеста проверяется ОДИН раз здесь же (а не в каждом гейте по отдельности):
+// испорченный manifest.json обязан упасть с понятным «манифест повреждён» сразу, до первого гейта.
+// Само исключение НЕ глотаем — Task 32 ловит его в try/catch и превращает в report.error с кодом
+// выхода 2 (отклонение оркестратора п.3).
+function runTimelineGates(manifest, profile) {
+  assertCameraArrays(manifest);
+  assertTexts(manifest);
+  assertCues(manifest);
+  const gates = [
+    gateRhythm(manifest, profile),
+    gateWeakCuts(manifest, profile),
+    gateScale(manifest, profile),
+    gateHook(manifest, profile),
+    gateSafeZone(manifest),
+    gateSfxDensity(manifest, profile),
+    gateStock(manifest, profile),
+    gateDonor(manifest, profile),
+  ];
+  return applyWaivers(gates, manifest.waivers || []);
+}
+
 module.exports = {
-  assertCameraArrays, detectCameraEvents, gateDonor, gateHook, gateRhythm, gateSafeZone, gateScale, gateStock, gateWeakCuts, speakerPlans,
+  assertCameraArrays, assertCues, detectCameraEvents, gateDonor, gateHook, gateRhythm, gateSafeZone,
+  gateScale, gateSfxDensity, gateStock, gateWeakCuts, runTimelineGates, speakerPlans,
 };
