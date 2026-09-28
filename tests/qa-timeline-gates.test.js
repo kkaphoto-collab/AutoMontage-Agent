@@ -631,7 +631,7 @@ test('gateWeakCuts throws the same clear error as gateRhythm on a malformed mani
   assert.throws(() => gateWeakCuts(bad, avatar), /манифест повреждён: camera\.s должен быть массивом из 3 конечных чисел/);
 });
 
-// Спаны G2 ограничены пятью худшими слабыми сменами, даже если их больше.
+// Спаны G2 ограничены первыми пятью по времени слабыми сменами, даже если их больше.
 test('G2 spans are capped at 5, even with more weak changes', () => {
   const m = manifestFixture({ seconds: 10, camera: (f) => ({ s: Math.floor(f / 20) % 2 ? 1.07 : 1.0 }) });
   const g2 = gateWeakCuts(m, avatar);
@@ -681,18 +681,22 @@ test('the eaten lookahead window is exactly [f, f+punchWindow], not f+2 or f+2·
 // самом флагнутом кадре (61, где рост уже погас до +1 %). Если бы top считался только по кадру
 // «to», порог отмотки оказался бы в разы меньше и riseStart ушёл бы на кадр раньше настоящего
 // начала роста (57 вместо 58 — уже захватив кадр 58 с крохотным 0,5 % разгоном).
+// Рост после пика взят +2 % (не +1 %, как раньше): +1 % совпадал ровно с порогом «плоскости»
+// isScaleStep (factor < 1,01), и от того, в какую сторону плавающая точка округлит произведение
+// 1,005×1,08×1,01, зависело бы, посчитается ли этот сосед плоским. +2 % держит соседа надёжно
+// НЕ плоским независимо от порядка умножений.
 test('riseStart computes top over the whole punch window, not only at the flagged frame', () => {
   const m = manifestFixture({ seconds: 4, camera: (f) => {
     if (f <= 57) return { s: 1 };
     if (f === 58) return { s: 1.005 };
     if (f === 59) return { s: 1.005 * 1.08 };
-    if (f === 60) return { s: 1.005 * 1.08 * 1.01 };
-    return { s: 1.005 * 1.08 * 1.01 * 1.01 };
+    if (f === 60) return { s: 1.005 * 1.08 * 1.02 };
+    return { s: 1.005 * 1.08 * 1.02 * 1.02 };
   } });
   const d = detectCameraEvents(m.camera, avatar.camera, 1, 25);
   assert.deepEqual(d.events.map((e) => e.kind), ['punch']);
   assert.equal(d.events[0].frame, 58,
-    'top должен считаться по максимуму окна (кадр 59, +8 %), а не только на флагнутом кадре (61, +1 %)');
+    'top должен считаться по максимуму окна (кадр 59, +8 %), а не только на флагнутом кадре (61, +2 %)');
 });
 
 // --- Задача 22: G3 «Масштаб», G4 «Спикер в первые 3 с», G10 «Сток», G11 «Чужое видео» ---
@@ -774,7 +778,7 @@ test('the fail case gets spans of the over-limit frames, and the hint names the 
   assert.match(g2.hint, /1,1/, 'подсказка обязана называть ПОРОГ ЭТОГО профиля, а не хардкод 1,25');
 });
 
-// Спаны G3 ограничены пятью худшими зонами, даже если их больше.
+// Спаны G3 ограничены первыми пятью по времени зонами, даже если их больше.
 test('G3 spans are capped at 5, even with more clamped zones', () => {
   const m = manifestFixture({ seconds: 10, camera: (f) => ({
     s: Math.floor(f / 20) % 2 ? 1.2 : 1.0, requested: Math.floor(f / 20) % 2 ? 1.3 : 1.0,
@@ -790,7 +794,87 @@ test('gateScale throws the same clear error as the other manifest gates on a mal
   assert.throws(() => gateScale(bad, avatar), /манифест повреждён: camera\.s должен быть массивом из 3 конечных чисел/);
 });
 
-// --- G4: правило автора (owner's documented rule) — «в первом кадре и первые 2–3 секунды виден
+// --- Step 0 (перед задачей 23): причина клэмпа сравнивает base[f] с ВИДИМЫМ s[f] этого кадра
+// (base[f]/s[f] >= eatenPunch), а не с фиксированным порогом профиля. Так план с пониженным
+// camera.maxScale (ниже 1,25) не сваливает вину на несуществующий панч, а легальный пресет,
+// перевалевший предел только вместе с панчем, не сваливает вину на пресет. ---
+
+const scaleManifest = (camera, sec = 8) => kit.buildManifest(kit.compileLayer(
+  { items: [], captions: false, camera: { face, ...camera } },
+  { fps: 25, width: 1080, height: 1920, durationInFrames: Math.round(sec * 25), words: [], sfxLibrary: { sounds: {} } },
+));
+
+test('REAL KIT: a plan-level camera.maxScale of 1.15 blames the preset, not a nonexistent punch', () => {
+  const m = scaleManifest({ maxScale: 1.15, shots: [{ at: 0, preset: 'W', drift: 'none' }, { at: 1, preset: 'M', drift: 'in' }] });
+  const g = gateScale(m, avatar);
+  assert.equal(g.status, 'warn');
+  assert.match(g.spans[0].note, /пресет крупнее предела/);
+  assert.doesNotMatch(g.spans[0].note, /панч-ин упёрся/);
+});
+
+test('REAL KIT: a plan-level camera.maxScale of 1.1 with a plain preset (no drift) also blames the preset', () => {
+  const m = scaleManifest({ maxScale: 1.1, shots: [{ at: 0, preset: 'W', drift: 'none' }, { at: 1, preset: 'M', drift: 'none' }] });
+  const g = gateScale(m, avatar);
+  assert.equal(g.status, 'warn');
+  assert.match(g.spans[0].note, /пресет крупнее предела/);
+  assert.doesNotMatch(g.spans[0].note, /панч-ин упёрся/);
+});
+
+// Пресет XL=1,24 сам по себе легален (< 1,25) и никогда не «съеден» в одиночку (даже на пике
+// дрейфа base доходит лишь до 1,302, а 1,302/1,25 = 1,042 < eatenPunch 1,05) — весь клэмп в этом
+// окне даёт только панч, и подсказка не должна советовать «уменьшите s пресета».
+test('REAL KIT: a legal 1.24 preset that crosses the limit only together with a punch is blamed on the punch', () => {
+  const m = scaleManifest({ presets: { XL: { s: 1.24 } },
+    shots: [{ at: 0, preset: 'W', drift: 'none' }, { at: 1, preset: 'XL', drift: 'in' }], punches: [{ at: 2, until: 5 }] });
+  const g = gateScale(m, avatar);
+  assert.equal(g.status, 'warn');
+  assert.match(g.spans[0].note, /панч-ин упёрся/);
+  for (const sp of g.spans) assert.doesNotMatch(sp.note, /уменьшите s пресета/);
+  assert.doesNotMatch(g.hint, /уменьшите сам пресет/);
+});
+
+// Пин границы сравнения: XL=1,28 без единого панча — base растёт через дрейф с 1,28 до 1,344,
+// пересекая eatenPunch только с запасом (1,28/1,25 = 1,024 в начале дрейфа, 1,344/1,25 = 1,075 на
+// пике) — без панча причина обязана оставаться «пресет» на всём окне, а не соскочить на «панч»
+// только потому, что base лишь немного выше предела в начале.
+test('REAL KIT: a preset only marginally over the limit is still blamed on the preset once drift pushes it past eatenPunch', () => {
+  const m = scaleManifest({ presets: { XL: { s: 1.28 } },
+    shots: [{ at: 0, preset: 'W', drift: 'none' }, { at: 1, preset: 'XL', drift: 'in' }] });
+  const g = gateScale(m, avatar);
+  assert.equal(g.status, 'warn');
+  for (const sp of g.spans) {
+    assert.match(sp.note, /пресет крупнее предела/);
+    assert.doesNotMatch(sp.note, /панч-ин упёрся/);
+  }
+});
+
+// Панч-зона касается пресет-зоны без разрыва: XL=1,30 с дрейфом — в начале base=1,30 (1,30/1,25 =
+// 1,04 < eatenPunch без панча), но панч на старте шота поднимает requested выше предела и даёт
+// зону «панч»; как только сам дрейф доводит base до 1,3125 (1,3125/1,25 = 1,05), причина обязана
+// смениться на «пресет» — ровно на границе, без промежутка немаркированных кадров.
+test('REAL KIT: a punch zone touching a preset zone stays two spans, each with its own cause', () => {
+  const m = scaleManifest({ presets: { XL: { s: 1.30 } },
+    shots: [{ at: 0, preset: 'W', drift: 'none' }, { at: 1, preset: 'XL', drift: 'in' }],
+    punches: [{ at: 1, until: 4 }] });
+  const g = gateScale(m, avatar);
+  assert.equal(g.status, 'warn');
+  assert.equal(g.spans.length, 2);
+  assert.match(g.spans[0].note, /панч-ин упёрся/);
+  assert.match(g.spans[1].note, /пресет крупнее предела/);
+  assert.equal(g.spans[0].toSec, g.spans[1].fromSec, 'зоны должны соприкасаться без разрыва между ними');
+});
+
+// Fail-ветка (camera.maxScale плана выше предела профиля) тоже режет спаны до пяти и называет
+// кадры выше предела в каждом — раньше на это была только одна проверка на непустоту (см. выше).
+test('the overLimit (fail) branch also caps its spans at 5, and each one names the frames above the limit', () => {
+  const m = manifestFixture({ seconds: 10, camera: (f) => ({ s: Math.floor(f / 20) % 2 ? 1.3 : 1.0 }) });
+  const g = gateScale(m, avatar);
+  assert.equal(g.status, 'fail');
+  assert.equal(g.spans.length, 5);
+  for (const sp of g.spans) assert.match(sp.note, /выше предела 1,25/);
+});
+
+// --- G4: задокументированное правило автора — «в первом кадре и первые 2–3 секунды виден
 // спикер». СТОП — скрыт хоть на одном кадре в [0, mustSec=2 с); ПРЕДУПРЕЖДЕНИЕ — скрыт только в
 // [mustSec, sec=3 с). Хук-перечисление освобождает от обоих требований. ---
 
@@ -842,6 +926,34 @@ test('gateHook throws the same clear error as the other manifest gates on a malf
   const bad = { fps: 25, width: 1080, height: 1920, durationInFrames: 3,
     camera: { s: [1, 1], requested: [1, 1], dx: [0, 0], dy: [0, 0], blur: [0, 0], opacity: [1, 1] }, inserts: [] };
   assert.throws(() => gateHook(bad, avatar), /манифест повреждён: camera\.s должен быть массивом из 3 конечных чисел/);
+});
+
+// Верхняя граница окна ПРЕДУПРЕЖДЕНИЯ (sec=3 с = 75 кадров при 25 fps) пристёгнута с обеих сторон:
+// кадр 74 ещё входит в проверяемый диапазон [0, totalFrames) и предупреждает; кадр 75 уже вне его
+// и не виден гейту вовсе — гейт проходит, а не «предупреждает про пропавший кадр за диапазоном».
+test('G4 warn window upper edge is exact: hidden at frame 74 (25 fps) warns, at frame 75 passes', () => {
+  const warnM = manifestFixture({ camera: (f) => ({ s: 1, opacity: f === 74 ? 0 : 1 }) });
+  assert.equal(gateHook(warnM, avatar).status, 'warn');
+  const passM = manifestFixture({ camera: (f) => ({ s: 1, opacity: f === 75 ? 0 : 1 }) });
+  assert.equal(gateHook(passM, avatar).status, 'pass');
+});
+
+// Порог «скрыт» — opacity ≤ 0,01: заметно видимый кадр (0,3) не должен считаться скрытым, а почти
+// прозрачный (0,005) обязан — граница задаёт ровно 1 %, а не «скорее 0, чем 1».
+test('G4 hidden threshold is exact at opacity 0.01: 0.3 stays visible, 0.005 counts as hidden', () => {
+  const visibleM = manifestFixture({ camera: (f) => ({ s: 1, opacity: f === 10 ? 0.3 : 1 }) });
+  assert.equal(gateHook(visibleM, avatar).status, 'pass');
+  const hiddenM = manifestFixture({ camera: (f) => ({ s: 1, opacity: f === 10 ? 0.005 : 1 }) });
+  assert.equal(gateHook(hiddenM, avatar).status, 'fail');
+});
+
+// covered() исключает правую границу (f < i.to): вставка [60, 70) закрывает ровно кадры 60..69, а
+// не 60..70 — спан обязан заканчиваться на 2,8 с (кадр 70), а не на 2,84 с (кадр 71).
+test('a cover insert\'s end frame is exclusive: coverage stops exactly at "to", not one frame later', () => {
+  const m = manifestFixture({ inserts: [{ id: 'stock-1', kind: 'stock', from: 60, to: 70, cover: true }] });
+  const g = gateHook(m, avatar);
+  assert.equal(g.status, 'warn');
+  assert.deepEqual([g.spans[0].fromSec, g.spans[0].toSec], [2.4, 2.8]);
 });
 
 // --- G10 «Стоковые вставки» ---
@@ -956,6 +1068,37 @@ test('G11 hint tells the author to use cover: true for a full-screen donor and s
   assert.match(g.hint, /не влияет/);
 });
 
+// Step 0 (перед задачей 23): порог «подряд» переведён в кадры через floor, не round — на 25 fps
+// round(0,5×25) = 13 кадров = 0,52 с, то есть УЖЕ больше заявленного gapSec и мог бы неверно
+// слить прогоны, разделённые паузой длиннее порога. floor(0,5×25) = 12 кадров = 0,48 с ≤ gapSec.
+test('G11 gapFrames uses floor, not round: a 0.52 s gap at 25 fps stays separate, not merged', () => {
+  const inserts = [
+    { id: 'd1', kind: 'donor', from: 0, to: 50 },
+    { id: 'd2', kind: 'donor', from: 63, to: 113 }, // пауза 13 кадров = 0,52 с > gapSec (0,5 с)
+  ];
+  const g = gateDonor(manifestFixture({ seconds: 20, inserts }), avatar);
+  assert.equal(g.status, 'pass', 'оба прогона по 2 с должны остаться раздельными, а не слиться в 4,52 с');
+  assert.equal(g.value, 2);
+});
+
+// Пауза РОВНО в gapSec ещё сливает прогоны, а пауза чуть больше — уже нет; проверено на 60 fps,
+// где 0,5 с — целое число кадров (30) и не зависит от floor/round.
+test('a gap of exactly gapSec (0.5 s) merges donor runs, a slightly longer gap (~0.567 s) keeps them separate, at 60 fps', () => {
+  const merged = gateDonor(manifestFixture({ seconds: 20, fps: 60, inserts: [
+    { id: 'd1', kind: 'donor', from: 0, to: 150 },
+    { id: 'd2', kind: 'donor', from: 180, to: 330 }, // пауза ровно 30 кадров = 0,5 с
+  ] }), avatar);
+  assert.equal(merged.status, 'fail', 'пауза ровно в gapSec ещё сливает прогоны в один эпизод 5,5 с');
+  assert.equal(merged.value, 5.5);
+
+  const separate = gateDonor(manifestFixture({ seconds: 20, fps: 60, inserts: [
+    { id: 'd1', kind: 'donor', from: 0, to: 150 },
+    { id: 'd2', kind: 'donor', from: 184, to: 334 }, // пауза 34 кадра ≈ 0,567 с > gapSec
+  ] }), avatar);
+  assert.equal(separate.status, 'pass', 'чуть более длинная пауза уже не сливает прогоны');
+  assert.equal(separate.value, 2.5);
+});
+
 // BAD CASE (уточнение после ревью пакета 1, ужесточено ревью пакета 2): cover-вставка с 0 с
 // закрывает лицо карточкой сразу, даже пока уход камеры ещё гаснет — G4 обязан считать спикера
 // невидимым внутри неё. Частичное закрытие (только первую секунду) теперь ТОЖЕ fail: по правилу
@@ -965,7 +1108,7 @@ test('BAD CASE: a cover insert from 0 s hides the speaker even while the camera 
   assert.equal(gateHook(manifestFixture({ inserts: insert(true) }), avatar).status, 'fail');
   assert.equal(gateHook(manifestFixture({ inserts: insert(false) }), avatar).status, 'pass');
   // Изменённый тест плана: раньше «видимо хотя бы на одном кадре из 3 с» проходило при частичном
-  // закрытии первой секунды; owner's rule требует видимости на КАЖДОМ кадре первых 2 с — 1 с
+  // закрытии первой секунды; правило автора требует видимости на КАЖДОМ кадре первых 2 с — 1 с
   // закрытия внутри mustSec обязана провалить гейт.
   assert.equal(gateHook(manifestFixture({ inserts: insert(true, 25) }), avatar).status, 'fail');
 });

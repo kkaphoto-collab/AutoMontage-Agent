@@ -236,7 +236,13 @@ function gateScale(manifest, profile) {
   let open = null;
   for (let f = 0; f < s.length; f += 1) {
     const eaten = isEatenFrame(requested, s, f, profile.camera.eatenPunch);
-    const cause = eaten ? (base[f] > limit + 1e-3 ? 'preset' : 'punch') : null;
+    // Причина клэмпа — сам ли пресет (с дрейфом, БЕЗ учёта панча) уже был бы «съеден» относительно
+    // видимого s этого кадра. Сравнение с s[f], а не с фиксированным порогом профиля: план с
+    // пониженным camera.maxScale (ниже 1,25) клэмпит s ниже профильного предела, и base там может
+    // быть съеден, даже оставаясь ниже 1,25; легальный пресет (например 1,24 < 1,25), который сам
+    // по себе съеден не был бы, но становится съеден вместе с панчем, — вина панча, а не пресета
+    // (Step 0 задачи 23).
+    const cause = eaten ? (base[f] / s[f] >= profile.camera.eatenPunch ? 'preset' : 'punch') : null;
     if (cause && open && open.cause === cause) open.to = f + 1;
     else { if (open) zones.push(open); open = cause ? { from: f, to: f + 1, cause } : null; }
   }
@@ -324,7 +330,10 @@ function mergeRuns(inserts, gapFrames) {
 // донора всегда, даже когда гейт проходит: это метрика профиля, а не только повод для fail.
 function gateDonor(manifest, profile) {
   const { fps } = manifest;
-  const gapFrames = Math.round(profile.donor.gapSec * fps);
+  // floor, не round: округление вверх (например 0,5 с при 25 fps → 13 кадров = 0,52 с) слило бы
+  // прогоны с паузой длиннее заявленного gapSec — floor гарантирует, что порог в кадрах никогда не
+  // превышает gapSec ни на каком fps (Step 0 задачи 23).
+  const gapFrames = Math.floor(profile.donor.gapSec * fps + 1e-9);
   const donors = manifest.inserts.filter((i) => i.kind === 'donor');
   const runs = mergeRuns(donors, gapFrames);
   const long = runs.filter((r) => (r.to - r.from) / fps > profile.donor.maxSec + 1e-9);
