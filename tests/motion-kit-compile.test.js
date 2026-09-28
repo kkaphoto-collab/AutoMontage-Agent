@@ -136,3 +136,31 @@ test('compilePlan rejects a buildPlan that does not return a plan object', () =>
 test('compilePlan lets kit validation errors (e.g. a missing camera.face) pass through unprefixed', () => {
   assert.throws(() => kit.compilePlan(() => ({ camera: { shots: [] }, items: [] }), cfg), /camera\.face/);
 });
+
+// Task 19, второе ревью: исходная ошибка buildPlan сохраняется в cause (по её стеку Node-манифест
+// находит строку в src/plan.js), а async buildPlan отклоняется сразу — иначе Promise дошёл бы до
+// compileLayer и дал бы непонятную ошибку про camera.face.
+test('compilePlan keeps the original buildPlan error as cause', () => {
+  const boom = new Error('boom');
+  assert.throws(() => kit.compilePlan(() => { throw boom; }, cfg), (error) => {
+    assert.match(error.message, /src\/plan\.js упал при построении плана — boom/);
+    assert.equal(error.cause, boom);
+    return true;
+  });
+});
+
+test('compilePlan rejects an async buildPlan without leaving an unhandled rejection', async () => {
+  const unhandled = [];
+  const onUnhandled = (reason) => unhandled.push(reason);
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    assert.throws(() => kit.compilePlan(async () => ({ camera: plan.camera, items: [] }), cfg),
+      /buildPlan в src\/plan\.js должен быть синхронным/);
+    assert.throws(() => kit.compilePlan(async () => { throw new Error('late'); }, cfg),
+      /buildPlan в src\/plan\.js должен быть синхронным/);
+    await new Promise((resolve) => setImmediate(resolve));
+  } finally {
+    process.off('unhandledRejection', onUnhandled);
+  }
+  assert.deepEqual(unhandled, []);
+});

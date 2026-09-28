@@ -72,7 +72,13 @@ export function compilePlan(buildPlan, ctx) {
   try {
     plan = buildPlan(ctx);
   } catch (error) {
-    throw new Error(`src/plan.js упал при построении плана — ${error.message}`);
+    // cause хранит исходный стек: по нему Node-манифест называет строку в src/plan.js.
+    throw new Error(`src/plan.js упал при построении плана — ${error.message}`, { cause: error });
+  }
+  if (typeof plan?.then === 'function') {
+    // Отклонённый Promise без обработчика уронил бы процесс (unhandledRejection) уже после этой ошибки.
+    Promise.resolve(plan).catch(() => {});
+    throw new Error('buildPlan в src/plan.js должен быть синхронным: уберите async и верните объект плана, а не Promise');
   }
   if (!plan || typeof plan !== 'object' || Array.isArray(plan)) {
     throw new Error('buildPlan в src/plan.js должен вернуть объект плана');
