@@ -6,6 +6,9 @@
 const { finiteNumber, optionValue } = require('./build-options');
 const { hostPath, runTool } = require('./process');
 
+// Формат обеих веток микса (голос [v] и музыка [m]); его же применяет к голосу замер G8.
+const MIX_AUDIO_FORMAT = 'aformat=sample_rates=44100:channel_layouts=stereo';
+
 function numberOption(args, name, fallback, range) {
   return finiteNumber(optionValue(args, name, fallback), `--${name}`, range);
 }
@@ -30,7 +33,10 @@ function parseMixOptions(args) {
   return options;
 }
 
-function buildMusicFilter(options) {
+// stem: 'music' — только музыка после того же sidechain, без смешивания с голосом: по ней G8
+// (scripts/qa/mix-gates.js) меряет баланс голоса и музыки. Обычный граф от stem не зависит.
+function buildMusicFilter(options, { stem = null } = {}) {
+  if (stem !== null && stem !== 'music') throw new Error(`buildMusicFilter: stem может быть только 'music', получено «${stem}»`);
   const musicFilters = [];
   if (options.start > 0) musicFilters.push(`atrim=start=${options.start}`, 'asetpts=PTS-STARTPTS');
   if (options.rate !== 1) musicFilters.push(`atempo=${options.rate}`);
@@ -41,14 +47,24 @@ function buildMusicFilter(options) {
     musicFilters.push(`afade=t=out:st=${fadeStart}:d=${options.fadeOut}`);
   }
 
-  const audioFormat = 'aformat=sample_rates=44100:channel_layouts=stereo';
+  const audioFormat = MIX_AUDIO_FORMAT;
   musicFilters.push(audioFormat);
+  const sidechain = `sidechaincompress=threshold=${options.threshold}:ratio=${options.ratio}:attack=${options.attack}:release=${options.release}:level_sc=1`;
+  if (stem === 'music') {
+    return [`[1:a]${musicFilters.join(',')}[m]`, `[0:a]${audioFormat}[sc]`, `[m][sc]${sidechain}[aout]`].join(';');
+  }
   return [
     `[1:a]${musicFilters.join(',')}[m]`,
     `[0:a]${audioFormat},asplit=2[v][sc]`,
-    `[m][sc]sidechaincompress=threshold=${options.threshold}:ratio=${options.ratio}:attack=${options.attack}:release=${options.release}:level_sc=1[duck]`,
+    `[m][sc]${sidechain}[duck]`,
     '[v][duck]amix=inputs=2:duration=first:normalize=0,apad[aout]',
   ].join(';');
+}
+
+// Входы микса: 0 — видео с голосом, 1 — музыка по кругу. Их же берёт замер G8, чтобы музыка в
+// замере была той же, что в preview.
+function mixMusicInputArgs(video, music) {
+  return ['-i', hostPath(video), '-stream_loop', '-1', '-i', hostPath(music)];
 }
 
 function mixMusicCommand(video, music, output, filter) {
@@ -56,9 +72,7 @@ function mixMusicCommand(video, music, output, filter) {
     command: 'ffmpeg',
     args: [
       '-y',
-      '-i', hostPath(video),
-      '-stream_loop', '-1',
-      '-i', hostPath(music),
+      ...mixMusicInputArgs(video, music),
       '-filter_complex', filter,
       '-map', '0:v',
       '-map', '[aout]',
@@ -97,8 +111,10 @@ if (require.main === module) {
 }
 
 module.exports = {
+  MIX_AUDIO_FORMAT,
   buildMusicFilter,
   main,
   mixMusicCommand,
+  mixMusicInputArgs,
   parseMixOptions,
 };

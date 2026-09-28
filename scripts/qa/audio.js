@@ -223,5 +223,5 @@ function audibleOutside(envelope, spans, {
 
 module.exports = {
   BLOCK, BLOCK_SEC, FLOOR_DB, SAMPLE_RATE,
-  audibleOutside, bestLagPearson, blockDb, decodeAudio, envelopeDb, pcmFromFfmpeg, pearson, windowedMax,
+  audibleOutside, bestLagPearson, blockDb, decodeAudio, envelopeDb, formatSeconds, pcmFromFfmpeg, pearson, windowedMax,
 };
