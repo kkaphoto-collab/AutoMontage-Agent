@@ -23,7 +23,9 @@ const MARKERS = ['remotion render', 'scripts/cli.js preview', 'scripts/build.js'
 // (пробел до и пробел/конец строки после): не «studio»/«still»/«preview» (алиасы v4 studio), не
 // «…/render-farm/…» и не «src/render.tsx» (перед «render» не пробел), не «…-render-01.png» и не
 // «renderfoo». Любые токены, а не только «--флаги»: путь движка с пробелом («--env-file=…/my projects/…»)
-// разрывал группу флагов, и настоящий рендер слоя не считался занятостью.
+// разрывал группу флагов, и настоящий рендер слоя не считался занятостью. Цена (редкая): если в пути
+// движка есть « render » отдельным словом («…/my render tools/…» в --env-file), Studio и still этого
+// движка тоже покажутся занятостью — ложное ожидание, а не пропущенный рендер.
 const REMOTION_CLI = /(?:@remotion[\\/]cli[\\/]\S+|[\\/]\.bin[\\/]remotion)\s(?:.*\s)?render(?:\s|$)/u;
 const defaultPs = (args) => execFileSync('ps', args, { encoding: 'utf8', shell: false });
 // «--template» раньше ловился отдельной проверкой снаружи (scripts/cli.js + --template): это просто

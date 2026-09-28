@@ -15,20 +15,21 @@ const render = require('../scripts/layer/render');
 const hasFfmpeg = toolAvailable('ffmpeg') && toolAvailable('ffprobe');
 const STATIC_PLAN = "export default function buildPlan({ face }) { return { camera: { face, shots: [{ at: 0, preset: 'W', drift: 'none' }] }, items: [] }; }\n";
 
-// Подмена Remotion: ролик lavfi нужной длины в полном диапазоне с теми же метками, что у настоящего Remotion
-// 4.0.504 (yuvj420p, color_range pc, colorspace bt470bg).
-// audio — lavfi-строка, функция, которая строит её уже во время «рендера» (манифест слоя к этому моменту
-// записан), или null — ролик без звуковой дорожки; after — что сделать после записи файла. Остальная
-// цепочка (нормализация ffmpeg, probe, PCM, гейты, отчёт) — настоящая.
-function fakeRemotion(seconds, audio, { after } = {}) {
+// Подмена Remotion: ролик lavfi нужной длины и fps в полном диапазоне с теми же метками, что у настоящего
+// Remotion 4.0.504 (yuvj420p, color_range pc, colorspace bt470bg).
+// audio — lavfi-строка со своей длиной d, функция, которая строит её уже во время «рендера» (манифест слоя к
+// этому моменту записан), или null — ролик без звуковой дорожки. Без -shortest: звук может быть длиннее
+// видео — настоящий Remotion дописывает хвост AAC на 43–64 мс. after — что сделать после записи файла.
+// Остальная цепочка (нормализация ffmpeg, probe, PCM, гейты, отчёт) — настоящая.
+function fakeRemotion(seconds, audio, { after, fps = 25 } = {}) {
   const calls = [];
   const runToolImpl = (command, args, options) => {
     if (options.stage !== 'layer Remotion render') return runProcessTool(command, args, options);
     calls.push(args);
     const output = args[args.indexOf('render') + 3];
     const audioInput = typeof audio === 'function' ? audio() : audio;
-    runTool('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', `testsrc2=s=540x960:r=25:d=${seconds}`,
-      ...(audioInput ? ['-f', 'lavfi', '-i', audioInput, '-shortest', '-c:a', 'aac'] : []),
+    runTool('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', `testsrc2=s=540x960:r=${fps}:d=${seconds}`,
+      ...(audioInput ? ['-f', 'lavfi', '-i', audioInput, '-c:a', 'aac'] : []),
       '-pix_fmt', 'yuvj420p', '-colorspace', 'bt470bg', '-c:v', 'libx264', output]);
     if (after) after();
     return null;
@@ -70,6 +71,13 @@ const LEAK = "aevalsrc='0.05*sin(2*PI*220*t)*gt(sin(2*PI*1.3*t),0)':s=48000:d=6"
 function videoStream(file) {
   return JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=pix_fmt,color_range',
     '-of', 'json', file], { encoding: 'utf8' })).streams[0];
+}
+// Длины потоков и контейнера готового слоя.
+function streams(file) {
+  const probe = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_type,duration,nb_frames:format=duration',
+    '-of', 'json', file], { encoding: 'utf8' }));
+  const [video, audio] = ['video', 'audio'].map((kind) => probe.streams.find((st) => st.codec_type === kind));
+  return { video, audio, container: Number(probe.format.duration) };
 }
 // Самая тёмная яркость первого кадра: у testsrc2 есть чёрное, в полном диапазоне это 0, в ограниченном — 16.
 function minLuma(file) {
@@ -117,6 +125,27 @@ test('G7 judges by the manifest of this run\'s layer check, not by one rewritten
   const json = report();
   assert.deepEqual(json.gates.map((g) => [g.id, g.status]), [['G6', 'pass'], ['G7', 'pass']]);
   assert.notEqual(json.inputs[2].sha256, hashFile(manifestPath(projectDir)), 'в отчёте — sha256 манифеста, по которому судили');
+});
+
+// Ревью с настоящим Remotion 4.0.504: звук AAC в рендере на 43–64 мс длиннее видео, нормализация его сохраняла —
+// G6 мерил контейнер и ложно останавливал слой на 29,97/30/50/60 fps. Правило владельца: хвост AAC режется до
+// длительности кадров. Теперь звук обрезается (и дополняется тишиной) ровно до durationInFrames/fps.
+test('the Remotion AAC tail (+60 ms) is trimmed to the frames: video, audio and container are 6,0 s, G6 passes at 60 fps', { skip: !hasFfmpeg }, async (t) => {
+  const { projectDir, layerDir, run, report } = await scaffold(t, { fps: 60 });
+  assert.equal(await run({ runToolImpl: fakeRemotion(6, () => effectsOf(projectDir, 6.06), { fps: 60 }).runToolImpl }), 0);
+  assert.deepEqual(report().gates.map((g) => [g.id, g.status, g.value]), [['G6', 'pass', 0], ['G7', 'pass', 0]]);
+  const { video, audio, container } = streams(path.join(layerDir, 'renders', 'layer-01.mp4'));
+  assert.equal(Number(video.nb_frames), 360);
+  assert.equal(Number(audio.duration), 6);
+  assert.equal(container, 6);
+});
+
+// G6 меряет видеопоток слоя, а не контейнер: звук дополнен тишиной до полной длины и не прячет короткое видео.
+test('BAD CASE: a video shorter than the composition fails G6 even though its audio is padded to full length', { skip: !hasFfmpeg }, async (t) => {
+  const { projectDir, run, report } = await scaffold(t);
+  assert.equal(await run({ runToolImpl: fakeRemotion(5, () => effectsOf(projectDir, 6.06)).runToolImpl }), 1);
+  const g6 = report().gates[0];
+  assert.deepEqual([g6.id, g6.status, g6.value], ['G6', 'fail', -25]);
 });
 
 test('BAD CASE: a layer longer than the source is rendered but stopped by G6', { skip: !hasFfmpeg }, async (t) => {
@@ -174,10 +203,27 @@ test('a crashed Remotion render gives an error report and releases the render nu
   assert.deepEqual(fs.readdirSync(path.join(layerDir, 'renders')), []);
 });
 
+// Отказ нормализации: недописанный layer-NN.mp4 этого номера удаляется, отчёт с error и код 2.
+test('a failed normalisation removes the partial layer file and gives an error report with exit 2', { skip: !hasFfmpeg }, async (t) => {
+  const { projectDir, layerDir, run, report } = await scaffold(t);
+  const fake = fakeRemotion(6, () => effectsOf(projectDir, 6));
+  const runToolImpl = (command, args, options) => {
+    if (options.stage !== 'layer normalize') return fake.runToolImpl(command, args, options);
+    fs.writeFileSync(args[args.length - 1], 'половина слоя');
+    throw new Error('layer normalize: ffmpeg завершился со status 1');
+  };
+  assert.equal(await run({ runToolImpl }), 2);
+  const json = report();
+  assert.equal(json.summary.status, 'error');
+  assert.match(json.error, /layer normalize/);
+  assert.deepEqual(json.inputs.map((i) => i.role), ['source', 'manifest']);
+  assert.deepEqual(fs.readdirSync(path.join(layerDir, 'renders')), []);
+});
+
 test('a failing layer check blocks the render before Remotion starts', { skip: !hasFfmpeg }, async (t) => {
   const { layerDir, projectDir, run } = await scaffold(t);
   fs.writeFileSync(path.join(layerDir, 'src', 'plan.js'), STATIC_PLAN);
-  const fake = fakeRemotion(6, 'anullsrc=r=48000:cl=stereo');
+  const fake = fakeRemotion(6, 'anullsrc=r=48000:cl=stereo:d=6');
   assert.equal(await run({ runToolImpl: fake.runToolImpl }), 1);
   assert.equal(fake.calls.length, 0);
   assert.ok(!fs.existsSync(path.join(layerDir, 'renders')));
@@ -212,6 +258,48 @@ test('a render number claimed by another run is skipped: the render goes to laye
   assert.equal(fs.readFileSync(foreign, 'utf8'), 'другой рендер ещё пишет сюда');
   assert.equal(report('02').inputs[0].path, 'motion-v01/renders/layer-02.mp4');
   assert.ok(!fs.existsSync(path.join(projectDir, 'qa', 'layer-motion-v01-render-01.json')));
+});
+
+// Номера рендеров не переиспользуются: на отчёт layer-motion-v01-render-01.json опираются layer import и барьер
+// preview (по sha256 слоя). Слой layer-01.mp4 импортировали и удалили — следующий рендер берёт layer-02 и не
+// перезаписывает отчёт 01.
+test('a render number whose qa report still exists is never reused, even after its layer file is deleted', { skip: !hasFfmpeg }, async (t) => {
+  const { projectDir, layerDir, run, report } = await scaffold(t);
+  assert.equal(await run({ runToolImpl: fakeRemotion(6, () => effectsOf(projectDir, 6)).runToolImpl }), 0);
+  const first = fs.readFileSync(path.join(projectDir, 'qa', 'layer-motion-v01-render-01.json'), 'utf8');
+  fs.rmSync(path.join(layerDir, 'renders', 'layer-01.mp4'));
+  assert.equal(await run({ runToolImpl: fakeRemotion(6, () => effectsOf(projectDir, 6)).runToolImpl }), 0);
+  assert.deepEqual(fs.readdirSync(path.join(layerDir, 'renders')), ['layer-02.mp4']);
+  assert.equal(fs.readFileSync(path.join(projectDir, 'qa', 'layer-motion-v01-render-01.json'), 'utf8'), first);
+  assert.equal(report('02').inputs[0].path, 'motion-v01/renders/layer-02.mp4');
+});
+
+// Заявка на номер держится, пока не записан отчёт: иначе после сбоя без готового слоя второй рендер успел бы
+// занять тот же номер до записи отчёта и потом перезаписать его.
+test('the render number stays claimed until its report is written', { skip: !hasFfmpeg }, async (t) => {
+  const { layerDir, projectDir, run } = await scaffold(t);
+  const raw = path.join(layerDir, 'renders', 'layer-01.raw.mp4');
+  const seen = [];
+  const log = (line) => {
+    if (String(line).startsWith('Отчёт:') && String(line).includes('render-01')) seen.push([fs.existsSync(path.join(projectDir, 'qa', 'layer-motion-v01-render-01.json')), fs.existsSync(raw)]);
+  };
+  const runToolImpl = (command, args, options) => {
+    if (options.stage === 'layer Remotion render') throw new Error('layer Remotion render: node завершился со status 1');
+    return runProcessTool(command, args, options);
+  };
+  assert.equal(await run({ runToolImpl, log }), 2);
+  assert.deepEqual(seen, [[true, true]]);
+  assert.ok(!fs.existsSync(raw));
+});
+
+test('claimRender skips a number whose qa report exists', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'layer-claim-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const reports = path.join(dir, 'qa');
+  fs.mkdirSync(reports);
+  fs.writeFileSync(path.join(reports, 'render-01.json'), '{}');
+  const claim = render.claimRender(dir, fs, { reportFile: (n) => path.join(reports, `render-${String(n).padStart(2, '0')}.json`) });
+  assert.equal(claim.n, 2);
 });
 
 test('claimRender takes the first free number atomically and skips finished and claimed ones', (t) => {
@@ -258,7 +346,7 @@ test('a plan edited while waiting for a free machine is checked again before the
   let polls = 0;
   const busyImpl = () => (polls++ === 0 ? [{ pid: 4242, command: 'node node_modules/@remotion/cli/remotion-cli.js render x' }] : []);
   const sleep = async () => fs.writeFileSync(path.join(layerDir, 'src', 'plan.js'), STATIC_PLAN);
-  const fake = fakeRemotion(6, 'anullsrc=r=48000:cl=stereo');
+  const fake = fakeRemotion(6, 'anullsrc=r=48000:cl=stereo:d=6');
   assert.equal(await run({ runToolImpl: fake.runToolImpl, checkImpl, busyImpl, sleep }, { 'no-wait': false }), 1);
   assert.equal(checks, 2);
   assert.equal(fake.calls.length, 0);
