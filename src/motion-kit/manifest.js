@@ -55,7 +55,13 @@ export function buildManifest(compiled) {
     inserts: compiled.inserts.map((insert) => ({ id: insert.id, kind: insert.kind, from: insert.from, to: insert.to, cover: insert.cover, src: insert.src })),
     cues: {
       kept: compiled.cues.kept.map((cue) => ({ id: cue.id, name: cue.name, startFrame: cue.startFrame, hitFrame: cue.hitFrame, notable: cue.notable, bed: cue.bed })),
-      dropped: compiled.cues.dropped.map((entry) => ({ id: entry.cue.id, conflictWith: entry.conflictWith, reason: entry.reason })),
+      // name/hitFrame/notable (Task 24 review): G9 (scripts/qa/timeline-gates.js) предупреждает,
+      // когда kit реально убрал ЗАМЕТНЫЙ звук из-за тесноты — kept-пары после thinCues физически не
+      // могут конфликтовать друг с другом, поэтому настоящий сигнал тесноты живёт именно здесь.
+      dropped: compiled.cues.dropped.map((entry) => ({
+        id: entry.cue.id, name: entry.cue.name, hitFrame: entry.cue.hitFrame, notable: entry.cue.notable,
+        conflictWith: entry.conflictWith, reason: entry.reason,
+      })),
     },
     hook: compiled.hook,
     waivers: compiled.waivers,

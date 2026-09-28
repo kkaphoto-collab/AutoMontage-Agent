@@ -324,9 +324,9 @@ function assertTexts(manifest) {
     if (!text || typeof text.id !== 'string' || !text.id) {
       throw new Error(`манифест повреждён: texts[${k}] должен иметь строковый id`);
     }
-    // Step 0 задачи 24: from — кадр начала жизни текста, обязан быть конечным целым для ЛЮБОГО
-    // текста (и статичной полосы, и покадрового) — battle-tested места ниже (item.from + i, span())
-    // складывают и делят это число, и дробный/NaN from молча испортил бы весь спан.
+    // from — кадр начала жизни текста, обязан быть конечным целым для ЛЮБОГО текста (и статичной
+    // полосы, и покадрового) — места ниже (item.from + i, span()) складывают и делят это число, и
+    // дробный/NaN from молча испортил бы весь спан.
     if (!isInt(text.from)) {
       throw new Error(`манифест повреждён: texts[${k}] (${text.id}).from должен быть конечным целым числом`);
     }
@@ -392,8 +392,8 @@ function gateSafeZone(manifest) {
   const captions = found.filter((v) => v.caption);
   const items = found.filter((v) => !v.caption);
   // Считаем ДО push ниже: items после push всегда содержит хотя бы саму полосу субтитров, если
-  // captions.length — нужно знать, был ли обычный (не-caption) элемент вне зоны ДО этой добавки
-  // (Step 0 задачи 24), иначе подсказка про captions.lane скрывала бы отдельную проблему с items.
+  // captions.length — нужно знать, был ли обычный (не-caption) элемент вне зоны ДО этой добавки,
+  // иначе подсказка про captions.lane скрывала бы отдельную проблему с items.
   const hasNonCaptionIssue = items.length > 0;
   if (captions.length) {
     const max = {};
@@ -413,8 +413,8 @@ function gateSafeZone(manifest) {
   const note = (v) => `${v.id}: ${Object.entries(v.max).map(([side, px]) => `${SAFE_SIDES[side]} до +${px} px`).join(', ')}`;
   const captionHint = 'полоса субтитров выходит за safe-зону — поправьте captions.lane или уберите свою lane';
   const itemHint = 'держите влёт, перелёт и выход внутри safe-зоны: уменьшите сдвиг входа или переставьте box';
-  // Step 0 задачи 24: обе подсказки нужны одновременно, когда в отчёте ОБА вида нарушения — иначе
-  // автор поправит только captions.lane и не узнает, что другой элемент тоже вышел за safe-зону.
+  // Обе подсказки нужны одновременно, когда в отчёте ОБА вида нарушения — иначе автор поправит
+  // только captions.lane и не узнает, что другой элемент тоже вышел за safe-зону.
   const hint = captions.length
     ? (hasNonCaptionIssue ? `${captionHint}; ${itemHint}` : captionHint)
     : itemHint;
@@ -502,24 +502,53 @@ function assertCues(manifest) {
     if (!entry || typeof entry.id !== 'string' || !entry.id) {
       throw new Error(`манифест повреждён: cues.dropped[${k}] должен иметь строковый id`);
     }
+    // name/hitFrame (Task 24 review): G9 читает их, чтобы предупредить о заметном дропе, — та же
+    // строгость, что и у kept.
+    if (typeof entry.name !== 'string' || !entry.name) {
+      throw new Error(`манифест повреждён: cues.dropped[${k}] (${entry.id}).name должен быть непустой строкой`);
+    }
+    if (!Number.isFinite(entry.hitFrame)) {
+      throw new Error(`манифест повреждён: cues.dropped[${k}] (${entry.id}).hitFrame должен быть конечным числом`);
+    }
   });
 }
 
-// G9: слишком частые звуки накладываются друг на друга и на затухание движка у начала слоя.
-// thinCues (src/motion-kit/sfx.js) уже развела «любые» (minGapSec) и «заметные» (notableGapSec)
-// звуки при сборке cues.kept — этот гейт последняя защита от ручной правки manifest.json или
-// другого источника cues, который такую развязку обошёл. Когда ОДНА И ТА ЖЕ пара соседних звуков
-// нарушает оба правила разом (они соседи и в полном списке, и среди заметных — заметная пара ближе
-// minGapSec автоматически ближе и notableGapSec, раз minGapSec < notableGapSec), показываем её один
-// раз с более строгой «заметной» формулировкой, а не дублируем предупреждение об одной и той же паре
-// (отклонение оркестратора п.1 задачи 24).
+// Проверка целостности inserts: G4 (covered()) и G9/G10/G11 читают id/kind/from/to по значению —
+// battle-tested как остальные assert* в этом файле. Без неё сломанный inserts либо тихо считает
+// вставку невидимой (сравнение с undefined всегда false), либо роняет гейт голым TypeError вместо
+// понятного «манифест повреждён».
+function assertInserts(manifest) {
+  const inserts = manifest && manifest.inserts;
+  if (!Array.isArray(inserts)) throw new Error('манифест повреждён: inserts должен быть массивом');
+  inserts.forEach((insert, k) => {
+    if (!insert || typeof insert.id !== 'string' || !insert.id) {
+      throw new Error(`манифест повреждён: inserts[${k}] должен иметь строковый id`);
+    }
+    if (typeof insert.kind !== 'string' || !insert.kind) {
+      throw new Error(`манифест повреждён: inserts[${k}] (${insert.id}).kind должен быть непустой строкой`);
+    }
+    if (!Number.isFinite(insert.from) || !Number.isFinite(insert.to)) {
+      throw new Error(`манифест повреждён: inserts[${k}] (${insert.id}).from/to должны быть конечными числами`);
+    }
+  });
+}
+
+// G9: настоящий сигнал тесноты — то, что kit реально УБРАЛ (cues.dropped), а не пары внутри
+// cues.kept. thinCues (src/motion-kit/sfx.js) уже развела «любые» (minGapSec) и «заметные»
+// (notableGapSec) звуки при сборке kept, поэтому две такие пары физически не могут конфликтовать
+// на реальном выводе kit; проверки пар ниже остаются только как sanity-check на случай ручной
+// правки manifest.json или другого источника cues, который такую развязку обошёл. Заметный
+// (notable) дроп меняет вердикт на warn со своим спаном; обычный дроп остаётся заметкой в hint
+// при иначе пройденном гейте.
 function gateSfxDensity(manifest, profile) {
+  assertCues(manifest);
   const { fps } = manifest;
   const t = profile.sfx;
   const kept = manifest.cues.kept.filter((c) => !c.bed).sort((a, b) => a.hitFrame - b.hitFrame);
 
-  // Пары храним по ключу «id-id»: если и «любые», и «заметные» правила нашли РОВНО одну и ту же
-  // пару, оставляем запись с более высоким приоритетом (2 — заметные, строже) вместо второй записи.
+  // sanity-check «любые/заметные» пары (см. комментарий выше — на реальном выводе kit не срабатывают).
+  // Пары храним по ключу «id-id»: если оба правила нашли РОВНО одну и ту же пару, оставляем запись
+  // с более высоким приоритетом (2 — заметные, строже) вместо второй записи.
   const byPair = new Map();
   const addPair = (a, b, priority, note) => {
     const key = `${a.id}\u0000${b.id}`;
@@ -537,36 +566,61 @@ function gateSfxDensity(manifest, profile) {
     if (gapSec < t.notableGapSec - 1e-9) addPair(notable[i - 1], notable[i], 2, `заметные звуки через ${fmt(gapSec)} с`);
   }
 
-  // Порог движка — src/scenes/BrollMedia.jsx fadeFramesForFps: Math.round(sceneFadeSec × fps), не
-  // меньше 1 кадра. Звук, ударивший РОВНО на этом кадре, уже полностью проявлен (envelope дошёл до
-  // 1) — граница строго «меньше», а не «меньше или равно» (отклонение оркестратора п.2).
+  // Движок глушит слой нарастанием/затуханием на sceneFadeSec с обоих концов (src/scenes/
+  // BrollMedia.jsx fadeFramesForFps: max(1, round(sceneFadeSec × fps)) — слой встраивается в
+  // родительское видео одной полноэкранной broll-сценой и получает ту же огибающую на своих краях).
+  // Судим по hitFrame (момент удара), а не startFrame: у звука с лидом (например у whoosh) старт
+  // может лежать до 0,12 с, а сам удар — заметно позже и звучит уже в полную силу.
   const fadeFrames = Math.max(1, Math.round(t.sceneFadeSec * fps));
-  const sceneIssues = kept.filter((c) => c.startFrame < fadeFrames).map((c) => ({
-    frame: c.startFrame,
-    item: span(c.startFrame, c.startFrame + 1, fps, `${c.name} в первые ${fmt(t.sceneFadeSec)} с движок приглушит нарастанием`),
+  const edgeNote = (c, dir) => (dir === 'start'
+    ? `${c.name}: перенесите не раньше ${fmt(t.sceneFadeSec)} с — движок плавно вводит звук слоя`
+    : `${c.name}: перенесите раньше — движок приглушает последние ${fmt(t.sceneFadeSec)} с слоя`);
+  const startIssues = kept.filter((c) => c.hitFrame < fadeFrames)
+    .map((c) => ({ frame: c.hitFrame, item: span(c.hitFrame, c.hitFrame + 1, fps, edgeNote(c, 'start')) }));
+  const endIssues = kept.filter((c) => c.hitFrame >= manifest.durationInFrames - fadeFrames)
+    .map((c) => ({ frame: c.hitFrame, item: span(c.hitFrame, c.hitFrame + 1, fps, edgeNote(c, 'end')) }));
+
+  // Настоящий сигнал: заметный (notable) дроп получает свой спан на hitFrame убранного звука — без
+  // этого автор читает «✅ pass», даже когда kit сам решил убрать конфликтующий заметный звук.
+  const droppedNotable = manifest.cues.dropped.filter((d) => d.notable);
+  const dropIssues = droppedNotable.map((d) => ({
+    frame: d.hitFrame,
+    item: span(d.hitFrame, d.hitFrame + 1, fps, `kit убрал заметный звук ${d.name} — конфликт с ${d.conflictWith}`),
   }));
 
-  // Хронологический порядок ДО обрезки до пяти: три источника нарушений (любые, заметные, старт
-  // сцены) иначе могли бы отдать пять самых РАННИХ по виду появления в коде, а не по времени на
-  // экране (отклонение оркестратора п.1).
-  const issues = [...byPair.values(), ...sceneIssues].sort((a, b) => a.frame - b.frame).map((i) => i.item);
-  const dropped = manifest.cues.dropped.length;
+  // Хронологический порядок ДО обрезки до пяти: источники нарушений иначе отдали бы пять самых
+  // ранних по виду появления в коде, а не по времени на экране.
+  const issues = [...byPair.values(), ...startIssues, ...endIssues, ...dropIssues]
+    .sort((a, b) => a.frame - b.frame).map((i) => i.item);
+  const droppedOther = manifest.cues.dropped.length - droppedNotable.length;
+  const threshold = `любые ≥ ${fmt(t.minGapSec)} с, заметные ≥ ${fmt(t.notableGapSec)} с, `
+    + `края слоя ≥ ${fmt(t.sceneFadeSec)} с (движок глушит вход/выход)`;
+  const hint = droppedNotable.length
+    ? `kit убрал заметный звук из-за тесноты с соседним — разнесите заметные звуки минимум на ${fmt(t.notableGapSec)} с или уберите один из них`
+    : issues.length
+      ? (startIssues.length || endIssues.length
+        ? 'движок глушит первые/последние доли секунды слоя — перенесите такие звуки подальше от края'
+        : 'разнесите звуки по времени')
+      : droppedOther
+        ? `kit убрал ${droppedOther} звук. из-за тесноты; проверьте, что важные остались`
+        : 'звуки в порядке';
   return gate('G9', 'Плотность звуков', {
-    status: issues.length ? 'warn' : 'pass', value: kept.length, unit: 'звук.', threshold: 'любые ≥ 0,3 с, заметные ≥ 1 с',
+    status: issues.length ? 'warn' : 'pass', value: kept.length, unit: 'звук.', threshold,
     spans: issues.slice(0, 5),
-    hint: dropped ? `kit убрал ${dropped} звук. из-за тесноты; проверьте, что важные остались` : 'разнесите звуки по времени',
+    hint,
   });
 }
 
 // Все гейты по манифесту в фиксированном порядке (D3 в context.md) — вызывается `layer check`
-// (Task 32). Форма манифеста проверяется ОДИН раз здесь же (а не в каждом гейте по отдельности):
-// испорченный manifest.json обязан упасть с понятным «манифест повреждён» сразу, до первого гейта.
-// Само исключение НЕ глотаем — Task 32 ловит его в try/catch и превращает в report.error с кодом
-// выхода 2 (отклонение оркестратора п.3).
+// (Task 32). Форма манифеста проверяется здесь один раз, первым делом, до любого гейта (camera-
+// массивы, texts, cues, inserts): испорченный manifest.json обязан упасть с понятным «манифест
+// повреждён» сразу. Само исключение НЕ глотаем — Task 32 ловит его в try/catch и превращает в
+// report.error с кодом выхода 2.
 function runTimelineGates(manifest, profile) {
   assertCameraArrays(manifest);
   assertTexts(manifest);
   assertCues(manifest);
+  assertInserts(manifest);
   const gates = [
     gateRhythm(manifest, profile),
     gateWeakCuts(manifest, profile),
@@ -581,6 +635,6 @@ function runTimelineGates(manifest, profile) {
 }
 
 module.exports = {
-  assertCameraArrays, assertCues, detectCameraEvents, gateDonor, gateHook, gateRhythm, gateSafeZone,
-  gateScale, gateSfxDensity, gateStock, gateWeakCuts, runTimelineGates, speakerPlans,
+  assertCameraArrays, assertCues, assertInserts, detectCameraEvents, gateDonor, gateHook, gateRhythm,
+  gateSafeZone, gateScale, gateSfxDensity, gateStock, gateWeakCuts, runTimelineGates, speakerPlans,
 };

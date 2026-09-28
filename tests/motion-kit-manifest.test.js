@@ -80,3 +80,22 @@ test('an insert without src comes out as src: null, not undefined', () => {
   assert.equal(m.inserts[0].src, null);
   assert.ok('src' in JSON.parse(JSON.stringify(m)).inserts[0], 'src обязан остаться в JSON как null, а не пропасть');
 });
+
+// Ревью задачи 24: cues.dropped теперь несёт name/hitFrame/notable, не только id/conflictWith/reason
+// — G9 (scripts/qa/timeline-gates.js) предупреждает, когда kit реально убрал ЗАМЕТНЫЙ звук из-за
+// тесноты, а kept-пары после thinCues физически не могут этого показать сами.
+test('cues.dropped carries hitFrame, notable and name for the gates', () => {
+  const sfxLibrary = { sounds: {
+    'whoosh-in': { file: 'a', lengthSec: 1.2, peakSec: 0.3, role: 'whoosh' },
+    'impact-low': { file: 'a', lengthSec: 1.0, peakSec: 0.02, role: 'impact' },
+  } };
+  const crowded = { ...plan, items: [], sfx: [{ at: 2, name: 'whoosh' }, { at: 2.4, name: 'impact' }] };
+  const m = kit.buildManifest(kit.compileLayer(crowded, { ...cfg, sfxLibrary }));
+  // impact имеет более высокий приоритет роли и остаётся в kept; whoosh конфликтует с ним (0,4 с —
+  // не ближе minGapSec 0,3 с, но ближе notableGapSec 1,0 с, оба заметные) и попадает в dropped.
+  assert.equal(m.cues.dropped.length, 1);
+  assert.deepEqual(m.cues.dropped[0], {
+    id: 'whoosh-in@50#0', name: 'whoosh-in', hitFrame: 50, notable: true,
+    conflictWith: 'impact-low@60#1', reason: 'notable-gap',
+  });
+});

@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { getProfile } = require('../scripts/qa/profiles');
-const { assertCameraArrays, assertCues, detectCameraEvents, gateDonor, gateHook, gateRhythm, gateSafeZone, gateScale, gateSfxDensity, gateStock, gateWeakCuts, runTimelineGates, speakerPlans } = require('../scripts/qa/timeline-gates');
+const { assertCameraArrays, assertCues, assertInserts, detectCameraEvents, gateDonor, gateHook, gateRhythm, gateSafeZone, gateScale, gateSfxDensity, gateStock, gateWeakCuts, runTimelineGates, speakerPlans } = require('../scripts/qa/timeline-gates');
 const { cutsEvery, manifestFixture } = require('./helpers/manifest-fixtures');
 
 const avatar = getProfile('avatar');
@@ -1355,6 +1355,13 @@ test('gateSafeZone refuses a static text whose `until` is not a finite integer g
   assert.doesNotThrow(() => gateSafeZone(manifestFixture({ texts: [{ id: 'x', from: 10, until: 11, static: [70, 1398, 950, 1482] }] })));
 });
 
+// Ревью задачи 24 (test-gap Step 0): `from` проверяется первым, до static/until — NaN from с иначе
+// валидным until не должен проскочить мимо проверки только потому, что until сам по себе в порядке.
+test('gateSafeZone refuses a static text with a NaN `from` even when `until` looks valid', () => {
+  assert.throws(() => gateSafeZone(manifestFixture({ texts: [{ id: 'x', from: NaN, until: 11, static: [70, 1398, 950, 1482] }] })),
+    /манифест повреждён: texts\[0\] \(x\)\.from должен быть конечным целым числом/);
+});
+
 // --- Задача 24: G9 «Плотность звуков» и общий прогон гейтов по манифесту ---
 
 // Синтетический cue тем же контрактом, что и cues.kept манифеста (Task 24 context.md): startFrame
@@ -1395,23 +1402,27 @@ test('the three issue kinds merge and sort by frame before the 5-span cap, not b
     cue(400, false, 'b1'), cue(402, false, 'b2'), // любые: 2 кадра = 0,08 с
     cue(500, false, 'c1'), cue(502, false, 'c2'), // любые: 2 кадра = 0,08 с — должен выпасть (6-й)
   ];
-  const g = gateSfxDensity(manifestFixture({ cues: { kept, dropped: [] } }), avatar);
+  // seconds: 30 держит durationInFrames (750) далеко за последним кадром (502) — иначе кадры
+  // 300+ упали бы в новое окно затухания КОНЦА слоя (Task 24 review) и добавили бы лишние спаны.
+  const g = gateSfxDensity(manifestFixture({ seconds: 30, cues: { kept, dropped: [] } }), avatar);
   assert.equal(g.status, 'warn');
   assert.equal(g.value, kept.length);
   assert.equal(g.spans.length, 5, 'шестое нарушение (кадр 500) обязано выпасть из пятёрки');
   assert.deepEqual(g.spans.map((s) => s.fromSec), [0, 2, 8, 12, 16], 'спаны обязаны идти в хронологическом порядке, а не по виду нарушения');
-  assert.match(g.spans[0].note, /boot в первые 0,12 с движок приглушит нарастанием/);
-  assert.match(g.spans[1].note, /звуки через 0,08 с/);
+  assert.match(g.spans[0].note, /boot: перенесите не раньше 0,12 с/);
+  assert.match(g.spans[1].note, /^звуки через 0,08 с/);
   assert.match(g.spans[2].note, /заметные звуки через 0,8 с/);
   assert.match(g.spans[3].note, /заметные звуки через 0,24 с/, 'слитая пара 300/306 обязана остаться заметной');
-  assert.match(g.spans[4].note, /звуки через 0,08 с/);
+  assert.match(g.spans[4].note, /^звуки через 0,08 с/);
   for (const s of g.spans) { assert.doesNotMatch(s.note, /c1|c2/); }
 });
 
-// Отклонение оркестратора (п.2): порог старта сцены — Math.round(sceneFadeSec × fps), та же формула
-// движка (src/scenes/BrollMedia.jsx fadeFramesForFps): при 25 fps это 3 кадра, при 60 fps — 7
-// (round(0,12×60)=round(7,2)=7). Звук, ударивший РОВНО на границе, уже полностью проявлен движком
-// (envelope дошёл до 1) — граница пристёгнута с обеих сторон на обоих fps.
+// Порог старта сцены — Math.round(sceneFadeSec × fps), та же формула движка (src/scenes/
+// BrollMedia.jsx fadeFramesForFps): при 25 fps это 3 кадра, при 60 fps — 7 (round(0,12×60)=
+// round(7,2)=7). Звук, ударивший РОВНО на границе, уже полностью проявлен движком (envelope дошёл
+// до 1) — граница пристёгнута с обеих сторон на обоих fps. cue() здесь всегда даёт startFrame ==
+// hitFrame, поэтому эти цифры пинуют границу независимо от того, судим мы по startFrame или по
+// hitFrame — разницу между ними проверяет отдельный тест ниже.
 test('the scene-start boundary matches the engine fade exactly, pinned at 25 and 60 fps', () => {
   assert.equal(gateSfxDensity(manifestFixture({ fps: 25, cues: { kept: [cue(2)], dropped: [] } }), avatar).status, 'warn',
     'кадр 2 при 25 fps ещё внутри окна затухания движка [0, 3)');
@@ -1423,10 +1434,177 @@ test('the scene-start boundary matches the engine fade exactly, pinned at 25 and
     'кадр 7 при 60 fps (round(0,12×60)=7) — уже вне окна');
 });
 
-test('the hint names the number of cues the kit dropped for crowding', () => {
-  const dropped = [{ id: 'pop@41', conflictWith: 'pop@40', reason: 'min-gap' }];
-  const g = gateSfxDensity(manifestFixture({ cues: { kept: [cue(10)], dropped } }), avatar);
-  assert.match(g.hint, /kit убрал 1 звук\. из-за тесноты/);
+// Ревью задачи 24 (важно, п.2): затухание движка судится по МОМЕНТУ УДАРА звука (hitFrame), а не по
+// кадру начала его проигрывания (startFrame) — у звука с лидом (например у whoosh) старт может
+// лежать до 0,12 с, а сам удар (и вся заметная громкость) — заметно позже, и звучит уже в полную
+// силу. Обратный случай — старт ПОЗДНО, но удар РАНО — обязан предупредить, раз бьёт именно в
+// момент затухания.
+test('the scene-edge rules judge by hitFrame, not startFrame, at 25 and 60 fps', () => {
+  const lead = (startFrame, hitFrame) => ({ id: `whoosh-in@${hitFrame}`, name: 'whoosh-in', startFrame, hitFrame, notable: true, bed: false });
+  assert.equal(gateSfxDensity(manifestFixture({ fps: 25, cues: { kept: [lead(0, 20)], dropped: [] } }), avatar).status, 'pass',
+    'startFrame=0 внутри старого порога, но hitFrame=20 давно после затухания — играть будет в полную силу');
+  assert.equal(gateSfxDensity(manifestFixture({ fps: 25, cues: { kept: [lead(10, 1)], dropped: [] } }), avatar).status, 'warn',
+    'startFrame=10 уже после порога, но hitFrame=1 бьёт прямо во время затухания');
+  assert.equal(gateSfxDensity(manifestFixture({ fps: 60, cues: { kept: [lead(0, 40)], dropped: [] } }), avatar).status, 'pass');
+  assert.equal(gateSfxDensity(manifestFixture({ fps: 60, cues: { kept: [lead(20, 3)], dropped: [] } }), avatar).status, 'warn');
+});
+
+// Ревью задачи 24 (важно, п.2): симметричное правило для КОНЦА слоя — движок так же плавно гасит
+// звук слоя на последних sceneFadeSec секундах (та же brollEnvelope: слой встраивается в
+// родительское видео одной полноэкранной broll-сценой и получает её огибающую на обоих краях).
+test('the end-of-layer fade rule warns on a hit near the very end, pinned at 25 and 60 fps', () => {
+  const c = (hitFrame) => cue(hitFrame, false, 'x');
+  // 25 fps, seconds=10 → durationInFrames=250, fadeFrames=3, порог конца = 247.
+  assert.equal(gateSfxDensity(manifestFixture({ fps: 25, cues: { kept: [c(246)], dropped: [] } }), avatar).status, 'pass');
+  assert.equal(gateSfxDensity(manifestFixture({ fps: 25, cues: { kept: [c(247)], dropped: [] } }), avatar).status, 'warn');
+  assert.equal(gateSfxDensity(manifestFixture({ fps: 25, cues: { kept: [c(249)], dropped: [] } }), avatar).status, 'warn');
+  // 60 fps, seconds=10 → durationInFrames=600, fadeFrames=7, порог конца = 593.
+  assert.equal(gateSfxDensity(manifestFixture({ fps: 60, cues: { kept: [c(592)], dropped: [] } }), avatar).status, 'pass');
+  assert.equal(gateSfxDensity(manifestFixture({ fps: 60, cues: { kept: [c(593)], dropped: [] } }), avatar).status, 'warn');
+});
+
+// Каждое из двух правил края слоя даёт своё, действенное сообщение (что делать), а не одну и ту же
+// описательную фразу — и называет конкретный звук, если их несколько.
+test('scene-edge spans carry their own actionable note, naming the sound', () => {
+  const startC = { id: 'w@1', name: 'whoosh-in', startFrame: 1, hitFrame: 1, notable: true, bed: false };
+  const gStart = gateSfxDensity(manifestFixture({ cues: { kept: [startC], dropped: [] } }), avatar);
+  assert.match(gStart.spans[0].note, /whoosh-in: перенесите не раньше 0,12 с — движок плавно вводит звук слоя/);
+
+  const endC = { id: 'w@248', name: 'whoosh-in', startFrame: 248, hitFrame: 248, notable: true, bed: false };
+  const gEnd = gateSfxDensity(manifestFixture({ cues: { kept: [endC], dropped: [] } }), avatar);
+  assert.match(gEnd.spans[0].note, /whoosh-in: перенесите раньше — движок приглушает последние 0,12 с слоя/);
+});
+
+// Ревью задачи 24 (п.3, sanity-check): на реальном выводе kit пары внутри kept никогда не
+// конфликтуют (thinCues уже развела их при сборке cues.kept) — эти границы пинуют только защитную
+// логику гейта на случай ручной правки manifest.json. 25 fps: 0,3 с = 7,5 кадра (7 ещё меньше, 8 уже
+// нет), 1,0 с = 25 кадров (24 ещё меньше, 25 уже нет ровно). 60 fps: 0,3 с = 18 кадров ровно (17
+// меньше, 18 уже нет), 1,0 с = 60 кадров ровно (59 меньше, 60 уже нет).
+test('sanity-check: the pair thresholds are pinned exactly at 25 and 60 fps', () => {
+  const c = (hitFrame, notable) => cue(hitFrame, notable, notable ? 'whoosh' : 'pop');
+  assert.equal(gateSfxDensity(manifestFixture({ fps: 25, cues: { kept: [c(100, false), c(107, false)], dropped: [] } }), avatar).status, 'warn');
+  assert.equal(gateSfxDensity(manifestFixture({ fps: 25, cues: { kept: [c(100, false), c(108, false)], dropped: [] } }), avatar).status, 'pass');
+  assert.equal(gateSfxDensity(manifestFixture({ fps: 60, cues: { kept: [c(100, false), c(117, false)], dropped: [] } }), avatar).status, 'warn');
+  assert.equal(gateSfxDensity(manifestFixture({ fps: 60, cues: { kept: [c(100, false), c(118, false)], dropped: [] } }), avatar).status, 'pass');
+  assert.equal(gateSfxDensity(manifestFixture({ fps: 25, cues: { kept: [c(100, true), c(124, true)], dropped: [] } }), avatar).status, 'warn');
+  assert.equal(gateSfxDensity(manifestFixture({ fps: 25, cues: { kept: [c(100, true), c(125, true)], dropped: [] } }), avatar).status, 'pass');
+  assert.equal(gateSfxDensity(manifestFixture({ fps: 60, cues: { kept: [c(100, true), c(159, true)], dropped: [] } }), avatar).status, 'warn');
+  assert.equal(gateSfxDensity(manifestFixture({ fps: 60, cues: { kept: [c(100, true), c(160, true)], dropped: [] } }), avatar).status, 'pass');
+});
+
+// Ревью задачи 24 (п.3): bed-звук рядом с обычным звуком (ближе порога) и bed-звук на кадре 0 (внутри
+// окна старта) — оба игнорируются целиком (kept фильтрует bed до всех проверок), и value считает
+// только не-bed звуки.
+test('a bed cue next to a close sound, and a bed cue at frame 0, are both ignored; value excludes beds', () => {
+  const bed = (hitFrame) => ({ id: `bed@${hitFrame}`, name: 'typing', startFrame: hitFrame, hitFrame, notable: false, bed: true });
+  const g = gateSfxDensity(manifestFixture({ cues: { kept: [bed(0), cue(100), bed(101)], dropped: [] } }), avatar);
+  assert.equal(g.status, 'pass');
+  assert.equal(g.value, 1, 'value считает только не-bed звуки');
+});
+
+// Ревью задачи 24 (п.3): простой проходной случай — два обычных звука почти в 0,5 с друг от друга.
+test('two non-notable cues about 0.5 s apart pass cleanly (sanity check)', () => {
+  const g = gateSfxDensity(manifestFixture({ cues: { kept: [cue(100), cue(113)], dropped: [] } }), avatar);
+  assert.equal(g.status, 'pass');
+  assert.equal(g.value, 2);
+});
+
+// Ревью задачи 24 (важно, п.1): настоящий сигнал тесноты — не пары (см. sanity-check выше), а то, что
+// kit реально убрал. Заметный (notable) дроп обязан перевести гейт в warn со своим спаном на
+// hitFrame убранного звука; без этого автор читает «✅ pass» и не узнаёт, что kit сам решил убрать
+// конфликтующий заметный звук.
+test('a dropped NOTABLE cue turns the gate warn, with a span at its hit time naming the conflict', () => {
+  const dropped = [{ id: 'whoosh-in@50#0', name: 'whoosh-in', hitFrame: 50, notable: true, conflictWith: 'impact-low@55#1', reason: 'notable-gap' }];
+  const g = gateSfxDensity(manifestFixture({ cues: { kept: [cue(55, true, 'impact-low')], dropped } }), avatar);
+  assert.equal(g.status, 'warn');
+  const s = g.spans.find((sp) => sp.note.includes('whoosh-in'));
+  assert.ok(s, JSON.stringify(g.spans));
+  assert.deepEqual([s.fromSec, s.toSec], [2, 2.04]);
+  assert.match(s.note, /kit убрал заметный звук whoosh-in — конфликт с impact-low@55#1/);
+  // Подсказка гейта (не только спан) тоже обязана называть настоящую причину — заметный дроп, а не
+  // общий совет «разнесите звуки» или дефолтное «звуки в порядке».
+  assert.match(g.hint, /kit убрал заметный звук из-за тесноты с соседним/);
+});
+
+// Ревью задачи 24 (важно, п.1): реальный сценарий ревьюера — карточка со звуком whoosh в 5,5 с,
+// которую kit убирает из-за конфликта с impact в 6,1 с (0,6 с < notableGapSec 1,0 с, оба заметные).
+// G9 обязан предупредить со спаном около 5,5 с, а не молчать статусом pass.
+test('REAL KIT: the reviewer\'s typical drop (whoosh at 5.5 s dropped for an impact at 6.1 s) warns at ~5.5 s', () => {
+  const sfxLibrary = { sounds: {
+    'whoosh-in': { file: 'sfx/whoosh-in.wav', lengthSec: 1.2, peakSec: 0.45, role: 'whoosh' },
+    'impact-low': { file: 'sfx/impact-low.wav', lengthSec: 1.5, peakSec: 0.03, role: 'impact' },
+  } };
+  const box = { x: 200, y: 500, w: 600, h: 200 };
+  const cfg = { fps: 25, width: 1080, height: 1920, durationInFrames: 250, words: [], sfxLibrary };
+  const plan = { captions: false, camera: { face: { x: 540, y: 700 }, shots: [{ at: 0, preset: 'W' }] },
+    items: [{ id: 'c3', kind: 'card', at: 5.5, until: 8, box, sfx: 'whoosh' }],
+    sfx: [{ at: 6.1, name: 'impact' }] };
+  const m = kit.buildManifest(kit.compileLayer(plan, cfg));
+  const dropped = m.cues.dropped.find((d) => d.name === 'whoosh-in');
+  assert.ok(dropped, JSON.stringify(m.cues.dropped));
+  assert.equal(dropped.notable, true);
+  assert.equal(dropped.hitFrame, 138);
+  const g = gateSfxDensity(m, avatar);
+  assert.equal(g.status, 'warn');
+  const s = g.spans.find((sp) => sp.note.includes('whoosh-in'));
+  assert.ok(s, JSON.stringify(g.spans));
+  assert.equal(s.fromSec, 5.52);
+  assert.match(s.note, /kit убрал заметный звук whoosh-in — конфликт с impact-low/);
+});
+
+// Ревью задачи 24 (п.1): не-заметный дроп сам по себе гейт не проваливает — остаётся информационной
+// подсказкой при статусе pass. Числа dropped(2) и kept(3) намеренно разные — мутант, путающий
+// dropped.length с kept.length, должен на этом провалиться.
+test('the hint names the number of non-notable cues the kit dropped, when the gate would otherwise pass', () => {
+  const dropped = [
+    { id: 'click-soft@41#0', name: 'click-soft', hitFrame: 41, notable: false, conflictWith: 'click-soft@40#0', reason: 'min-gap' },
+    { id: 'click-soft@42#1', name: 'click-soft', hitFrame: 42, notable: false, conflictWith: 'click-soft@40#0', reason: 'min-gap' },
+  ];
+  const g = gateSfxDensity(manifestFixture({ cues: { kept: [cue(100), cue(150), cue(200)], dropped } }), avatar);
+  assert.equal(g.status, 'pass', 'не-заметные дропы сами по себе не переводят гейт в warn');
+  assert.match(g.hint, /kit убрал 2 звук\. из-за тесноты/);
+});
+
+// Ревью задачи 24: подсказка называет ИМЕННО ту причину, что реально сработала — общий совет про
+// разнесение звуков для голой пары, отдельный совет про край слоя, когда пар нет вовсе. Пин на обе
+// ветки нужен, потому что ветвление тут по условию «есть ли startIssues/endIssues», а не по прямому
+// сравнению — инвертированное условие иначе прошло бы мимо всех остальных тестов status/spans.
+test('the hint text names the dominant issue kind: edge fade vs plain pair crowding', () => {
+  const pairOnly = gateSfxDensity(manifestFixture({ cues: { kept: [cue(100), cue(107)], dropped: [] } }), avatar);
+  assert.equal(pairOnly.status, 'warn');
+  assert.equal(pairOnly.hint, 'разнесите звуки по времени');
+
+  const edgeOnly = gateSfxDensity(manifestFixture({ cues: { kept: [cue(1)], dropped: [] } }), avatar);
+  assert.equal(edgeOnly.status, 'warn');
+  assert.match(edgeOnly.hint, /движок глушит первые\/последние доли секунды слоя/);
+  assert.notEqual(edgeOnly.hint, 'разнесите звуки по времени');
+});
+
+// Ревью задачи 24 (п.4): порог строится из значений профиля через fmt и упоминает край слоя, а не
+// зашитую фразу — другой профиль с другими sfx-порогами обязан получить другой текст.
+test('the threshold text is built from profile.sfx and mentions the edge fade', () => {
+  const g = gateSfxDensity(manifestFixture({}), avatar);
+  assert.match(g.threshold, /0,3 с/);
+  assert.match(g.threshold, /1 с/);
+  assert.match(g.threshold, /0,12 с/);
+});
+
+// Ревью задачи 24 (п.4): пороги профиля обязаны совпадать с дефолтами самого kit (src/motion-kit/
+// sfx.js thinCues) — иначе профиль и движок могли бы незаметно разойтись.
+test('profile.sfx min/notable gap defaults match the kit\'s own thinCues defaults', () => {
+  assert.equal(avatar.sfx.minGapSec, kit.MIN_GAP_SEC);
+  assert.equal(avatar.sfx.notableGapSec, kit.NOTABLE_GAP_SEC);
+});
+
+// Ревью задачи 24 (п.4): profile.sfx.sceneFadeSec обязан давать РОВНО ту же длину затухания в
+// кадрах, что и настоящая функция движка (src/scenes/BrollMedia.jsx fadeFramesForFps) — иначе гейт
+// судил бы по числу, оторванному от реального рендера.
+test('profile.sfx.sceneFadeSec matches the engine\'s own fadeFramesForFps at 25 and 60 fps', () => {
+  const { loadEsm } = require('./helpers/load-esm');
+  const broll = loadEsm('src/scenes/BrollMedia.jsx');
+  for (const fps of [25, 60]) {
+    assert.equal(broll.fadeFramesForFps(fps), Math.max(1, Math.round(avatar.sfx.sceneFadeSec * fps)), `fps=${fps}`);
+  }
 });
 
 test('gateSfxDensity is silent (pass) with no cues at all', () => {
@@ -1460,7 +1638,42 @@ test('assertCues refuses a dropped entry without a string id', () => {
   const m = manifestFixture({});
   assert.throws(() => assertCues({ ...m, cues: { kept: [], dropped: [{ conflictWith: 'y' }] } }),
     /манифест повреждён: cues\.dropped\[0\] должен иметь строковый id/);
-  assert.doesNotThrow(() => assertCues({ ...m, cues: { kept: [], dropped: [{ id: 'x', conflictWith: 'y', reason: 'min-gap' }] } }));
+  assert.doesNotThrow(() => assertCues({ ...m, cues: {
+    kept: [], dropped: [{ id: 'x', name: 'pop', hitFrame: 10, notable: false, conflictWith: 'y', reason: 'min-gap' }],
+  } }));
+});
+
+// Ревью задачи 24: dropped теперь несёт name/hitFrame (G9 читает их для предупреждения о заметном
+// дропе) — битые значения должны провалиться так же громко, как остальные поля.
+test('assertCues refuses a dropped entry with a missing name or a non-finite hitFrame', () => {
+  const m = manifestFixture({});
+  assert.throws(() => assertCues({ ...m, cues: { kept: [], dropped: [{ id: 'x', hitFrame: 10, conflictWith: 'y', reason: 'min-gap' }] } }),
+    /манифест повреждён: cues\.dropped\[0\] \(x\)\.name должен быть непустой строкой/);
+  assert.throws(() => assertCues({ ...m, cues: {
+    kept: [], dropped: [{ id: 'x', name: 'pop', hitFrame: NaN, conflictWith: 'y', reason: 'min-gap' }],
+  } }), /манифест повреждён: cues\.dropped\[0\] \(x\)\.hitFrame должен быть конечным числом/);
+});
+
+// --- assertInserts: манифест повреждён — как остальные проверки формы манифеста ---
+
+test('assertInserts refuses a non-array, a missing id/kind, or non-finite from/to', () => {
+  assert.throws(() => assertInserts({ inserts: null }), /манифест повреждён: inserts должен быть массивом/);
+  assert.throws(() => assertInserts({ inserts: [{ kind: 'stock', from: 0, to: 10 }] }),
+    /манифест повреждён: inserts\[0\] должен иметь строковый id/);
+  assert.throws(() => assertInserts({ inserts: [{ id: 'a', from: 0, to: 10 }] }),
+    /манифест повреждён: inserts\[0\] \(a\)\.kind должен быть непустой строкой/);
+  assert.throws(() => assertInserts({ inserts: [{ id: 'a', kind: 'stock', from: NaN, to: 10 }] }),
+    /манифест повреждён: inserts\[0\] \(a\)\.from\/to должны быть конечными числами/);
+  assert.doesNotThrow(() => assertInserts({ inserts: [{ id: 'a', kind: 'stock', from: 0, to: 10 }] }));
+  assert.doesNotThrow(() => assertInserts({ inserts: [] }));
+});
+
+// Ревью задачи 24 (п.5): гейт G9 обязан проверять cues сам, даже если его позвали в обход
+// runTimelineGates (например напрямую из другого места движка).
+test('gateSfxDensity validates cues itself, even called directly outside runTimelineGates', () => {
+  const bad = manifestFixture({});
+  bad.cues = { kept: [{ startFrame: 0, hitFrame: 0 }], dropped: [] };
+  assert.throws(() => gateSfxDensity(bad, avatar), /манифест повреждён: cues\.kept\[0\] должен иметь строковый id/);
 });
 
 // --- runTimelineGates: весь манифест одним прогоном, порядок гейтов и исключения ---
@@ -1480,10 +1693,18 @@ test('runTimelineGates without a waiver leaves the failing gate failed', () => {
   assert.equal(gates[0].status, 'fail');
 });
 
-// Отклонение оркестратора (п.3): runTimelineGates обязан проверить форму манифеста ОДИН раз в
-// начале (camera-массивы, texts, cues) — так падение случается сразу и с понятным сообщением, а не
-// где-то в середине конкретного гейта. Это то же исключение, что Task 32 (layer check) ловит в
-// try/catch и превращает в report.error с кодом выхода 2 — раннер не должен его глотать сам.
+// D4 (context.md): исключения существуют только для G1, G4 и G11 — G5 не входит в WAIVABLE, и
+// исключение для него не должно на него подействовать, даже с непустой причиной.
+test('a waiver for a non-waivable gate (G5) has no effect — it stays failed', () => {
+  const m = manifestFixture({ texts: [{ id: 'title', from: 0, frames: [[40, 300, 440, 400]] }], waivers: [{ gate: 'G5', reason: 'владелец разрешил' }] });
+  const gates = runTimelineGates(m, avatar);
+  assert.equal(gates.find((g) => g.id === 'G5').status, 'fail');
+});
+
+// runTimelineGates проверяет форму манифеста один раз, первым делом, до любого гейта (camera-
+// массивы, texts, cues, inserts) — так падение случается сразу с понятным сообщением, а не где-то
+// в середине конкретного гейта. Это то же исключение, что Task 32 (layer check) ловит в try/catch
+// и превращает в report.error с кодом выхода 2 — раннер не должен его глотать сам.
 test('runTimelineGates throws the same "манифест повреждён" errors as the individual gates, before running any gate', () => {
   const badCamera = { fps: 25, width: 1080, height: 1920, durationInFrames: 3,
     camera: { s: [1, 1], requested: [1, 1], dx: [0, 0], dy: [0, 0], blur: [0, 0], opacity: [1, 1] },
@@ -1496,4 +1717,11 @@ test('runTimelineGates throws the same "манифест повреждён" err
   const badCues = manifestFixture({});
   badCues.cues = { kept: [{ startFrame: 0, hitFrame: 0 }], dropped: [] };
   assert.throws(() => runTimelineGates(badCues, avatar), /манифест повреждён: cues\.kept\[0\] должен иметь строковый id/);
+
+  // Иначе валидный манифест с битым inserts: без assertInserts это дошло бы до gateHook и упало бы
+  // непонятным нативным TypeError вместо «манифест повреждён» — доказывает, что проверка формы
+  // происходит первым делом здесь, а не случайно где-то внутри гейта.
+  const badInserts = manifestFixture({});
+  badInserts.inserts = null;
+  assert.throws(() => runTimelineGates(badInserts, avatar), /манифест повреждён: inserts должен быть массивом/);
 });

@@ -1,5 +1,11 @@
 import { ref25, secToFrame } from './time.js';
 
+// Дефолты плотности звуков thinCues — тот же профиль гейтов (scripts/qa/profiles.js sfx.minGapSec/
+// notableGapSec) обязан совпадать с этими числами; экспортируем их, чтобы тест сверял один источник,
+// а не держал одно и то же число вручную в двух местах (Task 24 review).
+export const MIN_GAP_SEC = 0.3;
+export const NOTABLE_GAP_SEC = 1.0;
+
 export const NOTABLE_ROLES = Object.freeze(['whoosh', 'swoosh', 'impact', 'riser', 'shutter']);
 export const ROLE_VOLUME = Object.freeze({
   whoosh: 0.7, swoosh: 0.7, impact: 0.7, riser: 0.5, shutter: 0.6,
@@ -72,7 +78,7 @@ export function sfxFromItems(items, extra, { fps, library, durationInFrames }) {
 }
 
 // Не больше одного заметного звука в секунду и не ближе 0,3 с между любыми; набор текста — подложка.
-export function thinCues(cues, { fps, minGapSec = 0.3, notableGapSec = 1.0 } = {}) {
+export function thinCues(cues, { fps, minGapSec = MIN_GAP_SEC, notableGapSec = NOTABLE_GAP_SEC } = {}) {
   const kept = [];
   const dropped = [];
   const minGap = minGapSec * fps;
