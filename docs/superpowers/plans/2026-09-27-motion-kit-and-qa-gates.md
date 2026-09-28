@@ -9,13 +9,15 @@
 **Architecture:** Общая инфраструктура слоя живёт в движке как `src/motion-kit/` (ESM) и
 подключается проектным слоем по имени `@automontage/motion-kit` (webpack alias в Remotion и alias
 esbuild в Node). Слой описывает режиссуру одним чистым объектом `plan.js`; kit компилирует его в
-дорожки по кадрам, по которым одновременно рендерится слой и строится манифест для гейтов. Гейты —
+дорожки по кадрам, по которым одновременно рендерится слой и строится манифест для гейтов (обе стороны
+вызывают один `compilePlan(buildPlan, ctx)` из core). Гейты —
 чистые функции в `scripts/qa/`, запускаются в трёх точках: `layer check` (по манифесту, секунды),
 `layer render` (длина слоя, голос в звуке слоя) и внутри `preview` (баланс голоса и музыки по
 настоящим дорожкам); стоп не даёт опубликовать preview.
 
 **Tech Stack:** Node 20+ (CommonJS в `scripts/`, `node:test`), Remotion 4.0.504, React 19,
-esbuild 0.28 (уже в зависимостях Remotion), ffmpeg/ffprobe.
+esbuild 0.28.1 (с Task 19 — явная закреплённая зависимость движка, а не только транзитивная от Remotion),
+ffmpeg/ffprobe.
 
 **Исследование:** локальная заметка `knowledge/2026-09-27-motion-kit-research.md` (не в Git).
 
@@ -30,11 +32,11 @@ esbuild 0.28 (уже в зависимостях Remotion), ffmpeg/ffprobe.
 | D1 | Где живёт kit | ★ `src/motion-kit/` внутри движка: одна версия Remotion, общие тесты, слои уже рендерятся из корня движка | отдельный npm-пакет — релизы и версии ради внутренней библиотеки одного движка |
 | D2 | Как слой подключает kit | ★ Гибрид: инфраструктура импортом `@automontage/motion-kit`, а стартовые файлы ролика (`plan.js`, `scenes.jsx`, `Root.jsx`) копирует `layer new`. Гейты доверяют только kit, поэтому камеру и рамки нельзя «подправить» копией | полная копия kit в папку ролика — пять копий снова, исправления не доходят, гейт не может доверять таймлайну |
 | D3 | Где работают гейты | ★ Три точки автоматически: `layer check` до рендера (секунды), `layer render` после рендера, `preview` перед публикацией | только внутри `preview` — ошибка ритма находится после 5 минут рендера слоя |
-| D4 | Что при провале | ★ Объективные нарушения — стоп: preview не публикуется, прошлый остаётся в пульте. Вкусовые — предупреждение в отчёте. Исключение (`waivers`) только для G1, G4, G11 и только с причиной в плане слоя, видно в отчёте | только предупреждения — слабый preview снова попадает к владельцу |
+| D4 | Что при провале | ★ Объективные нарушения — стоп: preview не публикуется, прошлый остаётся в пульте. Вкусовые — предупреждение в отчёте. Исключение (`waivers`) только для G1, G4, G11 и только с причиной в плане слоя, видно в отчёте; битый waiver — ошибка компиляции плана | только предупреждения — слабый preview снова попадает к владельцу |
 | D5 | Громкость звуков слоя | ★ `masterDb` в `<SfxTrack>` (по умолчанию −5 dB = утверждённый уровень), схема brief не меняется | поле `brollMedia.audioGainDb` — правки схемы, Review (4 файла) и утверждённых brief |
 | D6 | Звук слоя в контракте | Слой kit рендерится со звуком (`audioMode: "mix"`), в нём только эффекты; голос в звуке слоя ловит G7. Записать в DECISIONS, поправить `creative-motion.md` и `qa-checklist.md` (сейчас требуют `mute`) | — |
-| D7 | Порог ритма | Стоп > 2,5 с, предупреждение > 2,2 с; джамп-кат засчитывается при скачке масштаба ≥ 15 % или сдвиге лица ≥ 85 px | — |
-| D8 | Баланс голоса и музыки | Меряется по настоящим дорожкам внутри `preview` (голос после нормализации + музыка после sidechain), только на участках речи. Коридор профиля `avatar` калибруется по утверждённому эталонному preview (Task 50) | — |
+| D7 | Порог ритма | Стоп > 2,5 с, предупреждение > 2,2 с; джамп-кат засчитывается при скачке масштаба ≥ 15 % или сдвиге лица ≥ 85 px (× короткая сторона кадра / 1080); слабая смена 6–15 % или сдвиг 40–85 px — только предупреждение G2 | — |
+| D8 | Баланс голоса и музыки | Меряется по настоящим дорожкам внутри `preview` (голос после нормализации `finish.js` + музыка после того же sidechain, что в `mix-music.js`), только на участках речи. Статистика — разрыв громкости под речью в LU: K-взвешивание BS.1770-4 (точные коэффициенты для 48 кГц, сигнал во float), сумма мощностей каналов по блокам 50 мс внутри окон речи, **без гейтинга**: `gapLu = 10·log10(ΣP голоса / ΣP музыки)`. Это то, что в среднем слышно под голосом, поэтому на музыке с паузами разрыв честно расходится с gated ebur128 — калибровка это не «исправляет». Коридор профиля `avatar` калибруется по утверждённому эталонному preview тем же путём замера (Task 47); до калибровки оба коридора — заглушки | — |
 
 ## Глобальные ограничения
 
@@ -73,7 +75,9 @@ motion-vNN/
 ```
 
 ```js
-// LayerPlan — то, что возвращает buildPlan(ctx). ctx = {...layer.json, words, sfxLibrary}
+// LayerPlan — то, что возвращает buildPlan(ctx). ctx = {...layer.json, words, sfxLibrary}.
+// buildPlan синхронный и возвращает объект; вызывается только через compilePlan(buildPlan, ctx) из core
+// (Node-манифест и Root.jsx) — он же даёт понятные ошибки: нет default function, throw, async, не объект.
 {
   hook: 'speaker' | 'enumeration',
   camera: {
@@ -87,41 +91,72 @@ motion-vNN/
     aways?: [{from, to}],
   },
   items: [{id, kind: 'text'|'card'|'media', at, until, box: {x, y, w, h}, rot?,
-           enter?: {kind: 'pop'|'fly'|'mask'|'cut', from?: [dx, dy]},
+           enter?: {kind: 'pop'|'fly'|'mask'|'cut', from?: [dx, dy]},   // from — пара конечных чисел
            exit?: {frames?: 5, dir?: 'down'|'up'}, life?: {parallax?: 8}, bleed?,
            sfx?: string|{name, vol?, leadFrames?}|null,
            type?: {from, to, sfx?}, props?: {...}}],
   inserts?: [{id?, kind: 'stock'|'screen'|'donor'|'scene', from, to, src?, cover?, kb?: [1.03, 1.1], sfx?}],
                                         // cover по умолчанию true (кроме donor); cover-вставка не короче
                                         // close + exit + 1 кадра (0,68 с при 25 fps); kb — пара чисел ≥ 1;
-                                        // stock рисует StockInsert, screen/scene — проект через FullscreenReveal
+                                        // stock рисует StockInsert, screen/scene — проект через FullscreenReveal;
+                                        // donor без cover — оверлей (спикер виден), полноэкранный донор — cover: true
   sfx?: [{at, name, vol?, prio?}],       // звуки вне элементов
   captions?: false | {chunk?: {...}, lane?: {x, y, w, h}, hide?: [{from, to}]},  // hide: конечные from < to, с
-  waivers?: [{gate: 'G1'|'G4'|'G11', reason}],
+  waivers?: [{gate: 'G1'|'G4'|'G11', reason}],   // другой гейт или пустая reason — ошибка компиляции; null — нет
 }
 ```
+
+`plan.js` — чистые данные: импортирует только `@automontage/motion-kit/core` и относительные файлы внутри
+своего слоя (React-файлы, в том числе `scenes.jsx`, подключает `Root.jsx`, план ссылается на них по id);
+`process.env` в плане пуст. Границу проверяет `buildLayerManifest` по metafile esbuild (`findPlanViolation`,
+Task 19). Это ограждение от случайностей, а не песочница: динамический `require`, `eval` и
+`globalThis.process` оно не ловит, а `layer check` выполняет `plan.js` — не запускать его на чужих слоях.
 
 Манифест (`out/manifest.json`, пишет `buildManifest`):
 
 ```js
 {version: 1, kitVersion, fps, width, height, durationInFrames, maxScale,
- camera: {s: [], requested: [], dx: [], dy: [], blur: [], opacity: []},   // по кадру
+ camera: {s: [], requested: [], base: [], dx: [], dy: [], blur: [], opacity: []},   // по кадру; base — масштаб
+                                        // пресета с дрейфом до панчей и до maxScale (G3 отличает пресет от панча)
  texts: [{id, from, frames: [[l, t, r, b] | null]}  |  {id, from, until, static: [l, t, r, b]}],
                                         // субтитры: caption-<n>, после окна hide — caption-<n>b, caption-<n>c…
- inserts: [{id, kind, from, to, cover, src}],   // cover и src — с Task 22
- cues: {kept: [{id, name, startFrame, hitFrame, notable, bed}], dropped: [{id, conflictWith, reason}]},
+ inserts: [{id, kind, from, to, cover, src}],   // cover — G4 (лицо закрыто), src — короткий сток (Task 38)
+ cues: {kept: [{id, name, startFrame, hitFrame, durationFrames, notable, bed}],   // durationFrames — окна G7
+        dropped: [{id, name, hitFrame, notable, conflictWith, reason}]},        // что убрал thinCues — сигнал G9
  hook, waivers}
 ```
+
+Гейты сначала проверяют форму манифеста (`assertCameraArrays`, `assertTexts`, `assertCues`, `assertInserts`):
+обрезанный массив `camera.*`, NaN-бокс, `durationFrames ≤ 0` дают исключение «манифест повреждён: …», которое
+команда превращает в отчёт с `error` (код 2).
 
 Отчёт гейтов (`<проект>/qa/<имя>.json` + `.txt`):
 
 ```js
 {version: 1, kind: 'layer-check'|'layer-render'|'preview', layer?, profile, createdAt,
  inputs: [{path, sha256}], gates: [{id, title, status: 'pass'|'warn'|'fail'|'waived'|'skipped',
- value, threshold, unit, spans: [{fromSec, toSec, note}], hint}], summary: {status, fail, warn}, error?}
+ value, threshold, unit, spans: [{fromSec, toSec, note}], hint}],
+ summary: {status: 'pass'|'warn'|'fail'|'error', fail, warn}, error: string | null}
 ```
 
+С ошибкой (`error` не `null`) `summary.status` всегда `'error'` — «оценить нельзя», даже при пустом или
+зелёном `gates`; текст — `error?.message ?? String(error)`, пустой — «неизвестная ошибка». Исключение
+снимает `fail` всего гейта, а не отдельного места ролика.
+
 Коды выхода команд с гейтами: 0 — пройдено или только предупреждения; 1 — стоп; 2 — оценить нельзя.
+
+Профили порогов (`scripts/qa/profiles.js`, глубоко заморожены; px — для короткой стороны кадра 1080):
+
+- общие: `rhythm {stopSec 2.5, warnSec 2.2}`; `camera {jumpScale 0.15, shiftPx 85, weakShiftPx 40,
+  punchScale 0.1, weakScale 0.06, sharpBlurPx 6, eatenPunch 1.05}`; `scale {max 1.25}`; `hook {sec 3,
+  mustSec 2}` (правило владельца: спикер на каждом кадре первых 2 с — стоп, до 3 с — предупреждение);
+  `donor {maxSec 3, gapSec 0.5}`; `stock {min 3, minShort 2, shortSec 45}`; `sfx {minGapSec 0.3,
+  notableGapSec 1.0, sceneFadeSec 0.12}` (= `MIN_GAP_SEC`/`NOTABLE_GAP_SEC` kit); `leak {stop 0.6,
+  windowWarn 0.8, windowSec 2, silentDb −60, outsideWarnSec 0.15, outsideStopSec 0.5, headSec 0.1,
+  tailSec 0.15}`; `duration {toleranceFrames 1}`;
+- `voiceMusic` (G8, LU: `stopLow/warnLow/target/warnHigh/stopHigh`): `avatar` 3/9/12/15/20, `live`
+  6/12/15/18/24 — заглушки до калибровки (`avatar` — Task 47; `live` — стартовые значения без калибровки);
+- `WAIVABLE` = G1, G4, G11 (= `WAIVABLE_GATES` kit).
 
 ## Карта файлов
 
@@ -130,14 +165,14 @@ motion-vNN/
 | `src/motion-kit/time.js` | секунды ↔ кадры |
 | `src/motion-kit/words.js` | слова из транскрипта, написание, якоря |
 | `src/motion-kit/safe.js` | прямоугольник safe-zone, выход за него |
-| `src/motion-kit/camera.js` | пресеты, `compileCamera`, `cameraAt`, `autoShots` |
-| `src/motion-kit/motion.js` | вход/жизнь/выход элементов, габариты по кадру, `typed` |
+| `src/motion-kit/camera.js` | пресеты, `compileCamera`, `cameraAt` (с `base` — масштаб пресета до панчей и клэмпа), `autoShots` |
+| `src/motion-kit/motion.js` | вход/жизнь/выход элементов (`reveal` маски), габариты по кадру, `typed` |
 | `src/motion-kit/inserts.js` | вставки и уход аватара под них, карточка и кривые раскрытия/закрытия |
-| `src/motion-kit/sfx.js` | звуковые события, выравнивание по пику, прореживание, громкость `cueVolume` |
+| `src/motion-kit/sfx.js` | звуковые события, выравнивание по пику, прореживание (`MIN_GAP_SEC`, `NOTABLE_GAP_SEC`), громкость `cueVolume`, `assertMasterDb` |
 | `src/motion-kit/captions.js` | нарезка субтитров, полоса, кадры видимости `captionSpans`, подгонка кегля |
 | `src/motion-kit/screen.js` | прокрутка скриншота долей страницы, вспышка затвора, цвета окна браузера |
-| `src/motion-kit/compile.js` | `compileLayer`, `compileItems`, `KIT_VERSION` |
-| `src/motion-kit/manifest.js` | `buildManifest` |
+| `src/motion-kit/compile.js` | `compileLayer`, `compileItems`, `compilePlan` (единый вход buildPlan → слой для Node-манифеста и `Root.jsx`), проверка waivers (`WAIVABLE_GATES`), `KIT_VERSION` |
+| `src/motion-kit/manifest.js` | `buildManifest` (контракт — «Контракт слоя» выше) |
 | `src/motion-kit/core.js` | реэкспорт только чистых модулей (для Node и `plan.js`) |
 | `src/motion-kit/index.js` | `core` + React-компоненты |
 | `src/motion-kit/SpeakerLayer.jsx` | аватар: один `OffthreadVideo muted`, камера, `Freeze`, заливка краёв |
@@ -148,10 +183,17 @@ motion-vNN/
 | `src/motion-kit/Subtitles.jsx` | субтитры с караоке в одну строку с подгонкой кегля |
 | `src/motion-kit/FontLoader.jsx` | гейт шрифтов: оборачивает слой, держит `delayRender` до загрузки |
 | `scripts/remotion-webpack.js` | + alias `@automontage/motion-kit` |
-| `scripts/motion-kit-node.js` | загрузка kit и слоя в Node через esbuild |
-| `scripts/qa/*.js` | профили, события камеры, гейты, аудио, отчёт |
+| `scripts/motion-kit-node.js` | синхронная сборка kit и слоя esbuild (`buildSync` + metafile): `loadKitCore`, `buildLayerManifest`, граница `plan.js` `findPlanViolation` |
+| `scripts/qa/profiles.js` | пороги профилей `avatar`/`live`, `WAIVABLE` |
+| `scripts/qa/report.js` | `gate`, `applyWaivers`, `buildReport` (статус `error`), `exitCodeFor`, `formatReport`, `writeReport` |
+| `scripts/qa/safe-rect.js` | safe-зона для CommonJS-гейтов (те же числа, что `safe.js`) |
+| `scripts/qa/timeline-gates.js` | события камеры и гейты по манифесту G1–G5, G9–G11, `runTimelineGates` |
+| `scripts/qa/audio.js` | PCM из ffmpeg (`pcmFromFfmpeg`, `floatPcmFromFfmpeg`, `decodeAudio`), огибающая, `pearson`, `bestLagPearson`, `windowedMax`, `audibleOutside` |
+| `scripts/qa/media-gates.js` | по отрендеренному слою: G6 `gateLayerDuration`, G7 `gateVoiceLeak` |
+| `scripts/qa/mix-gates.js` | G8: `speechWindows`, `blockPowers`, `loudnessGap`, `measureVoiceMusic`, `gateVoiceMusic` |
+| `scripts/qa/preview-gates.js` | барьер перед публикацией preview (Task 40) |
 | `scripts/layer/*.js` | команды `automontage layer …` |
-| `scripts/mix-music.js` | + режим `stem: 'music'` для замера |
+| `scripts/mix-music.js` | + режим `stem: 'music'`, `MIX_AUDIO_FORMAT`, `mixMusicInputArgs` для замера G8 |
 | `scripts/preview.js` | + гейты перед публикацией |
 | `scripts/review/media-import.js` | + `-threads 1` для VP8-прокси |
 | `scripts/build-commands.js` | + `remotionLayerRenderCommand` |
@@ -159,6 +201,8 @@ motion-vNN/
 | `templates/motion-layer/` | стартовые файлы слоя |
 | `docs/MOTION-KIT.md` | как собирать слой из kit, API, гейты |
 | `skills/reel-turnkey/references/motion-layer-brief.md` | единое задание субагенту слоя |
+| `package.json` | + `esbuild` 0.28.1 в `dependencies` |
+| `.github/workflows/ci.yml` | + Windows-шаг «Проверить сборку motion-слоя и границу plan.js» (`tests/motion-kit-node.test.js`) |
 
 ## Фаза 0. Рабочее место
 
@@ -2698,6 +2742,31 @@ function buildLayerManifest(layerDir) {
 module.exports = { buildLayerManifest, loadKitCore };
 ```
 
+**Состояние после пакета 2** (ревью Task 19; источник истины — `scripts/motion-kit-node.js`, фрагмент выше —
+исходный набросок):
+- Всё синхронно: `buildLayerManifest(layerDir)` возвращает манифест, а не Promise; `loadKitCore()` кеширует core.
+  esbuild — явная закреплённая зависимость `"esbuild": "0.28.1"` в `dependencies`.
+- Entry из stdin (`<stdin>`) только загружает четыре файла слоя и отдаёт `buildPlan` (namespace-импорт
+  `plan.js`) и `ctx = {...layer, words, sfxLibrary}`; манифест строится в Node:
+  `kitCore.buildManifest(kitCore.compilePlan(buildPlan, ctx))`. `compilePlan` (core, `compile.js`) — единая
+  точка и для `Root.jsx` (Task 29): нет default function, throw в buildPlan (стек в `cause`), async buildPlan,
+  не объект — понятные русские ошибки.
+- Сборка: `buildSync` с `metafile: true`, `packages: 'external'`, `define: {'process.env': '{}'}` (план видит
+  пустой env, как рендер), `sourcemap: 'inline'`, `absWorkingDir` — канонический путь слоя.
+- Граница плана — `findPlanViolation(metafile, {root, kitRoot, kitFiles, layerFiles}, {pathApi, canonical})` по
+  metafile после сборки, закрыта по умолчанию: коду ролика можно только `@automontage/motion-kit/core` и файлы
+  внутри слоя (канонические пути, симлинк наружу — отказ). React, remotion, Node, сторонние пакеты, другие
+  подпути kit, файлы вне слоя — ошибка `слой X: <файл> импортирует «…» — <причина>`; если запрещённый импорт
+  пришёл через помощника — кратчайшая цепочка от plan.js (`src/plan.js → src/helper.js → …`), а для
+  React/remotion ещё и подсказка, какой импорт убрать. Это ограждение от случайностей, а не песочница.
+- Ошибки называют виновный файл: нет файла (`src/words.js` — «создаётся командой automontage layer words»,
+  остальные — `layer new`), синтаксис (`не собирается <файл> — файл:строка:колонка: …`), ошибка загрузки файлов
+  слоя, ошибка плана или kit — с префиксом `слой X:`. Место `(src/plan.js:N:M)` добавляется, только если в
+  процессе включены source maps (`process.setSourceMapsEnabled(true)` — CLI слоя, Task 28). Пути kit в
+  сообщениях — `@automontage/motion-kit/…`, без путей движка.
+- Windows: канонические пути через `fs.realpathSync.native` (короткие имена 8.3); в Windows-джобе CI шаг
+  «Проверить сборку motion-слоя и границу plan.js» запускает `tests/motion-kit-node.test.js`.
+
 - [ ] **Step 4: Запустить**
 
 Run: `node --test tests/motion-kit-node.test.js`
@@ -2888,6 +2957,23 @@ function writeReport(projectDir, name, report, fileSystem = fs) {
 
 module.exports = { applyWaivers, buildReport, exitCodeFor, formatReport, gate, summarize, writeReport };
 ```
+
+**Состояние после пакета 2** (ревью Task 20; источник истины — `scripts/qa/profiles.js`, `scripts/qa/report.js`):
+- Профили глубоко заморожены: гейт не может поменять порог следующему гейту. Значения — «Профили порогов» в
+  начале плана; `voiceMusic` — в LU (Task 27) и до калибровки (Task 47) остаётся заглушкой.
+- `gate()` отклоняет статус вне `pass|warn|fail|waived|skipped` и превращает `spans: undefined` в `[]`.
+  `applyWaivers` пропускает битые записи без падения и снимает только `fail`; подсказка — `исключение:
+  <причина>` без пробелов по краям. Сами waivers проверяет kit при компиляции плана (`WAIVABLE_GATES` =
+  `WAIVABLE`, равенство закреплено тестом): не тот гейт или пустая причина — ошибка `layer check`, `null` —
+  «исключений нет». Исключение снимает весь гейт, а не место в ролике (вопрос владельцу в трекере).
+- `buildReport({..., error})`: с ошибкой `summary.status: 'error'` при любых `gates` (даже пустых или
+  зелёных), `error` — строка (пустая → «неизвестная ошибка»), без ошибки — `null`. `exitCodeFor`: ошибка → 2,
+  `fail` → 1, иначе 0.
+- `formatReport`: вердикт «оценить нельзя» при ошибке, «всё хорошо (исключений: N)» при waived; числа и
+  числовой порог — с запятой (ноль тоже печатается); не больше трёх spans и строка «…и ещё N — полный список в
+  JSON-отчёте рядом»; `clock` округляет до сотых до деления на минуты (59,999 → `1:00,00`) и не уходит в минус.
+- `writeReport` пишет атомарно: временный файл с `randomUUID`, флаг `wx`, при сбое записи или rename временный
+  файл удаляется; `fileSystem` подменяется в тестах.
 
 - [ ] **Step 4: Запустить**
 
@@ -3087,6 +3173,23 @@ function gateWeakCuts(manifest, profile) {
 module.exports = { detectCameraEvents, gateRhythm, gateWeakCuts, speakerPlans };
 ```
 
+**Состояние после пакета 2** (ревью Task 21; источник истины — `scripts/qa/timeline-gates.js`):
+- `detectCameraEvents(camera, t, scale, fps)` — `scale` (короткая сторона / 1080) и `fps` обязательны, без них
+  ошибка. Возвращает `{events: [{frame, kind: 'cut'|'focus'|'punch'}], weak: [{frame, ratio, shift, reason:
+  'scale'|'shift'}], sharp}`. Сдвиг лица — евклидов (`Math.hypot`), а не максимум по оси.
+- Ступенька — однокадровый скачок ≥ `weakScale` с ровными (< 1 %) соседями, рез между двумя shots kit: её
+  судят только порогами реза и слабого реза, а не порогом панча (12 % между W и M — слабый рез G2, не панч).
+  Панч не засчитывается, если в его окне есть ступенька или настоящий рез/смена резкости.
+- Датировка панча: у первого кадра пачки начало отодвигается к настоящему старту роста — назад, пока
+  однокадровый прирост ≥ 10 % от пика пружины (дрейф `in` больше не утаскивает старт на десятки кадров раньше).
+- Слабые смены (G2): масштаб 6–15 % или сдвиг лица ≥ `weakShiftPx` 40 px × scale (`reason: 'shift'`, span
+  «сдвиг N px»), только если спикер резкий и в кадре f, и в опорном f − 2; «съеденный» панч (клэмп у потолка)
+  в G2 не показывается — это G3, кроме ступеньки. Повторы схлопываются только внутри одного вида событий.
+- `speakerPlans` возвращает планы по времени (сортирует гейт). `gateRhythm` — `skipped` («спикер не виден —
+  ритм не оценивается»), если резкого спикера нет вовсе; px и % в подсказках G1/G2 считаются от профиля и
+  кадра. Каждый гейт по манифесту сначала вызывает `assertCameraArrays` (семь массивов `camera.*`, включая
+  `base`, длиной `durationInFrames` из конечных чисел).
+
 - [ ] **Step 4: Запустить**
 
 Run: `node --test tests/qa-timeline-gates.test.js`
@@ -3235,6 +3338,23 @@ function gateDonor(manifest, profile) {
 }
 ```
 
+**Состояние после пакета 2** (ревью Task 22):
+- G3 решает причину клэмпа по `camera.base` — масштаб пресета с дрейфом до панчей и до `maxScale` (`cameraAt`
+  отдаёт `base`, манифест — массив `camera.base`), а не по форме кривой. `fail` — только если сам видимый `s`
+  выше `profile.scale.max` (так может быть лишь при `camera.maxScale` плана > 1,25; spans — кадры выше
+  предела). Иначе `warn` по зонам «съеденных» кадров (`requested / s ≥ eatenPunch`) с причиной: `preset`, если
+  и `base / s ≥ eatenPunch` («пресет крупнее предела — уменьшите s пресета»), иначе `punch` («панч-ин упёрся в
+  предел»).
+- G4 — правило владельца (`docs/BATCH-REELS-WORKFLOW.md`, `docs/editing-rules.md`), профиль `hook: {sec: 3,
+  mustSec: 2}`: спикер скрыт (`opacity ≤ 0,01` или кадр внутри вставки с `cover: true`) хоть на одном кадре
+  первых 2 с — `fail`; только между 2 и 3 с — `warn`; `hook: 'enumeration'` освобождает от обоих. Размытие и
+  текст поверх допустимы.
+- G10 не менялся: считает вставки `kind: 'stock'` (повтор одного `src` — как разные вставки, см. Task 38).
+- G11 сливает донорские вставки с паузой ≤ `donor.gapSec` 0,5 с (порог в кадрах — `floor`, никогда не больше
+  gapSec) в один прогон и судит его длину; `value` — самый длинный прогон всегда, даже при `pass`. `cover` решает
+  только видимость спикера (G4, G1), а не G11: донор без `cover` — оверлей, спикер виден; полноэкранный донор
+  обязан ставить `cover: true`. Это же говорит подсказка G11.
+
 - [ ] **Step 4: Запустить**
 
 Run: `node --test tests/qa-timeline-gates.test.js tests/motion-kit-manifest.test.js`
@@ -3322,6 +3442,19 @@ function gateSafeZone(manifest) {
 }
 ```
 
+**Состояние после пакета 2** (ревью Task 23):
+- G5 сканирует всю жизнь текста: span одного текста — от первого до последнего нарушившего кадра, в заметке —
+  максимальный выход по каждой стороне (`title: слева до +30 px`), а не первый кадр; spans — по времени.
+  Статичная полоса субтитров нарушает весь свой `[from, until)`.
+- Все куски субтитров (`caption-<n>`, `caption-<n>b`…) делят один `captions.lane` — это одна проблема: один
+  элемент «субтитры (полоса)» в `value` и `spans` с подсказкой про `captions.lane`; если вне зоны ещё и обычный
+  элемент — обе подсказки через «;».
+- Порог в тексте отчёта считается от `safeRect(width, height)` кадра (у 16:9 свои числа).
+- `assertTexts` отклоняет битые тексты (нет id, дробный `from`, NaN-бокс, `until ≤ from` у полосы) ошибкой
+  «манифест повреждён: …». Корни в kit: `compileItems` проверяет `enter.from` (пара конечных чисел), `animOf`
+  отдаёт `reveal` маски (первый кадр `mask` не нарисован и в манифест не попадает), пружины входа клэмпятся
+  через `measureSpring` — манифест долгоживущих элементов строится за линейное время.
+
 - [ ] **Step 4: Запустить**
 
 Run: `node --test tests/qa-timeline-gates.test.js`
@@ -3403,6 +3536,20 @@ function runTimelineGates(manifest, profile) {
   ], manifest.waivers || []);
 }
 ```
+
+**Состояние после пакета 2** (ревью Task 24):
+- Настоящий сигнал тесноты G9 — `cues.dropped`: заметный звук, который kit убрал из-за соседа, даёт `warn` со
+  span на его `hitFrame` («kit убрал заметный звук <name> — конфликт с <name> (<t> с)»; служебный id соседа
+  переводится в имя и время по `cues.kept`). Обычный дроп — только строка в hint при пройденном гейте. Для
+  этого манифест отдаёт `cues.dropped: [{id, name, hitFrame, notable, conflictWith, reason}]`. Пары внутри
+  `cues.kept` после `thinCues` конфликтовать не могут — их проверка осталась защитой от ручной правки.
+- Края слоя — по удару (`hitFrame`), а не по старту звука: `warn`, если удар в первых или последних
+  `max(1, round(sceneFadeSec · fps))` кадрах — огибающая broll-сцены preview глушит их (Task 37).
+- Дефолты `thinCues` экспортированы (`MIN_GAP_SEC`, `NOTABLE_GAP_SEC` в `sfx.js`) и сверяются с профилем тестом.
+- `runTimelineGates` первым делом проверяет форму манифеста (`assertCameraArrays`, `assertTexts`, `assertCues`
+  — у kept конечные кадры и `durationFrames > 0`, у dropped `name` и `hitFrame`, — `assertInserts`) и бросает
+  «манифест повреждён: …». Исключение не глотается: `layer check` (Task 32) превращает его в отчёт с `error`
+  и код 2.
 
 - [ ] **Step 4: Запустить**
 
@@ -3544,6 +3691,25 @@ function windowedMax(a, b, windowBlocks, { minDbA = -60 } = {}) {
 module.exports = { BLOCK, FLOOR_DB, SAMPLE_RATE, blockDb, decodeAudio, envelopeDb, pcmFromFfmpeg, pearson, windowedMax };
 ```
 
+**Состояние после пакета 2** (ревью Task 25 и 27; источник истины — `scripts/qa/audio.js`):
+- Константы: `SAMPLE_RATE` 8000, `BLOCK` 400 (50 мс), `BLOCK_SEC` 0,05, `FLOOR_DB` −90.
+- `pcmFromFfmpeg(inputArgs, {maxBuffer, spawnImpl})` → `Int16Array` моно 8 кГц; `floatPcmFromFfmpeg(inputArgs,
+  {sampleRate, channels, maxBuffer, spawnImpl})` → `Float32Array` полной полосы, каналы чередуются (для G8;
+  перед фильтрами, поднимающими уровень, вызывающий сам ставит `aformat=sample_fmts=fltp`). Сбой ffmpeg —
+  всегда ошибка, не тишина: ENOENT → «ffmpeg не найден; запусти npm run doctor», нет звуковой дорожки → «в
+  <файл> нет звуковой дорожки», иначе причина из stderr или `error.message`.
+- `decodeAudio(file, {fromSec, durationSec, spawnImpl})`: `-ss`/`-t` после `-i` (точно по сэмплу, без сдвига
+  на задержку AAC), `-map 0:a:0`, `aresample=async=1:first_pts=0` (звук на глобальном таймкоде, даже если
+  дорожка начинается позже 0); неверные `fromSec`/`durationSec` и пустой отрезок — ошибка. `formatSeconds` —
+  десятичная запись без экспоненты.
+- `bestLagPearson(a, b, maxLagBlocks)` → `{r, lag}` | null — лучшая корреляция при сдвиге ±maxLagBlocks
+  (перекрытие ≥ 3 точек); `lag > 0` — событие в `a` позже, чем в `b`.
+- `windowedMax(a, b, windowBlocks, {minDbA = −60, minAudibleShare = 0.4, maxLagBlocks = 6, hop =
+  windowBlocks/4})` → `{r, startBlock, lag}` | null: окно берётся по доле слышимых блоков (не по средней
+  громкости), внутри окна ищется сдвиг, последнее окно у конца проверяется всегда; `hop` — целое ≥ 1.
+- `audibleOutside(envelope, spans, {minDb = −60, blockSec, headSec = 0.1, tailSec = 0.15})` → `{seconds,
+  stretches: [{fromSec, toSec}]}` — секунды слышимого звука вне окон эффектов с запасами на кодек AAC.
+
 - [ ] **Step 4: Запустить**
 
 Run: `node --test tests/qa-audio.test.js`
@@ -3669,6 +3835,22 @@ function gateVoiceLeak({ layerEnv, sourceEnv, audioMode }, profile) {
 
 module.exports = { gateLayerDuration, gateVoiceLeak };
 ```
+
+**Состояние после пакета 2** (ревью Task 26; источник истины — `scripts/qa/media-gates.js`):
+- `gateLayerDuration({layer, source}, profile)`: разница длины в кадрах исходника (`round(duration ·
+  source.fps)`), `fail` при |diff| > `toleranceFrames` или другом размере/FPS (FPS сравниваются с допуском 1e-3:
+  29,97 ≠ 30); если причин две, подсказка называет обе.
+- `gateVoiceLeak({layerEnv, sourceEnv, audioMode, cues, fps}, profile)` — три сигнала.
+  A (главный) — секунды слышимого звука слоя вне окон оставленных эффектов (`cues` = `manifest.cues.kept`,
+  окна `[startFrame, startFrame + durationFrames) / fps`, подложки тоже, запасы `leak.headSec`/`tailSec`):
+  `warn` от `outsideWarnSec` 0,15 с, `fail` от `outsideStopSec` 0,5 с. B — `bestLagPearson` огибающих всей
+  дорожки со сдвигом ±300 мс: `fail` от `leak.stop` 0,6 (ловит полную утечку даже под длинной подложкой).
+  C — `windowedMax` окном `leak.windowSec` 2 с: `warn` от `windowWarn` 0,8, только если в окне есть ≥ 0,1 с
+  звука вне эффектов. `sourceEnv: null` (у исходника нет звука) — судит один A.
+- `value` — секунды вне эффектов (`unit: 'с'`); spans — до пяти отрезков вне эффектов и окно C; подсказка
+  называет r и сдвиг каждого сигнала. `audioMode: 'mute'` → `skipped`; нет звука или он нигде не громче
+  `silentDb` — `warn`. `cues` не массив, нет `fps` при непустых cues, cue без `startFrame ≥ 0` или
+  `durationFrames > 0` — ошибка (вызывающий превращает её в отчёт с `error`, Task 34).
 
 - [ ] **Step 4: Запустить**
 
@@ -3863,6 +4045,26 @@ function gateVoiceMusic(result, profile, { hasMusic = true } = {}) {
 module.exports = { gateVoiceMusic, measureVoiceMusic, speechWindows, voiceMusicGap };
 ```
 
+**Состояние после пакета 2** (ревью Task 27; источник истины — `scripts/qa/mix-gates.js`; медиана разрывов по
+блокам 8 кГц из фрагмента выше заменена):
+- `mix-music.js`: `MIX_AUDIO_FORMAT` (формат обеих веток микса), `mixMusicInputArgs(video, music)` (входы микса:
+  голос и музыка с `-stream_loop -1`), `buildMusicFilter(options, {stem})` — `stem` только `null` или
+  `'music'`; обычный граф байт-в-байт прежний.
+- Статистика (D8) — разрыв громкости под речью в LU: оба стема на 48 кГц во float (`aformat=sample_fmts=fltp`
+  до фильтров — иначе s16-вход обрезается внутри biquad), K-взвешивание BS.1770-4 точными коэффициентами
+  (`K_WEIGHTING`), сумма мощностей каналов по блокам 50 мс (`blockPowers`) в целых блоках окон речи, без
+  гейтинга: `loudnessGap(voicePowers, musicPowers, windows)` → `{gapLu, voiceLufs, musicLufs, blocks}` | null
+  (нет речи). `gapLu = −Infinity` — голос в окнах не звучит (даже если молчит и музыка), `Infinity` — под речью
+  цифровая тишина музыки.
+- `measureVoiceMusic({voicePath, musicPath, mixOptions, durationSec, windows, spawnImpl})`: голос — звук
+  `finish.js` через `MIX_AUDIO_FORMAT`, музыка — те же входы и тот же граф `stem: 'music'`, что в preview; нет
+  `mixOptions`, неверная длительность, `windows` не массив, пустой PCM — ошибка, а не тихий пропуск.
+- `gateVoiceMusic(result, profile, {hasMusic, gainDb})`: `skipped` без музыки или без речи; `fail` «голос не
+  звучит» проверяется раньше «музыки под речью нет»; иначе коридор профиля в LU (`value` с точностью 0,1,
+  `unit: 'LU'`). Совет двигает `music.gainDb` на разницу с целью, но не за −60…0 дБ схемы (нужен `gainDb` из
+  brief); когда края не хватает — «возьмите трек громче/тише или ослабьте/усильте ducking» (`ducking.thresholdDb`,
+  `ducking.ratio`). Замер старой формы (`{median}`) — ошибка вызова.
+
 - [ ] **Step 4: Запустить**
 
 Run: `node --test tests/qa-mix-gates.test.js tests/music-ducking.test.js tests/media-finalization-security.test.js`
@@ -3889,6 +4091,13 @@ git commit -m "feat: measure voice and music balance on real preview stems"
   неверное значение всплывает только на рендере слоя.
 - Тест в `tests/layer-cli.test.js`: `readLayerJson` на `layer.json` с `sfxMasterDb: 3`, `null` и без поля
   бросает ошибку с `layer.json` и `sfxMasterDb`; с `-5` — возвращает объект.
+
+**Уточнения после ревью пакета 2:**
+- `scripts/layer/cli.js` в начале `main()` включает source maps: `process.setSourceMapsEnabled(true)` — тогда
+  ошибка `buildPlan` в `layer check` и `layer render` называет строку `(src/plan.js:N:M)`: Task 19 добавляет её,
+  только когда source maps включены (фрагмент ниже уже так). Тест через настоящий CLI — в Task 32.
+- Проверка `sfxMasterDb` в `readLayerJson` (блок выше) остаётся как есть: `assertMasterDb` экспортирует core
+  kit, та же проверка стоит в `SfxTrack`.
 
 **Files:**
 - Create: `scripts/layer/cli.js`, `scripts/layer/common.js`
@@ -3980,6 +4189,8 @@ function parseArgs(argv, flags) {
 }
 
 async function main(argv = process.argv.slice(2)) {
+  // Ошибка plan.js покажет строку src/plan.js, а не строку бандла (Task 19).
+  process.setSourceMapsEnabled(true);
   const [command, ...rest] = argv;
   if (command === '--help' || command === '-h') {
     console.log(USAGE);
@@ -4114,6 +4325,17 @@ git commit -m "feat: add automontage layer command group"
 - `activeChunk` требует fps: если `plan.js` сверяет режиссуру с субтитрами —
   `activeChunk(chunks, sec, hide, fps)`.
 
+**Уточнения после ревью пакета 2:**
+- `Root.jsx` собирает слой общим `compilePlan(buildPlan, {...layer, words, sfxLibrary})` из kit — той же точкой,
+  что Node-манифест `layer check` (Task 19): одинаковые ошибки плана и один и тот же скомпилированный слой у
+  гейта и у рендера. Своего `ctx` + `compileLayer` в шаблоне нет (фрагмент ниже уже так).
+- `plan.js` импортирует только `@automontage/motion-kit/core` и относительные файлы внутри слоя — не
+  `scenes.jsx` и не React: границу проверяет `buildLayerManifest` (Task 19), иначе `layer check` даст код 2.
+- Карточка-заголовок масштабируется вместе со своим box: `fontSize`, `borderRadius` и `padding` умножаются на
+  тот же `k = width / 1080`, что box в `plan.js` (на 540×960 — кегль 32 и радиус 14, а не 64 и 28).
+- Тест шаблона дополнительно: `Root.jsx` вызывает `compilePlan(buildPlan` и не содержит `compileLayer`;
+  в `scenes.jsx` нет голых `fontSize: 64` и `borderRadius: 28`.
+
 **Files:**
 - Create: `templates/motion-layer/src/index.jsx`, `Root.jsx`, `plan.js`, `scenes.jsx`, `templates/motion-layer/README.md`
 - Test: `tests/layer-template.test.js`
@@ -4144,6 +4366,11 @@ test('template imports only the kit, never another reel or an absolute path', ()
   // FontLoader — гейт: оборачивает весь слой, а не стоит рядом пустым элементом.
   assert.match(root, /<FontLoader faces=\{FONTS\}>[\s\S]*<SpeakerLayer[\s\S]*<Subtitles[\s\S]*<\/FontLoader>/);
   assert.doesNotMatch(root, /<FontLoader[^>]*\/>/);
+  // Одна точка сборки с Node-манифестом layer check (Task 19).
+  assert.match(root, /compilePlan\(buildPlan/);
+  assert.doesNotMatch(root, /compileLayer/);
+  // Кегль и скругление заголовка масштабируются вместе с box.
+  assert.doesNotMatch(read('src/scenes.jsx'), /fontSize: 64|borderRadius: 28/);
   assert.match(read('src/scenes.jsx'), /BrowserFrame/);
   assert.match(read('src/scenes.jsx'), /scroll=\{/);
   assert.doesNotMatch(read('src/scenes.jsx') + read('src/plan.js'), /maxScroll/);
@@ -4180,7 +4407,7 @@ registerRoot(Root);
 import { useMemo } from 'react';
 import { AbsoluteFill } from 'remotion';
 import { FontLoader, FullscreenReveal, KitBox, SfxTrack, ShutterFlash, SpeakerLayer, StockInsert, Subtitles,
-  compileLayer } from '@automontage/motion-kit';
+  compilePlan } from '@automontage/motion-kit';
 import layer from '../layer.json';
 import buildPlan from './plan.js';
 import { InsertContent, SceneContent } from './scenes.jsx';
@@ -4199,10 +4426,8 @@ function Insert({ insert }) {
 }
 
 export function LayerComposition() {
-  const compiled = useMemo(() => {
-    const ctx = { ...layer, words, sfxLibrary };
-    return compileLayer(buildPlan(ctx), ctx);
-  }, []);
+  // Та же точка сборки, что у Node-манифеста layer check: гейт проверяет ровно этот слой.
+  const compiled = useMemo(() => compilePlan(buildPlan, { ...layer, words, sfxLibrary }), []);
   // FontLoader — гейт: ничего из слоя не попадает в кадр, пока шрифты не загрузились.
   // Вспышка — на ударе каждого оставшегося звука затвора: звук и свет не расходятся.
   return (
@@ -4269,13 +4494,15 @@ import { BrowserFrame, REVEAL_FRAMES, ScrollShot, closeWindow, ref25, revealCard
 const SCREEN_URLS = {};
 
 export function SceneContent({ item }) {
-  const { fps } = useVideoConfig();
+  const { fps, width } = useVideoConfig();
+  // Тот же масштаб, что у box в plan.js: кегль и скругление растут и сжимаются вместе с карточкой.
+  const k = width / 1080;
   const { view } = item.props;
   if (view === 'title') {
     return (
       <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: 'rgba(12,16,24,.82)', borderRadius: 28, color: '#ffffff', fontFamily: 'KitOswald', fontSize: 64,
-        fontWeight: 700, textAlign: 'center', padding: '0 32px' }}>{item.props.text}</div>
+        background: 'rgba(12,16,24,.82)', borderRadius: Math.round(28 * k), color: '#ffffff', fontFamily: 'KitOswald',
+        fontSize: Math.round(64 * k), fontWeight: 700, textAlign: 'center', padding: `0 ${Math.round(32 * k)}px` }}>{item.props.text}</div>
     );
   }
   if (view === 'browser') {
@@ -4463,6 +4690,12 @@ git commit -m "feat: copy a local sound library into motion layers"
 ```
 
 ### Task 31: `layer new` и `layer words`
+
+**Уточнения после ревью пакета 2:**
+- `makeLayerProject(t, {seconds = 6, size = '540x960'})` — единственный helper проекта слоя, `size` задаётся
+  здесь один раз. Task 41 передаёт `size: '1080x1920'` и helper не меняет; Task 34 дописывает рядом фикстуру
+  библиотеки звуков `makeSfxLibrary`. Фальшивые рендеры слоя (Task 34) берут ту же геометрию 540×960, что
+  исходник по умолчанию, иначе G6 остановит их по размеру.
 
 **Files:**
 - Create: `scripts/layer/new.js`, `scripts/layer/words.js`
@@ -4680,9 +4913,25 @@ git commit -m "feat: scaffold motion layers with automontage layer new"
 - Тест: `BAD CASE: a bad sfxMasterDb in layer.json exits 2 and names the field` — `sfxMasterDb: 3` → код 2,
   `report.error` содержит `layer.json` и `sfxMasterDb`.
 
+**Уточнения после ревью пакета 2:**
+- `buildLayerManifest` синхронный (Task 19) — вызывается без `await`.
+- Любая ошибка внутри `try` — чтение `layer.json`, сборка слоя, граница `plan.js`, «манифест повреждён: …» от
+  `assert*` внутри `runTimelineGates` (Task 24) — отчёт с `error: error?.message ?? String(error)` и код 2, а
+  не падение процесса (брошено может быть и не `Error`).
+- Неиспользованные исключения видны: waiver из `manifest.waivers`, чей гейт не стал `waived` (прошёл или дал
+  только `warn`), попадает в JSON (`report.unusedWaivers: [{gate, reason}]`) и в текстовый отчёт строкой
+  «☑️ исключение G1 не понадобилось: <причина> — уберите его из plan.js». Реализация — необязательный параметр
+  `unusedWaivers = []` у `buildReport` и строка в `formatReport` (`scripts/qa/report.js`, тест в
+  `tests/qa-report.test.js`).
+- Тест: waiver G1 на слое, где G1 проходит, → код 0 и строка про неиспользованное исключение G1 в `.txt`.
+- Тест source maps через настоящий CLI (Task 28): `spawnSync(process.execPath, [cli, 'layer', 'check',
+  '--project-dir', p, '--layer', 'motion-v01'])` на слое, где `buildPlan` бросает на строке 2, → код 2, в
+  выводе `(src/plan.js:2:`.
+
 **Files:**
 - Create: `scripts/layer/check.js`
-- Test: `tests/layer-check.test.js`
+- Modify: `scripts/qa/report.js` (`unusedWaivers`)
+- Test: `tests/layer-check.test.js`, `tests/qa-report.test.js` (дописать)
 
 - [ ] **Step 1: Написать падающий тест**
 
@@ -4755,9 +5004,12 @@ async function run(options) {
     const profile = getProfile(profileName);
     const manifest = buildLayerManifest(layerDir);
     writeJson(path.join(layerDir, 'out', 'manifest.json'), manifest);
-    report = buildReport({ kind: 'layer-check', layer: layerName, profile: profileName, gates: runTimelineGates(manifest, profile) });
+    const gates = runTimelineGates(manifest, profile);
+    // Исключение, которое ничего не сняло (гейт прошёл или дал только warn), показываем автору.
+    const unusedWaivers = (manifest.waivers || []).filter((w) => !gates.some((g) => g.id === w.gate && g.status === 'waived'));
+    report = buildReport({ kind: 'layer-check', layer: layerName, profile: profileName, gates, unusedWaivers });
   } catch (error) {
-    report = buildReport({ kind: 'layer-check', layer: layerName, profile: profileName, gates: [], error: error.message });
+    report = buildReport({ kind: 'layer-check', layer: layerName, profile: profileName, gates: [], error: error?.message ?? String(error) });
   }
   const paths = writeReport(projectDir, `layer-${layerName}-check`, report);
   console.log(formatReport(report));
@@ -4770,13 +5022,14 @@ module.exports = { FLAGS, run };
 
 - [ ] **Step 4: Запустить**
 
-Run: `node --test tests/layer-check.test.js`
-Expected: PASS (2 теста). Если первый тест падает на G1/G5 — чинить шаблон `plan.js`, а не пороги.
+Run: `node --test tests/layer-check.test.js tests/qa-report.test.js`
+Expected: PASS (тесты фрагмента и уточнений выше). Если первый тест падает на G1/G5 — чинить шаблон `plan.js`,
+а не пороги.
 
 - [ ] **Step 5: Коммит**
 
 ```bash
-git add scripts/layer/check.js tests/layer-check.test.js
+git add scripts/layer/check.js scripts/qa/report.js tests/layer-check.test.js tests/qa-report.test.js
 git commit -m "feat: run timeline gates with automontage layer check"
 ```
 
@@ -4929,14 +5182,49 @@ git commit -m "feat: wait for a free machine and render layers with the protecte
 
 ### Task 34: `layer render` — рендер, нормализация, G6 и G7
 
+**Уточнения после ревью пакета 2:**
+- G7 получает окна эффектов из манифеста, который только что записал `layer check` этого же запуска:
+  `gateVoiceLeak({ layerEnv, sourceEnv, audioMode: 'mix', cues: manifest.cues.kept, fps: manifest.fps }, profile)`,
+  где `manifest = readJson(<слой>/out/manifest.json)`; у исходника без звука `sourceEnv: null` (судит один
+  сигнал A, Task 26).
+- Любая ошибка после рендера (probe, декодирование, гейт, битый манифест) — отчёт `layer-render` с
+  `error: error?.message ?? String(error)` и код 2; `inputs` с SHA-256 файла пишутся всё равно.
+- Фальшивый рендер из первого наброска пищал каждые 2,3 с мимо эффектов и получил бы стоп G7 «звук вне
+  эффектов». Его звук строится из `cues.kept` манифеста (писк только внутри `[startFrame, startFrame +
+  durationFrames)`), а заготовке нужна фикстура библиотеки звуков: `makeSfxLibrary(root)` в
+  `tests/helpers/layer-project.js` генерирует lavfi-файлы `pop.wav`, `whoosh.wav`, `shutter.wav` (роли — по
+  имени), `AUTOMONTAGE_SFX_DIR` указывает на неё — тогда у шаблона есть cues (pop титула, затвор, whoosh стока).
+- Новый BAD CASE через настоящую цепочку (подмена рендера → нормализация → PCM → G7): в звуке слоя голос
+  исходника на −18 дБ → G7 `fail`, код 1.
+- Тест ошибки: подмена рендера после записи файла портит `out/manifest.json` (cue с `durationFrames: 0`) →
+  код 2, `report.error` содержит «манифест повреждён».
+
 **Files:**
 - Create: `scripts/layer/render.js`
+- Modify: `tests/helpers/layer-project.js` (`makeSfxLibrary`)
 - Test: `tests/layer-render.test.js`
 
 - [ ] **Step 1: Написать падающий тест**
 
 Вместо настоящего Remotion подставляется функция, которая кладёт в `output` ролик lavfi нужной длины и
 со звуком. Остальная цепочка (нормализация ffmpeg, probe, PCM, гейты, отчёт) — настоящая.
+
+В `tests/helpers/layer-project.js` рядом с `makeLayerProject`:
+
+```js
+// Фикстура локальной библиотеки звуков: короткие lavfi-звуки, роль — по имени файла (pop, whoosh, shutter).
+function makeSfxLibrary(root) {
+  const dir = path.join(root, 'sfx-library');
+  fs.mkdirSync(dir, { recursive: true });
+  for (const [name, seconds] of Object.entries({ pop: 0.15, whoosh: 0.6, shutter: 0.2 })) {
+    runTool('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i',
+      `aevalsrc='0.8*sin(2*PI*900*t)*exp(-8*t)':s=48000:d=${seconds}`, path.join(dir, `${name}.wav`)]);
+  }
+  return dir;
+}
+
+module.exports = { makeLayerProject, makeSfxLibrary };
+```
 
 ```js
 // tests/layer-render.test.js
@@ -4945,37 +5233,51 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { toolAvailable, runTool } = require('./helpers/media-fixtures');
-const { makeLayerProject } = require('./helpers/layer-project');
+const { makeLayerProject, makeSfxLibrary } = require('./helpers/layer-project');
 const newLayer = require('../scripts/layer/new');
 const render = require('../scripts/layer/render');
 
 const hasFfmpeg = toolAvailable('ffmpeg') && toolAvailable('ffprobe');
 
-function fakeRemotion(seconds, audioLavfi) {
+// Подмена Remotion: ролик lavfi нужной длины. audio — lavfi-строка или функция, которая строит её уже
+// после layer check (манифест слоя к этому моменту записан); after — что сделать после записи файла.
+function fakeRemotion(seconds, audio, { after } = {}) {
   const calls = [];
   const runToolImpl = (command, args, options) => {
     if (options.stage !== 'layer Remotion render') return runTool(command, args, options);
     calls.push(args);
     const output = args[args.indexOf('render') + 3];
-    return runTool('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', `testsrc2=s=540x960:r=25:d=${seconds}`,
-      '-f', 'lavfi', '-i', audioLavfi, '-shortest', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-c:a', 'aac', output]);
+    runTool('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', `testsrc2=s=540x960:r=25:d=${seconds}`,
+      '-f', 'lavfi', '-i', typeof audio === 'function' ? audio() : audio,
+      '-shortest', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-c:a', 'aac', output]);
+    if (after) after();
+    return null;
   };
   return { calls, runToolImpl };
 }
 
 async function scaffold(t) {
   const project = makeLayerProject(t);
-  process.env.AUTOMONTAGE_SFX_DIR = path.join(project.projectDir, 'no-library');
+  process.env.AUTOMONTAGE_SFX_DIR = makeSfxLibrary(project.root);
   t.after(() => { delete process.env.AUTOMONTAGE_SFX_DIR; });
   await newLayer.run({ 'project-dir': project.projectDir });
   return project;
 }
 
-const EFFECTS = "aevalsrc='0.8*sin(2*PI*1000*t)*lt(mod(t,2.3),0.08)':s=48000:d=6";
+const manifestPath = (projectDir) => path.join(projectDir, 'motion-v01', 'out', 'manifest.json');
+// Звук настоящего слоя kit — только эффекты: писк внутри окна каждого оставленного звука манифеста.
+function effectsOf(projectDir, seconds) {
+  const m = JSON.parse(fs.readFileSync(manifestPath(projectDir), 'utf8'));
+  assert.ok(m.cues.kept.length > 0, 'у шаблона с библиотекой звуков есть эффекты');
+  const beeps = m.cues.kept.map((c) => `0.8*sin(2*PI*1000*t)*between(t,${c.startFrame / m.fps},${(c.startFrame + c.durationFrames) / m.fps - 1e-6})`);
+  return `aevalsrc='${beeps.join('+')}':s=48000:d=${seconds}`;
+}
+// Голос исходника makeLayerProject на −18 дБ — утечка аватара в звук слоя.
+const LEAK = "aevalsrc='0.05*sin(2*PI*220*t)*gt(sin(2*PI*1.3*t),0)':s=48000:d=6";
 
 test('a good layer renders, normalises to limited-range yuv420p and passes G6 and G7', { skip: !hasFfmpeg }, async (t) => {
   const { projectDir } = await scaffold(t);
-  const fake = fakeRemotion(6, EFFECTS);
+  const fake = fakeRemotion(6, () => effectsOf(projectDir, 6));
   const code = await render.run({ 'project-dir': projectDir, layer: 'motion-v01', 'no-wait': true }, { runToolImpl: fake.runToolImpl });
   assert.equal(code, 0);
   assert.equal(fake.calls.length, 1);
@@ -4989,15 +5291,39 @@ test('a good layer renders, normalises to limited-range yuv420p and passes G6 an
 
 test('BAD CASE: a layer longer than the source is rendered but stopped by G6', { skip: !hasFfmpeg }, async (t) => {
   const { projectDir } = await scaffold(t);
-  const code = await render.run({ 'project-dir': projectDir, layer: 'motion-v01', 'no-wait': true }, { runToolImpl: fakeRemotion(6.4, EFFECTS).runToolImpl });
+  const code = await render.run({ 'project-dir': projectDir, layer: 'motion-v01', 'no-wait': true },
+    { runToolImpl: fakeRemotion(6.4, () => effectsOf(projectDir, 6.4)).runToolImpl });
   assert.equal(code, 1);
+});
+
+test('BAD CASE: the avatar voice in the layer audio is stopped by G7 through the real render chain', { skip: !hasFfmpeg }, async (t) => {
+  const { projectDir } = await scaffold(t);
+  const code = await render.run({ 'project-dir': projectDir, layer: 'motion-v01', 'no-wait': true }, { runToolImpl: fakeRemotion(6, LEAK).runToolImpl });
+  assert.equal(code, 1);
+  const report = JSON.parse(fs.readFileSync(path.join(projectDir, 'qa', 'layer-motion-v01-render-01.json'), 'utf8'));
+  assert.deepEqual(report.gates.map((g) => [g.id, g.status]), [['G6', 'pass'], ['G7', 'fail']]);
+});
+
+test('a broken manifest after the render gives an error report with exit 2', { skip: !hasFfmpeg }, async (t) => {
+  const { projectDir } = await scaffold(t);
+  const breakManifest = () => {
+    const m = JSON.parse(fs.readFileSync(manifestPath(projectDir), 'utf8'));
+    m.cues.kept[0].durationFrames = 0;
+    fs.writeFileSync(manifestPath(projectDir), JSON.stringify(m));
+  };
+  const code = await render.run({ 'project-dir': projectDir, layer: 'motion-v01', 'no-wait': true },
+    { runToolImpl: fakeRemotion(6, () => effectsOf(projectDir, 6), { after: breakManifest }).runToolImpl });
+  assert.equal(code, 2);
+  const report = JSON.parse(fs.readFileSync(path.join(projectDir, 'qa', 'layer-motion-v01-render-01.json'), 'utf8'));
+  assert.equal(report.summary.status, 'error');
+  assert.match(report.error, /манифест повреждён/);
 });
 
 test('a failing layer check blocks the render before Remotion starts', { skip: !hasFfmpeg }, async (t) => {
   const { projectDir } = await scaffold(t);
   fs.writeFileSync(path.join(projectDir, 'motion-v01', 'src', 'plan.js'),
     "export default function buildPlan({ face }) { return { camera: { face, shots: [{ at: 0, preset: 'W', drift: 'none' }] }, items: [] }; }\n");
-  const fake = fakeRemotion(6, EFFECTS);
+  const fake = fakeRemotion(6, 'anullsrc=r=48000:cl=stereo');
   assert.equal(await render.run({ 'project-dir': projectDir, layer: 'motion-v01', 'no-wait': true }, { runToolImpl: fake.runToolImpl }), 1);
   assert.equal(fake.calls.length, 0);
 });
@@ -5024,7 +5350,7 @@ const { getProfile } = require('../qa/profiles');
 const { buildReport, exitCodeFor, formatReport, writeReport } = require('../qa/report');
 const check = require('./check');
 const { waitUntilFree } = require('./busy');
-const { readLayerJson, relative, resolveLayer, sha256File } = require('./common');
+const { readJson, readLayerJson, relative, resolveLayer, sha256File } = require('./common');
 
 const FLAGS = { 'project-dir': 'value', layer: 'value', profile: 'value', 'no-wait': 'bool' };
 const pad = (n) => String(n).padStart(2, '0');
@@ -5066,12 +5392,22 @@ async function run(options, deps = {}) {
     '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', out], { cwd: ROOT, stage: 'layer normalize' });
   fs.rmSync(raw, { force: true });
   const profile = getProfile(profileName);
-  const layerEnv = hasAudio(out) ? envelopeDb(decodeAudio(out)) : null;
-  const gates = [
-    gateLayerDuration({ layer: probeVideo(out), source: probeVideo(sourcePath) }, profile),
-    gateVoiceLeak({ layerEnv, sourceEnv: envelopeDb(decodeAudio(sourcePath)), audioMode: 'mix' }, profile),
-  ];
-  const report = buildReport({ kind: 'layer-render', layer: layerName, profile: profileName, gates,
+  let gates = [];
+  let error = null;
+  try {
+    // Окна эффектов — из манифеста, который записал layer check этого же запуска.
+    const manifest = readJson(path.join(layerDir, 'out', 'manifest.json'));
+    const layerEnv = hasAudio(out) ? envelopeDb(decodeAudio(out)) : null;
+    const sourceEnv = hasAudio(sourcePath) ? envelopeDb(decodeAudio(sourcePath)) : null;
+    gates = [
+      gateLayerDuration({ layer: probeVideo(out), source: probeVideo(sourcePath) }, profile),
+      gateVoiceLeak({ layerEnv, sourceEnv, audioMode: 'mix', cues: manifest.cues.kept, fps: manifest.fps }, profile),
+    ];
+  } catch (caught) {
+    gates = [];
+    error = caught?.message ?? String(caught);
+  }
+  const report = buildReport({ kind: 'layer-render', layer: layerName, profile: profileName, gates, error,
     inputs: [{ path: relative(projectDir, out), sha256: sha256File(out) }] });
   const paths = writeReport(projectDir, `layer-${layerName}-render-${pad(n)}`, report);
   console.log(formatReport(report));
@@ -5086,12 +5422,12 @@ module.exports = { FLAGS, run };
 - [ ] **Step 4: Запустить**
 
 Run: `node --test tests/layer-render.test.js`
-Expected: PASS (3 теста).
+Expected: PASS (5 тестов).
 
 - [ ] **Step 5: Коммит**
 
 ```bash
-git add scripts/layer/render.js tests/layer-render.test.js
+git add scripts/layer/render.js tests/layer-render.test.js tests/helpers/layer-project.js
 git commit -m "feat: render motion layers with duration and voice leak gates"
 ```
 
@@ -5304,6 +5640,12 @@ git commit -m "feat: import only checked motion layers and register them"
   огибающей сцены — эффект хука ставьте не раньше 0,12 с»; то же правило — в `motion-layer-brief.md`
   (Task 44), на пробе (Task 49) эффект хука проверить на слух.
 
+**Уточнения после ревью пакета 2:**
+- G9 (Task 24) уже предупреждает об эффекте с ударом в первые и последние `sceneFadeSec` 0,12 с слоя — это та же
+  огибающая `brollEnvelope`. Подсказка `layer brief` и G9 говорят одно и то же.
+- Слой — одна сцена `broll` (блок выше) ещё и потому, что G9 знает только края слоя: огибающая на внутренних
+  стыках сцен глушила бы эффекты, которых гейт не видит.
+
 **Files:**
 - Create: `scripts/layer/brief.js`
 - Test: `tests/layer-brief.test.js`
@@ -5438,6 +5780,13 @@ git commit -m "feat: publish a draft brief for a checked motion layer"
   (если был `pass`) и span «сток <src> короче вставки <id> на X с — последний кадр замрёт»; нет файла — тот же
   `warn` с «нет public/<src>». Тест: сток 1 с на вставку 2 с → G10 `warn`, код 0.
 - Тест `layer stock`: `--insert stock-1` без `--sec` даёт клип длиной вставки шаблона (≈ 2 с).
+
+**Уточнения после ревью пакета 2:**
+- `buildLayerManifest` синхронный, у вставок манифеста есть `cover` и `src` (Task 22): предупреждение о коротком
+  стоке (блок выше) читает их напрямую и добавляется к результату G10 перед записью отчёта.
+- G10 считает вставки `kind: 'stock'`, а не уникальные `src`: один клип, поставленный трижды, засчитан как три.
+  Пока `layer stock` кладёт каждый клип отдельным файлом, это не мешает; если шаблон или ролики начнут
+  повторять клип — считать уникальные `src` (тест «три вставки одного клипа — 1 сток»).
 
 **Files:**
 - Create: `scripts/layer/stock.js`
@@ -5714,6 +6063,17 @@ git commit -m "feat: add contact sheet, pult comment frames and empty frame gate
 не появляется, в пульте остаётся прошлый. Для прочих роликов те же проверки — только предупреждение
 (поведение существующих проектов не меняется).
 
+**Уточнения после ревью пакета 2:**
+- Замер G8 возвращает `{gapLu, voiceLufs, musicLufs, blocks}` (LU, Task 27), а не `{median, p10}`; замер старой
+  формы `gateVoiceMusic` отклоняет ошибкой. Подмены `measureImpl` в тестах — новой формы (фрагменты ниже уже так).
+- `gateVoiceMusic(measured, profile, { hasMusic, gainDb: brief.music?.gainDb })`: с `gainDb` совет не выходит за
+  −60…0 дБ схемы. Замер и сам гейт — в одном `try`: любая ошибка (ffmpeg, нет `mixOptions`, неверная форма
+  замера) — G8 `fail` «замер не удался: …» (`error?.message ?? String(error)`), для ролика без слоя kit — `warn`.
+- До калибровки (Task 47) коридор `avatar` 9–15 LU — заглушка, а утверждённые рецепты музыки читаются как ~30–50 LU:
+  любой preview слоя kit с музыкой будет остановлен G8 («стоп > 20»). Это ожидаемо — Task 47 калибрует коридор
+  раньше пробного preview (Task 50). Тесты этой задачи работают на подменах и от калибровки не зависят (0,5 LU —
+  стоп при любом коридоре).
+
 **Files:**
 - Create: `scripts/qa/preview-gates.js`
 - Modify: `scripts/preview.js` (вызов после `mix-music`, до `publishCurrentPreview`)
@@ -5741,7 +6101,7 @@ function project(t, { registered, renderStatus = 'pass' }) {
   return dir;
 }
 const brief = { scenes: [{ scene: 'broll', brollMedia: { kind: 'video', sha256: 'c'.repeat(64) } }] };
-const loud = () => ({ median: 0.5, p10: 0, blocks: 100 });
+const loud = () => ({ gapLu: 0.5, voiceLufs: -14, musicLufs: -14.5, blocks: 100 });
 
 test('a kit layer with music at the voice level blocks the preview', (t) => {
   const result = runPreviewGates({ projectDir: project(t, { registered: true }), brief, hasMusic: true, words: [], range: { fromSec: 0, toSec: 10 } },
@@ -5752,7 +6112,7 @@ test('a kit layer with music at the voice level blocks the preview', (t) => {
 
 test('a kit layer whose render failed blocks even with good music', (t) => {
   const result = runPreviewGates({ projectDir: project(t, { registered: true, renderStatus: 'fail' }), brief, hasMusic: true, words: [], range: { fromSec: 0, toSec: 10 } },
-    { measureImpl: () => ({ median: 12, p10: 10, blocks: 100 }) });
+    { measureImpl: () => ({ gapLu: 12, voiceLufs: -14, musicLufs: -26, blocks: 100 }) });
   assert.equal(result.block, true);
   assert.equal(result.report.gates[0].status, 'fail');
 });
@@ -5816,20 +6176,18 @@ function runPreviewGates({ projectDir, brief, hasMusic, words, range, finishedPa
     const ok = render && !render.error && render.summary.status !== 'fail';
     gates.push(gate('L', 'Слой прошёл layer check и layer render', { status: ok ? 'pass' : 'fail', hint: 'пересоберите слой: layer render → layer import' }));
   }
-  let measured = null;
-  let failure = null;
-  if (hasMusic) {
-    try {
+  // Замер и гейт в одном try: ошибка ffmpeg, нет mixOptions или неверная форма замера — «замер не удался».
+  try {
+    let measured = null;
+    if (hasMusic) {
       const windows = speechWindows(words, { fromSec: range.fromSec, toSec: range.toSec });
       measured = (deps.measureImpl || measureVoiceMusic)({ voicePath: finishedPath, musicPath,
         mixOptions: mixArgs ? parseMixOptions(mixArgs) : null, durationSec: range.toSec - range.fromSec, windows });
-    } catch (error) {
-      failure = error.message;
     }
+    gates.push(gateVoiceMusic(measured, profile, { hasMusic, gainDb: brief.music?.gainDb }));
+  } catch (error) {
+    gates.push(gate('G8', 'Голос и музыка', { status: 'fail', hint: `замер не удался: ${error?.message ?? String(error)}` }));
   }
-  gates.push(failure
-    ? gate('G8', 'Голос и музыка', { status: 'fail', hint: `замер не удался: ${failure}` })
-    : gateVoiceMusic(measured, profile, { hasMusic }));
   const enforced = entry ? gates : gates.map((g) => (g.status === 'fail'
     ? { ...g, status: 'warn', hint: `${g.hint} (ролик без слоя kit — только предупреждение)`.trim() } : g));
   const report = buildReport({ kind: 'preview', layer: entry?.layer || null, profile: profileName, gates: enforced });
@@ -5910,13 +6268,17 @@ git commit -m "feat: block publishing kit previews that fail the voice-music gat
 - Кадры для 10-секундного шаблона: 5 и 40 — титул и субтитры, 90 — середина скриншот-карточки (3,0–5,6 с),
   160 — сток (6–8 с, раскрытие закончилось к кадру 159).
 
+**Уточнения после ревью пакета 2:**
+- `makeLayerProject` уже принимает `size` (Task 31, по умолчанию `540x960`): тест передаёт `size: '1080x1920'`,
+  helper не меняется и в коммит не входит.
+
 **Files:**
 - Test: `tests/layer-render-still.test.js`
 
 - [ ] **Step 1: Написать тест**
 
 По образцу `tests/motion-render.test.js`: включается `AUTOMONTAGE_TEST_MOTION_RENDER=1`. Создаёт проект
-(`makeLayerProject`, 1080×1920 вместо 108×192 — параметр `size`), `layer new`, затем `bundle` из
+(`makeLayerProject` с `size: '1080x1920'` вместо 540×960 по умолчанию), `layer new`, затем `bundle` из
 `@remotion/bundler` с `webpackOverride: (c) => withMotionKitAlias(c)` и `renderStill` кадров 5, 40,
 середины карточки и середины стока; через `page.evaluate` меряет все `[data-kit-text]` и сверяет с
 `safeRect(1080, 1920)`; ожидание — ни одного выхода и ненулевой PNG.
@@ -5958,7 +6320,7 @@ test('real Remotion stills of the template keep every kit text inside the safe z
 });
 ```
 
-Параметр `size` добавить в `makeLayerProject` (`testsrc2=s=${size}`), по умолчанию `108x192`. Замер
+Параметр `size` в `makeLayerProject` уже есть (Task 31) — helper не менять. Замер
 `[data-kit-text]` через DOM — перенести из `tests/motion-render.test.js:100-140` (перехват `page.close`),
 заменив селекторы на `[data-kit-text]` и границы на `safeRect(1080, 1920)`.
 
@@ -5970,7 +6332,7 @@ Expected: PASS за 1–3 минуты. Без флага — `skipped`.
 - [ ] **Step 3: Коммит**
 
 ```bash
-git add tests/layer-render-still.test.js tests/helpers/layer-project.js
+git add tests/layer-render-still.test.js
 git commit -m "test: render real template stills and measure kit text boxes"
 ```
 
@@ -6048,6 +6410,21 @@ Expected: FAIL — `ENOENT … docs/MOTION-KIT.md`.
 - G5 видит `item.box`, а не вылезающий текст: содержимое карточки обязано помещаться в свой box.
 - Звук слоя в первые и последние 0,12 с приглушает огибающая сцены preview (`brollEnvelope`, Task 37).
 
+**Уточнения после ревью пакета 2** (в разделы 3, 5 и 8 `docs/MOTION-KIT.md`):
+- Раздел 3 — контракт манифеста и отчёта из «Контракта слоя» этого плана (`camera.base`, `cues.kept` с
+  `durationFrames`, `cues.dropped` с `name`/`hitFrame`/`notable`, `inserts` с `cover`/`src`); `summary.status`
+  может быть `error` — «оценить нельзя», код 2; исключение снимает весь гейт, а не место в ролике.
+- Правило `plan.js`: только `@automontage/motion-kit/core` и файлы внутри слоя. Это ограждение, а не песочница:
+  `layer check` выполняет `plan.js` — не запускать его на чужих слоях.
+- Раздел 5. G4 — правило владельца: спикер виден на каждом кадре первых 2 с (иначе стоп), лучше все 3 с
+  (предупреждение); кадр под cover-вставкой — «спикер не виден». G11 — донорские вставки с паузой ≤ 0,5 с
+  считаются одним прогоном; донор без `cover` — оверлей: спикер виден, план G1 продолжается; полноэкранный донор
+  ставит `cover: true` (иначе ложный стоп G1). G8 — разрыв громкости под речью в LU (D8), совет по
+  `music.gainDb` не выходит за −60…0 дБ. G9 — заметные звуки, которые kit убрал из-за тесноты, и удары у краёв слоя.
+- Раздел 5, G7 — три сигнала (звук вне эффектов, корреляция всей дорожки, похожее окно) и слепые пятна: утечка
+  ≤ 1 с под очень плотными эффектами и утечка тише −50 дБ могут пройти — поэтому все видео в слое `muted`.
+- Раздел 8 — ограничения G5 (видит `item.box`), вспышки и скриншоты: блок пакета 1 выше.
+
 `README.md` — в раздел команд добавить блок:
 
 ```bash
@@ -6117,7 +6494,7 @@ git commit -m "docs: document motion-kit layers and QA gates"
 - **D-035 – QA-гейты в трёх точках, стоп только для объективных нарушений.** Пороги G1–G12, профили `avatar`
   и `live`, исключения только G1/G4/G11 с причиной; для не-kit роликов гейты `preview` — предупреждения.
   Замер «голос − музыка» по настоящим дорожкам после нормализации, а не моделью на сыром голосе; коридор
-  `avatar` откалиброван по утверждённому эталонному preview: R = `<значение из Task 47>` dB.
+  `avatar` откалиброван по утверждённому эталонному preview: R = `<значение из Task 47>` LU.
 - **D-036 – Звук слоя kit: только эффекты, `audioMode: "mix"`, громкость `sfxMasterDb`.** Почему не поле
   brief (D-014: громкость — подготовка медиа; Review не меняется); почему библиотека вне Git (лицензия).
 - **D-037 – Вставка раскрывается из карточки safe-зоны, спикер возвращается до её закрытия.** См. уточнение ниже.
@@ -6128,6 +6505,21 @@ git commit -m "docs: document motion-kit layers and QA gates"
 непрозрачный) к началу закрытия вставки (`away.to = to − close − exit`), поэтому cover-вставка не короче
 `close + exit + 1` кадра (0,68 с при 25 fps). Отклонено: константа под 1080×1920 (неверная карточка на 16:9) и
 возврат к самому концу вставки (на стыке видно размытое тёмное кольцо вместо лица).
+
+**Уточнения после ревью пакета 2:**
+- D-035: G4 — по правилу владельца (`docs/BATCH-REELS-WORKFLOW.md`, `docs/editing-rules.md`): спикер виден в
+  первом кадре и все первые 2 с (стоп), 2–3 с — предупреждение, `hook: 'enumeration'` — исключение. G11 — прогон
+  донора с паузой ≤ `donor.gapSec` 0,5 с (стартовое значение, калибровка — Task 49). G8 — статистика D8: разрыв
+  громкости под речью в LU (K-взвешивание BS.1770-4, без гейтинга, окна речи по транскрипту); отклонено —
+  медиана разрывов по блокам 8 кГц (расходилась с LUFS на +0,4…+9 дБ в зависимости от спектра музыки). Коридор
+  `live` (6/12/15/18/24) — стартовые значения без калибровки; калибровка `avatar` останавливается при `R ≤ 6`.
+- D-034 и TESTING §12: граница `plan.js` проверяется по metafile esbuild (ограждение, не песочница);
+  Windows-джоб CI получил шаг «Проверить сборку motion-слоя и границу plan.js» (`node --test
+  tests/motion-kit-node.test.js`) — описать; первый настоящий прогон на Windows будет в CI после push/PR.
+- TESTING §12 — список BAD CASE по фактическим именам тестов (`qa-timeline-gates`, `qa-media-gates`,
+  `qa-mix-gates`, `layer-render`), а не «пять».
+- CHANGELOG: `esbuild` 0.28.1 — явная зависимость; `layer check` выполняет `plan.js` — не запускать на чужих
+  слоях; G8 меряется в LU. D-037 уже в списке выше.
 
 - [ ] **Step 3: TESTING.md**
 
@@ -6156,6 +6548,10 @@ git commit -m "docs: record motion-kit architecture, decisions and tests"
 
 Три задания пакета (v1 — правила и вход, v2 — живая камера, звук, настоящие вставки, v3 — громкости и
 ритм ≤ 2,5 с) сведены в один публичный шаблон без имён клиентов и личных путей.
+
+**Уточнения после ревью пакета 2:** в шаблоне задания ниже правила G4 (2 с — стоп, 3 с — предупреждение) и
+G11 (паузы донора, `cover`) описаны по фактическим гейтам, и есть правило импорта `plan.js` (только core и файлы
+слоя; это ограждение, а не песочница).
 
 **Files:**
 - Create: `skills/reel-turnkey/references/motion-layer-brief.md`
@@ -6230,13 +6626,19 @@ Expected: FAIL — `ENOENT … motion-layer-brief.md`.
 - План спикера без события — не дольше 2,5 с (цель ≤ 2,2 с). Событие: джамп-кат ≥ 15 % или сдвиг лица
   ≥ 85 px, панч-ин на общем плане W, размытие под графикой, уход под вставку. Медленный дрейф — не событие.
 - Масштаб аватара ≤ 1,25 (исходник аватара растянут из 720p).
-- Спикер виден в первые 3 с. Хук-перечисление без человека — только по решению владельца: `hook: 'enumeration'`.
+- Спикер виден на каждом кадре первых 2 с (стоп), лучше все первые 3 с (предупреждение); размытие и текст
+  поверх допустимы, полноэкранная вставка закрывает лицо. Хук-перечисление без человека — только по решению
+  владельца: `hook: 'enumeration'`.
 - Весь текст — внутри safe-zone 70/130/250/420 px на каждом кадре, включая вход и выход; никаких
   отрицательных `left`/`translateX` за экран.
 - 3–4 стоковые вставки по смыслу фраз (`automontage layer stock`), без читаемых чужих брендов.
-- Чужое видео — только 2–3 с подряд, с подписью автора; выдуманные сатирой цитаты — с меткой «САТИРА».
+- Чужое видео — только 2–3 с подряд (вставки с паузой ≤ 0,5 с считаются одним куском), с подписью автора;
+  донор на весь кадр — `cover: true`, без него он оверлей поверх спикера; выдуманные сатирой цитаты — с меткой
+  «САТИРА».
 - Исключение из правила ритма, хука или чужого видео — только строкой `waivers: [{ gate, reason }]`
   с причиной (например, номер правки владельца).
+- `plan.js` импортирует только `@automontage/motion-kit/core` и свои файлы внутри слоя — не `scenes.jsx`, не
+  React, remotion или Node: `layer check` назовёт запрещённый импорт и цепочку файлов.
 
 ## Правила владельца, которые гейт не видит
 
@@ -6279,8 +6681,9 @@ Expected: FAIL — `ENOENT … motion-layer-brief.md`.
 `qa-checklist.md`:
 - «Нет непредусмотренной паузы без визуального события дольше 2,2 секунды» → «План спикера без события не
   дольше 2,5 секунды (стоп), лучше до 2,2 (предупреждение) — считает `automontage layer check`, G1»;
-- «Под речью музыка примерно на 12–18 dB ниже голоса» → «Голос − музыка под речью в коридоре профиля:
-  `live` 12–18 dB, `avatar` — по DECISIONS D-035; считает `automontage preview`, G8»;
+- «Под речью музыка примерно на 12–18 dB ниже голоса» → «Разрыв громкости голос − музыка под речью (LU) в
+  коридоре профиля: `live` 12–18 LU (стартовые значения), `avatar` — по DECISIONS D-035; считает
+  `automontage preview`, G8»;
 - пункт про «собственный звук выключен» → «звук слоя kit — только эффекты (G7)»;
 - новый пункт: «Отчёты `qa/layer-*-check.txt`, `qa/layer-*-render-*.txt`, `qa/preview-*.txt` без ❌,
   контакт-лист `automontage layer sheet` просмотрен глазами».
@@ -6385,19 +6788,33 @@ git commit -m "docs: start reel skills from motion-kit and its gates"
 
 Коридор профиля `avatar` берётся из реального звука, который владелец утвердил, а не из модели.
 
+**Уточнения после ревью пакета 2:**
+- Статистика G8 — разрыв громкости под речью в LU (D8); `measureVoiceMusic` возвращает `{gapLu, voiceLufs,
+  musicLufs, blocks}`, медианы и p10 больше нет. Калибровка идёт тем же путём, что гейт (48 кГц, float,
+  K-взвешивание, окна речи): путь замера между калибровкой и гейтом не менять.
+- **Решение владельца (трекер):** утверждённые рецепты музыки (gain −16, sidechain ratio 4 / −40 dB) читаются как
+  ~30–50 LU под речью, поэтому ветка «R > 20» почти наверняка сработает. Это не стоп: коридор калибруется по
+  утверждённому эталону (это и есть вкус владельца), а число R и итоговый коридор отдельной строкой идут в
+  итоговый отчёт владельцу (Task 52).
+- Тесты `tests/qa-mix-gates.test.js`, которые берут коридор `avatar` (BAD CASE «12 LU проходит», «музыка
+  слышна в нескольких блоках», «gain −60 под ducking»), рассчитаны на коридор-заглушку: при калибровке перевести
+  их на явный тестовый коридор, а не подгонять числа под R.
+
 - [ ] **Step 1:** В `projects/_kit-trial/tools/calibrate-g8.js` (локально, не в Git) собрать «голос после
   finish» эталона: ffmpeg смешивает звук исходника (громкость 1) и звук импортированного слоя эталона
   (`volume=-18dB`, как `BrollMedia` при `mix`), затем фильтр `buildFinishAudioFilter()` из
   `scripts/finish-audio.js` (loudnorm −14 LUFS). Музыка и её параметры — из утверждённого brief эталона
   (`buildLessonMusicMixArgs(brief.music, duration)` → `parseMixOptions`). Окна речи — `speechWindows` по
-  транскрипту эталона. Замер — `measureVoiceMusic`.
-- [ ] **Step 2:** Запустить и записать медиану R (dB) и p10.
+  транскрипту эталона. Замер — `measureVoiceMusic` (тот же путь, что у G8 в preview).
+- [ ] **Step 2:** Запустить и записать `gapLu` (это R, LU), `voiceLufs`, `musicLufs` и `blocks` эталона.
 - [ ] **Step 3:** В `scripts/qa/profiles.js` выставить `avatar.voiceMusic = { stopLow: 3, warnLow: R−3, target: R,
-  warnHigh: R+3, stopHigh: R+8 }` (R округлить до 0,5). Прогнать `node --test tests/qa-report.test.js tests/qa-mix-gates.test.js`
-  — порядок коридора сохраняется. Если R < 6 или > 20 — остановиться и показать владельцу (значит,
-  утверждённый баланс сильно отличается от ожиданий).
-- [ ] **Step 4:** Вписать R в D-035 (`DECISIONS.md`); в локальной памяти поправить
-  `knowledge/heygen-voice-music-ducking.md` (фактический порядок: нормализация → музыка).
+  warnHigh: R+3, stopHigh: R+8 }` (R округлить до 0,5 LU). Прогнать `node --test tests/qa-report.test.js tests/qa-mix-gates.test.js`
+  — порядок коридора сохраняется, тесты G8 не зависят от числа R (см. уточнение выше). Если R ≤ 6 —
+  остановиться и показать владельцу: коридор теряет строгий порядок (`warnLow ≤ stopLow`), а утверждённый баланс
+  сильно отличается от ожиданий. Если R > 20 — ожидаемо (решение владельца выше): продолжать и записать R для
+  итогового отчёта.
+- [ ] **Step 4:** Вписать R (LU) и способ замера в D-035 (`DECISIONS.md`); в локальной памяти поправить
+  `knowledge/heygen-voice-music-ducking.md` (фактический порядок: нормализация → музыка; единица — LU).
 - [ ] **Step 5:** Коммит `fix: calibrate the avatar voice-music corridor on the approved reference preview`.
 
 ### Task 48: Пробный проект
@@ -6414,6 +6831,19 @@ git commit -m "docs: start reel skills from motion-kit and its gates"
 Цель: те же сцены эталона, но камера, звук, субтитры, анимации входа/выхода, safe-zone — из kit, и ритм
 лучше эталона (у эталона план ≈ 5,0 с на 69,70–74,74 и слабые джамп-каты).
 
+**Уточнения после ревью пакета 2** (калибровка гейтов на пробном слое; каждое изменение порога или правила —
+отдельным `fix:` с тестом и строкой в DECISIONS):
+- Ступенька камеры (G1/G2): «ровные соседи» сейчас — жёсткий допуск 1 %. Срез внутри отпускания панча даёт
+  ложные панч-ины; проверенный на ревью вариант — допуск `max(1 %, 20 % шага)`. Включать, если на пробе появятся
+  ложные события.
+- Короткие импульсы размытия (0,24 с) сейчас рвут план G1. Решить, нужен ли минимум длительности «нерезкого»
+  отрезка, чтобы ритм нельзя было обмануть блюр-импульсами.
+- G11: промежуток между слитыми донорскими вставками считается временем донора (1,4 + 0,4 + 1,4 = 3,2 с → стоп
+  при `donor.gapSec` 0,5 с) — решить, так ли задумано; `gapSec` 0,5 с — стартовое значение.
+- G4: ручной `away` с 1,85 с даёт только `warn` (гаснущий спикер «виден» до 2,16 с), а cover-вставка с 1,96 с —
+  `fail`. Учесть при разборе хука пробы.
+- G1: план после cover-вставки до 0,24 с длиннее, чем «от конца вставки» (Task 21) — чинить событием, не порогом.
+
 - [ ] **Step 1:** `automontage layer new --project-dir projects/_kit-trial` → `motion-v01`.
 - [ ] **Step 2:** Скопировать (не переносить) из слоя эталона компоненты сцен (`items.jsx`, сценовые части
   `ui.jsx`), `public/` ассеты (клипы, скриншоты, шрифты с OFL, `SOURCE.md`) в `motion-v01/`. Вспомогательный
@@ -6429,6 +6859,13 @@ git commit -m "docs: start reel skills from motion-kit and its gates"
 - [ ] **Step 6:** Кадры входов/выходов 6 ключевых элементов — `npx remotion still` из корня движка, смотреть глазами.
 
 ### Task 50: Рендер, импорт, brief, preview
+
+**Уточнения после ревью пакета 2** (первый настоящий рендер слоя):
+- G6 меряет длину контейнера (`probeVideo`). Проверить, что рендер Remotion не удлиняет звук на 2+ AAC-кадра;
+  при расхождении мерить слой по длине видеопотока (отдельный `fix:` с тестом).
+- G7: слой только с эффектами обязан давать 0,00 с «вне эффектов». При ложных секундах расширять запасы
+  `leak.headSec`/`tailSec`, а не поднимать пороги `outsideWarnSec`/`outsideStopSec`.
+- Step 4 (preview) — только после калибровки G8 (Task 47): коридор-заглушка стопит любой preview слоя kit с музыкой.
 
 - [ ] **Step 1:** `automontage layer render --project-dir projects/_kit-trial --layer motion-v01` (ждёт свободную машину).
   Expected: G6, G7 — pass.
@@ -6450,14 +6887,16 @@ git commit -m "docs: start reel skills from motion-kit and its gates"
 ### Task 52: Доказательства и финальная проверка
 
 - [ ] **Step 1:** `npm test` — `fail 0`; сохранить итоговые строки.
-- [ ] **Step 2:** `node --test --test-name-pattern "BAD CASE" tests/` — пять плохих случаев пойманы
-  (статичный план 5 с, голос в звуке слоя, музыка вровень, слой длиннее исходника, текст за safe-zone).
+- [ ] **Step 2:** `node --test --test-name-pattern "BAD CASE" tests/` — все плохие случаи пойманы: статичный план
+  5 с, голос в звуке слоя (на файлах и через `layer render`), музыка вровень, слой длиннее исходника, текст за
+  safe-zone (в покое, во влёте, на перелёте pop), cover-вставка с 0 с.
 - [ ] **Step 3:** Отчёты пробы: `qa/layer-motion-v01-check.txt`, `qa/layer-motion-v01-render-01.txt`,
   `qa/preview-*.txt` — без ❌; контакт-лист `qa/sheet-*.jpg` и `qa/compare.jpg` просмотрены.
 - [ ] **Step 4:** `node scripts/check-public-privacy.js` по всему дереву ветки и Gitleaks (pre-commit hook уже
   прогонялся на каждом коммите); `git log --oneline main..HEAD` — маленькие коммиты с `feat:/fix:/docs:/test:`.
 - [ ] **Step 5:** `superpowers:verification-before-completion`: итог владельцу — что сделано, как теперь
-  запускается новый ролик, что осталось; предложить PR (не открывать без просьбы).
+  запускается новый ролик, что осталось; отдельной строкой — число R калибровки G8 и итоговый коридор `avatar`
+  (решение владельца, Task 47); предложить PR (не открывать без просьбы).
 
 ### Task 53: Память
 
@@ -6475,8 +6914,8 @@ git commit -m "docs: start reel skills from motion-kit and its gates"
 | Переменная окружения `AUTOMONTAGE_SFX_DIR` | `.env.example`, `README.md`, `ARCHITECTURE.md` §7 | 42, 43 |
 | Формат brief | не меняется (D-036) | — |
 | Заметное поведение и исправления | `CHANGELOG.md` `[Unreleased]` | 43 |
-| Архитектурные выборы | `DECISIONS.md` D-034 … D-036 | 43, 47 |
-| Команды и критерии проверки | `TESTING.md` §12, CI не меняется (тесты идут в `npm test`) | 43 |
+| Архитектурные выборы | `DECISIONS.md` D-034 … D-037 | 43, 47 |
+| Команды и критерии проверки | `TESTING.md` §12; CI: Windows-шаг `tests/motion-kit-node.test.js` (Task 19), остальное — в `npm test` | 19, 43 |
 | Навыки и контракт монтажа | `creative-motion.md`, `qa-checklist.md`, `motion-layer-brief.md`, `SKILL.md` трёх навыков + зеркала | 44, 45 |
 | Медиа в Git | нет новых бинарников; политика SFX в `ASSETS.md` | 42 |
 
@@ -6486,7 +6925,7 @@ git commit -m "docs: start reel skills from motion-kit and its gates"
 |---|---|---|
 | 1. Шаблон одной командой: камера, звуки, сток, скриншот-карточка, субтитры | 29, 31, 41 | `tests/layer-template.test.js`, `tests/layer-new.test.js`, кадры шаблона |
 | 2. Проба на исходнике эталона не хуже по кадрам и проходит все гейты | 46–51 | `qa/*.txt` пробы без ❌, `qa/compare.jpg`, вывод в README пробы |
-| 3. Гейты ловят 5 плохих случаев | 21, 23, 26, 27 | `node --test --test-name-pattern "BAD CASE" tests/` |
+| 3. Гейты ловят плохие случаи (5 основных + cover-вставка с 0 с, влёт и перелёт текста, утечка голоса через `layer render`) | 21–23, 26, 27, 34 | `node --test --test-name-pattern "BAD CASE" tests/` |
 | 4. `npm test` зелёный, privacy-check и Gitleaks чистые | 52 | вывод команд |
 | 5. Навыки и creative-motion стартуют с kit и гейтов | 44, 45 | `tests/creative-motion-instructions.test.js` |
 | 6. MOTION-BRIEF v1–v3 сведены в один шаблон | 44 | `skills/reel-turnkey/references/motion-layer-brief.md` |
