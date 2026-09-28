@@ -205,11 +205,10 @@ test('the real CLI promotes a gate-command router failure to exit 2 through scri
     assert.equal(result.status, 2, result.stderr);
     assert.match(result.stderr, new RegExp(`❌ layer ${command} отменён`));
   }
-  // У остальных команд отчёта нет, поэтому любой отказ роутера — код 1, а не 2. Модуля import ещё нет
-  // (Task 35): здесь отказ — «Cannot find module», а не неизвестный флаг; код от этого не зависит.
+  // У остальных команд отчёта нет, поэтому любой отказ роутера — код 1, а не 2.
   const other = run('layer', 'import', '--bogus');
   assert.equal(other.status, 1, other.stderr);
-  assert.match(other.stderr, /❌ layer import отменён/);
+  assert.match(other.stderr, /❌ layer import отменён: неизвестный флаг --bogus/);
 });
 
 test('sha256File streams the file in chunks and matches crypto over its bytes', (t) => {
