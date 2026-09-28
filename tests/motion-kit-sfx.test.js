@@ -66,6 +66,17 @@ test('assertMasterDb accepts a finite number <= 0 and names layer.json → sfxMa
   assert.throws(() => kit.assertMasterDb(3), /layer\.json.*sfxMasterDb/);
 });
 
+// Ревью follow-up (Task 28 fix): String("-5") и String(-5) печатают одно и то же "-5" — опечатка
+// «строка вместо числа» в layer.json была не видна в сообщении. Строка теперь в кавычках через
+// JSON.stringify, а NaN/null/undefined остаются как раньше (JSON.stringify дал бы им "null" или
+// сам undefined — хуже, а не лучше).
+test('assertMasterDb quotes a string value so it cannot be confused with a real number', () => {
+  assert.throws(() => kit.assertMasterDb('-5'), /получено "-5"/);
+  assert.throws(() => kit.assertMasterDb(NaN), /получено NaN/);
+  assert.throws(() => kit.assertMasterDb(null), /получено null/);
+  assert.throws(() => kit.assertMasterDb(undefined), /получено undefined/);
+});
+
 test('an explicit typeSfx: null suppresses the typing bed', () => {
   const cues = kit.sfxFromItems([{ from: 50, typeFrom: 50, typeTo: 150, typeSfx: null }], [], opts);
   assert.deepEqual(cues, []);

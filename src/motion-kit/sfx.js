@@ -122,9 +122,15 @@ export const dbToGain = (db) => 10 ** (db / 20);
 // layer.sfxMasterDb) — это не «оставить громкость как есть», а испорченные данные, и он не должен
 // тихо превратиться в 0 дБ. undefined — это и есть «оставить как есть» (аргумент не передан или
 // передан явно), поэтому только он держит дефолт −5.
+// Строка "-5" в JSON — частая опечатка (число получилось строкой). String("-5") и String(-5)
+// печатают одинаково "-5", и в сообщении об ошибке их было не различить. JSON.stringify только
+// для строк — кавычки делают опечатку видимой; для числа/NaN/null/undefined остаётся прежний
+// читаемый вид (JSON.stringify(NaN/undefined) дал бы "null"/сам undefined, что хуже String()).
+const describeMasterDb = (value) => (typeof value === 'string' ? JSON.stringify(value) : String(value));
+
 export function assertMasterDb(masterDb) {
   if (!(Number.isFinite(masterDb) && masterDb <= 0)) {
-    throw new Error(`layer.json → sfxMasterDb должен быть конечным числом ≤ 0 (по умолчанию −5 дБ) — получено ${String(masterDb)}`);
+    throw new Error(`layer.json → sfxMasterDb должен быть конечным числом ≤ 0 (по умолчанию −5 дБ) — получено ${describeMasterDb(masterDb)}`);
   }
 }
 

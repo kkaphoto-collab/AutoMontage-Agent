@@ -1,11 +1,14 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { parseArgs } = require('../scripts/layer/cli');
-const { nextLayerName, readLayerJson, relative, resolveLayer } = require('../scripts/layer/common');
+const { main, parseArgs } = require('../scripts/layer/cli');
+const {
+  nextLayerName, readJson, readLayerJson, relative, resolveLayer, sha256File, writeJson,
+} = require('../scripts/layer/common');
 const { createOrOpenProject } = require('../scripts/project/workspace');
 
 const cli = path.resolve(__dirname, '../scripts/cli.js');
@@ -25,11 +28,48 @@ function makeProjectFixture(t) {
   return { dir, projectDir: workspace.dir };
 }
 
+// Фейковая подкоманда для тестов роутера: поведение управляется флагом --mode, а не process.env —
+// так параллельные тесты не делят глобальное состояние. Файл живёт во временной папке и требуется
+// по абсолютному пути через commands-override main(), а не подменой Module._resolveFilename.
+function makeFakeCommand(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'automontage-layer-fake-cmd-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'fake-cmd.js');
+  fs.writeFileSync(file, `
+    module.exports = {
+      FLAGS: { mode: 'value' },
+      async run(options) {
+        const mode = options.mode;
+        if (mode === 'undef') return undefined;
+        if (mode === 'throwstr') throw 'plain string';
+        if (mode === 'throwundef') throw undefined;
+        if (mode === 'throw') throw new Error('boom');
+        if (mode === 'two') return 2;
+        return 0;
+      },
+    };
+  `);
+  return file;
+}
+
+async function captureConsoleError(fn) {
+  const original = console.error;
+  const lines = [];
+  console.error = (...args) => { lines.push(args.join(' ')); };
+  try {
+    const result = await fn();
+    return { result, lines };
+  } finally {
+    console.error = original;
+  }
+}
+
 test('public CLI advertises layer commands and routes them to their own script', () => {
   const help = run('--help');
   for (const line of ['automontage layer new --project-dir', 'automontage layer check', 'automontage layer render', 'automontage layer import', 'automontage layer brief']) {
     assert.match(help.stdout, new RegExp(line));
   }
+  assert.match(help.stdout, /automontage layer --help/);
   const usage = run('layer');
   assert.equal(usage.status, 1);
   assert.match(usage.stderr, /usage: automontage layer new\|words\|check\|render\|import\|brief\|stock\|sheet/);
@@ -37,7 +77,9 @@ test('public CLI advertises layer commands and routes them to their own script',
   const unknown = run('layer', 'bogus');
   assert.equal(unknown.status, 1);
   assert.match(unknown.stderr, /неизвестная команда layer bogus/);
-  assert.equal(run('layer', '--help').status, 0);
+  const help2 = run('layer', '--help');
+  assert.equal(help2.status, 0);
+  assert.match(help2.stdout, /usage: automontage layer/);
 });
 
 test('layer flags are strict: unknown, repeated and valueless flags fail', () => {
@@ -49,15 +91,108 @@ test('layer flags are strict: unknown, repeated and valueless flags fail', () =>
   assert.throws(() => parseArgs(['stray'], flags), /лишний аргумент «stray»/);
 });
 
-test('readLayerJson validates sfxMasterDb the same way SfxTrack does', (t) => {
+test('parseArgs rejects --flag=value with a hint, but keeps a leading-dash value given as a separate argument', () => {
+  const flags = { 'project-dir': 'value', 'music-gain-db': 'value' };
+  assert.throws(() => parseArgs(['--project-dir=p'], flags), /пишите --project-dir p \(без =\)/);
+  assert.throws(() => parseArgs(['--music-gain-db=-16'], flags), /пишите --music-gain-db -16 \(без =\)/);
+  assert.deepEqual(parseArgs(['--music-gain-db', '-16'], flags), { 'music-gain-db': '-16' });
+});
+
+test('main() treats --help/-h anywhere in argv as the top-level usage, without touching subcommand modules', async () => {
+  const outputs = [];
+  const original = console.log;
+  console.log = (...args) => outputs.push(args.join(' '));
+  try {
+    // 'new' и 'render' ничего не реализуют (задачи 29+), но --help не должен требовать их модуль.
+    assert.equal(await main(['new', '--project-dir', 'p', '--help']), 0);
+    assert.equal(await main(['-h']), 0);
+    assert.equal(await main(['render', '-h', '--layer', 'motion-v01']), 0);
+  } finally {
+    console.log = original;
+  }
+  assert.equal(outputs.length, 3);
+  for (const out of outputs) assert.match(out, /usage: automontage layer/);
+});
+
+test('router extracts a message from a thrown string or undefined instead of crashing', async (t) => {
+  const file = makeFakeCommand(t);
+  const strThrow = await captureConsoleError(() => main(['import', '--mode', 'throwstr'], { commands: { import: file } }));
+  assert.equal(strThrow.result, 1);
+  assert.match(strThrow.lines[0], /❌ layer import отменён: plain string/);
+
+  const undefThrow = await captureConsoleError(() => main(['import', '--mode', 'throwundef'], { commands: { import: file } }));
+  assert.equal(undefThrow.result, 1);
+  assert.match(undefThrow.lines[0], /❌ layer import отменён: undefined/);
+});
+
+test('router treats a non-integer return value from a subcommand as an error, not a silent success', async (t) => {
+  const file = makeFakeCommand(t);
+  const { result, lines } = await captureConsoleError(() => main(['import', '--mode', 'undef'], { commands: { import: file } }));
+  assert.equal(result, 1);
+  assert.match(lines[0], /❌ layer import отменён:.*код возврата/);
+});
+
+test('router promotes a thrown error from the gate commands check/render to exit 2, keeps 1 for others', async (t) => {
+  const file = makeFakeCommand(t);
+  assert.equal(await main(['check', '--mode', 'throw'], { commands: { check: file } }), 2);
+  assert.equal(await main(['render', '--mode', 'throw'], { commands: { render: file } }), 2);
+  assert.equal(await main(['import', '--mode', 'throw'], { commands: { import: file } }), 1);
+  // Успешный возврат кода не переопределяется: gate-команда может честно вернуть 1 (STOP отчёта).
+  assert.equal(await main(['check', '--mode', 'two'], { commands: { check: file } }), 2);
+});
+
+test('the real CLI promotes a gate-command router failure to exit 2 through scripts/cli.js', () => {
+  for (const command of ['check', 'render']) {
+    const result = run('layer', command, '--bogus');
+    assert.equal(result.status, 2, result.stderr);
+    assert.match(result.stderr, new RegExp(`❌ layer ${command} отменён`));
+  }
+  // 'import'/'brief' остаются обычными командами: неизвестный флаг там — код 1, а не 2.
+  const other = run('layer', 'import', '--bogus');
+  assert.equal(other.status, 1, other.stderr);
+  assert.match(other.stderr, /❌ layer import отменён/);
+});
+
+test('sha256File streams the file in chunks and matches crypto over its bytes', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'automontage-layer-hash-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'sample.bin');
+  const bytes = Buffer.from('automontage layer hash sample');
+  fs.writeFileSync(file, bytes);
+  const expected = crypto.createHash('sha256').update(bytes).digest('hex');
+  assert.equal(sha256File(file), expected);
+});
+
+test('readJson names the file in a broken-JSON error, using a custom label when given', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'automontage-layer-readjson-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'weird-name.json');
+  fs.writeFileSync(file, '{not json');
+  assert.throws(() => readJson(file), /weird-name\.json: неверный JSON/);
+  assert.throws(() => readJson(file, 'project.json'), /project\.json: неверный JSON/);
+});
+
+test('writeJson writes atomically through a nested, not-yet-existing directory', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'automontage-layer-writejson-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'motion-v01', 'out', 'manifest.json');
+  writeJson(file, { version: 1, ok: true });
+  const text = fs.readFileSync(file, 'utf8');
+  assert.deepEqual(JSON.parse(text), { version: 1, ok: true });
+  assert.match(text, /\n$/);
+  assert.deepEqual(fs.readdirSync(path.dirname(file)), ['manifest.json']);
+});
+
+test('readLayerJson validates sfxMasterDb the same way SfxTrack does, and rejects a non-object layer.json', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'automontage-layer-json-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const layerDir = path.join(dir, 'motion-v01');
   fs.mkdirSync(layerDir, { recursive: true });
+  const layerFile = path.join(layerDir, 'layer.json');
   const writeLayer = (value, { omit = false } = {}) => {
     const layer = { version: 1, composition: 'motion-v01', fps: 25, width: 1080, height: 1920 };
     if (!omit) layer.sfxMasterDb = value;
-    fs.writeFileSync(path.join(layerDir, 'layer.json'), JSON.stringify(layer));
+    fs.writeFileSync(layerFile, JSON.stringify(layer));
   };
 
   writeLayer(3);
@@ -76,9 +211,18 @@ test('readLayerJson validates sfxMasterDb the same way SfxTrack does', (t) => {
   const layer = readLayerJson(layerDir);
   assert.equal(layer.sfxMasterDb, -5);
   assert.equal(layer.composition, 'motion-v01');
+
+  fs.writeFileSync(layerFile, '{"sfxMasterDb": -5,');
+  assert.throws(() => readLayerJson(layerDir), /layer\.json: неверный JSON/);
+
+  fs.writeFileSync(layerFile, '[]');
+  assert.throws(() => readLayerJson(layerDir), /layer\.json должен быть объектом/);
+
+  fs.writeFileSync(layerFile, 'null');
+  assert.throws(() => readLayerJson(layerDir), /layer\.json должен быть объектом/);
 });
 
-test('resolveLayer accepts a real layer directory and rejects bad names, including traversal-shaped ones', (t) => {
+test('resolveLayer accepts a real layer directory and rejects names failing the motion-vNN pattern', (t) => {
   const { projectDir } = makeProjectFixture(t);
   fs.mkdirSync(path.join(projectDir, 'motion-v01'));
 
@@ -87,33 +231,46 @@ test('resolveLayer accepts a real layer directory and rejects bad names, includi
   assert.equal(resolved.layerDir, path.join(projectDir, 'motion-v01'));
   assert.equal(resolved.projectDir, projectDir);
 
-  assert.throws(
-    () => resolveLayer({ 'project-dir': projectDir, layer: 'foo' }),
-    /--layer должен быть вида motion-v01/,
-  );
-  assert.throws(
-    () => resolveLayer({ 'project-dir': projectDir, layer: 'motion-v1' }),
-    /--layer должен быть вида motion-v01/,
-  );
+  assert.throws(() => resolveLayer({ 'project-dir': projectDir, layer: 'foo' }), /--layer должен быть вида motion-v01/);
+  assert.throws(() => resolveLayer({ 'project-dir': projectDir, layer: 'motion-v1' }), /--layer должен быть вида motion-v01/);
   // Путь вида «../x» не совпадает с motion-vNN и отклоняется раньше, чем дошёл бы до файловой
-  // системы — resolveProjectPath (вторая линия защиты от выхода за пределы проекта) не вызывается.
-  assert.throws(
-    () => resolveLayer({ 'project-dir': projectDir, layer: '../x' }),
-    /--layer должен быть вида motion-v01/,
-  );
-  assert.throws(
-    () => resolveLayer({ 'project-dir': projectDir, layer: '../motion-v01' }),
-    /--layer должен быть вида motion-v01/,
-  );
-  // Имя формально проходит шаблон, но такой папки в проекте нет — вторая линия защиты
-  // (resolveProjectPath) не даёт использовать несуществующий или чужой путь молча.
+  // системы — вторая линия защиты (resolveProjectPath) не вызывается вовсе.
+  assert.throws(() => resolveLayer({ 'project-dir': projectDir, layer: '../x' }), /--layer должен быть вида motion-v01/);
+  assert.throws(() => resolveLayer({ 'project-dir': projectDir, layer: '../motion-v01' }), /--layer должен быть вида motion-v01/);
+});
+
+test('resolveLayer gives a friendly message for a missing layer and wraps other resolveProjectPath errors with --layer <name>', (t) => {
+  const { projectDir } = makeProjectFixture(t);
+
   assert.throws(
     () => resolveLayer({ 'project-dir': projectDir, layer: 'motion-v99' }),
-    /does not exist/,
+    /папка слоя motion-v99 не найдена — создайте: automontage layer new/,
+  );
+
+  fs.writeFileSync(path.join(projectDir, 'motion-v03'), 'x');
+  assert.throws(
+    () => resolveLayer({ 'project-dir': projectDir, layer: 'motion-v03' }),
+    /--layer motion-v03: layer must be a directory/,
+  );
+
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'automontage-layer-outside-'));
+  t.after(() => fs.rmSync(outside, { recursive: true, force: true }));
+  fs.symlinkSync(outside, path.join(projectDir, 'motion-v01'));
+  assert.throws(
+    () => resolveLayer({ 'project-dir': projectDir, layer: 'motion-v01' }),
+    /--layer motion-v01: layer escapes through a symbolic link/,
+  );
+
+  // resolveProjectPath не делает исключения для симлинка, указывающего ВНУТРЬ проекта — тоже отказ.
+  fs.mkdirSync(path.join(projectDir, 'real'));
+  fs.symlinkSync(path.join(projectDir, 'real'), path.join(projectDir, 'motion-v02'));
+  assert.throws(
+    () => resolveLayer({ 'project-dir': projectDir, layer: 'motion-v02' }),
+    /--layer motion-v02: layer escapes through a symbolic link/,
   );
 });
 
-test('nextLayerName picks the next free number and fills gaps', (t) => {
+test('nextLayerName is the highest existing number + 1 and never reuses one, even for a file or a dangling symlink', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'automontage-layer-next-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
 
@@ -121,10 +278,15 @@ test('nextLayerName picks the next free number and fills gaps', (t) => {
   fs.mkdirSync(path.join(dir, 'motion-v01'));
   assert.equal(nextLayerName(dir), 'motion-v02');
   fs.mkdirSync(path.join(dir, 'motion-v03'));
-  // v02 остаётся свободным между v01 и v03 — следующее имя заполняет дыру, а не идёт за максимум.
-  assert.equal(nextLayerName(dir), 'motion-v02');
-  fs.mkdirSync(path.join(dir, 'motion-v02'));
+  // v02 занят, v03 тоже — следующий номер идёт после максимума, а не в дыру: старые qa-отчёты и
+  // pult-card.json могут ссылаться на уже использованные имена, их нельзя выдать повторно.
   assert.equal(nextLayerName(dir), 'motion-v04');
+
+  fs.writeFileSync(path.join(dir, 'motion-v04'), 'x');
+  assert.equal(nextLayerName(dir), 'motion-v05');
+
+  fs.symlinkSync(path.join(dir, 'nope'), path.join(dir, 'motion-v05'));
+  assert.equal(nextLayerName(dir), 'motion-v06');
 });
 
 test('relative uses forward slashes for a nested layer path', () => {
