@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { getProfile } = require('../scripts/qa/profiles');
-const { assertCameraArrays, detectCameraEvents, gateDonor, gateHook, gateRhythm, gateScale, gateStock, gateWeakCuts, speakerPlans } = require('../scripts/qa/timeline-gates');
+const { assertCameraArrays, detectCameraEvents, gateDonor, gateHook, gateRhythm, gateSafeZone, gateScale, gateStock, gateWeakCuts, speakerPlans } = require('../scripts/qa/timeline-gates');
 const { cutsEvery, manifestFixture } = require('./helpers/manifest-fixtures');
 
 const avatar = getProfile('avatar');
@@ -1111,4 +1111,51 @@ test('BAD CASE: a cover insert from 0 s hides the speaker even while the camera 
   // закрытии первой секунды; правило автора требует видимости на КАЖДОМ кадре первых 2 с — 1 с
   // закрытия внутри mustSec обязана провалить гейт.
   assert.equal(gateHook(manifestFixture({ inserts: insert(true, 25) }), avatar).status, 'fail');
+});
+
+// --- Задача 23: G5 «Safe-zone текста» ---
+//
+// Порог гейта строится из safeRect(width, height) — тех же отступов, что и src/motion-kit/safe.js
+// (равенство закреплено tests/motion-kit-safe.test.js), а не из хардкода «70/130/250/420 px»: это
+// верно только для 9:16 1080×1920, а 16:9 1920×1080 отдаёт другой прямоугольник (единственное
+// отклонение от task-23.md, всё остальное — как в плане).
+
+test('BAD CASE: text at x=40 stops the layer and names the side', () => {
+  const m = manifestFixture({ texts: [{ id: 'title', from: 0, frames: [[40, 300, 440, 400]] }] });
+  const g = gateSafeZone(m);
+  assert.equal(g.status, 'fail');
+  assert.match(g.spans[0].note, /title: слева \+30 px/);
+});
+
+test('BAD CASE: an element inside at rest that flies in from the side is caught on entry frames', () => {
+  const cfg = { fps: 25, width: 1080, height: 1920, durationInFrames: 100, words: [], sfxLibrary: { sounds: {} } };
+  const plan = (from) => ({ captions: false, camera: { face: { x: 540, y: 787 }, shots: [{ at: 0, preset: 'W' }] },
+    items: [{ id: 'card', kind: 'card', at: 1, until: 3, box: { x: 100, y: 300, w: 400, h: 100 }, enter: { kind: 'fly', from } }] });
+  const bad = gateSafeZone(kit.buildManifest(kit.compileLayer(plan([-200, 0]), cfg)));
+  assert.equal(bad.status, 'fail');
+  assert.equal(bad.spans[0].fromSec, 1.04);
+  assert.equal(gateSafeZone(kit.buildManifest(kit.compileLayer(plan([0, 60]), cfg))).status, 'pass');
+});
+
+test('static caption lanes are checked once and pass inside the safe zone', () => {
+  const m = manifestFixture({ texts: [{ id: 'caption-1', from: 0, until: 50, static: [70, 1398, 950, 1482] }] });
+  assert.equal(gateSafeZone(m).status, 'pass');
+});
+
+// caption-<n>b (кусок субтитра после окна hide, Task 18) проверяется той же логикой, что и любой
+// другой текстовый id — свой from/until/static, своё имя в spans.
+test('a caption-<n>b piece after a hide window is checked exactly like any other text id', () => {
+  const m = manifestFixture({ texts: [{ id: 'caption-2b', from: 60, until: 90, static: [40, 1398, 950, 1482] }] });
+  const g = gateSafeZone(m);
+  assert.equal(g.status, 'fail');
+  assert.match(g.spans[0].note, /caption-2b: слева \+30 px/);
+});
+
+// Порог называет геометрию ЭТОГО кадра, а не хардкод: 9:16 1080×1920 и 16:9 1920×1080 отдают разные
+// числа.
+test('the threshold text names the frame\'s own safe-zone insets, not a hardcoded 9:16 value', () => {
+  const portrait = manifestFixture({ seconds: 0.04 });
+  assert.match(gateSafeZone(portrait).threshold, /слева 70, справа 130, сверху 250, снизу 420 px/);
+  const landscape = manifestFixture({ seconds: 0.04, width: 1920, height: 1080 });
+  assert.match(gateSafeZone(landscape).threshold, /слева 80, справа 80, сверху 60, снизу 60 px/);
 });

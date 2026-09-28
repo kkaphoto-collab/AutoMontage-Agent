@@ -1,5 +1,6 @@
 // Гейты по манифесту слоя: считаются до рендера, за доли секунды.
 const { gate } = require('./report');
+const { overflow, safeRect } = require('./safe-rect');
 
 const r2 = (value) => Math.round(value * 100) / 100;
 const fmt = (value) => String(r2(value)).replace('.', ',');
@@ -293,6 +294,45 @@ function gateHook(manifest, profile) {
   });
 }
 
+const SAFE_SIDES = { left: 'слева', right: 'справа', top: 'сверху', bottom: 'снизу' };
+
+// Порог в человеческом виде считаем от геометрии САМОГО кадра (safeRect), а не хардкодим
+// «70/130/250/420 px» — эти числа верны только для 1080×1920; на 16:9 (1920×1080) safeRect отдаёт
+// другой прямоугольник, и подпись обязана называть именно его.
+function safeZoneThreshold(width, height) {
+  const safe = safeRect(width, height);
+  const left = Math.round(safe.left);
+  const top = Math.round(safe.top);
+  const right = Math.round(width - safe.right);
+  const bottom = Math.round(height - safe.bottom);
+  return `слева ${left}, справа ${right}, сверху ${top}, снизу ${bottom} px на каждом кадре`;
+}
+
+// G5: каждый бокс текста на каждом кадре его жизни обязан помещаться в safe-зону. Статичная полоса
+// субтитров (caption-<n>, а после окна hide — caption-<n>b, caption-<n>c…, Task 18) проверяется
+// один раз по своему static-прямоугольнику — у неё нет покадровых frames. Показываем только первый
+// нарушивший кадр каждого текста (`break`) — остальные почти наверняка тот же самый выход.
+function gateSafeZone(manifest) {
+  const safe = safeRect(manifest.width, manifest.height);
+  const found = [];
+  for (const text of manifest.texts) {
+    const boxes = text.static ? [text.static] : text.frames;
+    for (let i = 0; i < boxes.length; i += 1) {
+      const b = boxes[i];
+      if (!b) continue;
+      const out = overflow({ left: b[0], top: b[1], right: b[2], bottom: b[3] }, safe);
+      if (out) { found.push({ id: text.id, frame: text.from + i, out }); break; }
+    }
+  }
+  const note = (v) => `${v.id}: ${Object.entries(v.out).map(([side, px]) => `${SAFE_SIDES[side]} +${px} px`).join(', ')}`;
+  return gate('G5', 'Safe-zone текста', {
+    status: found.length ? 'fail' : 'pass', value: found.length, unit: 'элем.',
+    threshold: safeZoneThreshold(manifest.width, manifest.height),
+    spans: found.slice(0, 5).map((v) => span(v.frame, v.frame + 1, manifest.fps, note(v))),
+    hint: 'держите влёт, перелёт и выход внутри safe-зоны: уменьшите сдвиг входа или переставьте box',
+  });
+}
+
 // G10: минимальное число стоковых вставок по длине ролика — вкусовой порог, только предупреждение.
 function gateStock(manifest, profile) {
   const count = manifest.inserts.filter((i) => i.kind === 'stock').length;
@@ -349,5 +389,5 @@ function gateDonor(manifest, profile) {
 }
 
 module.exports = {
-  assertCameraArrays, detectCameraEvents, gateDonor, gateHook, gateRhythm, gateScale, gateStock, gateWeakCuts, speakerPlans,
+  assertCameraArrays, detectCameraEvents, gateDonor, gateHook, gateRhythm, gateSafeZone, gateScale, gateStock, gateWeakCuts, speakerPlans,
 };
