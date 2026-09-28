@@ -4,7 +4,10 @@ const path = require('node:path');
 
 const { startReviewServer } = require('./server');
 
-const SIGNAL_EXIT_CODES = Object.freeze({ SIGINT: 130, SIGTERM: 143 });
+// SIGHUP — закрытое окно терминала: без обработчика оно осиротило бы сервер вместе с активным
+// импортом и его блокировкой проекта. Убираемся так же, как по SIGTERM (installReviewShutdownHandlers
+// ниже вешает один и тот же shutdown на каждый сигнал из этой таблицы).
+const SIGNAL_EXIT_CODES = Object.freeze({ SIGINT: 130, SIGTERM: 143, SIGHUP: 129 });
 
 function parseReviewOptions(argv) {
   if (!Array.isArray(argv)) throw new Error('review arguments are invalid');

@@ -149,10 +149,11 @@ test('a real plan.js that throws undefined or a string gives a readable error re
   writePlan("export default function buildPlan() {\n  throw 'строка';\n}\n");
   assert.equal(await runCheck(), 2);
   assert.match(report().error, /^слой motion-v01: src\/plan\.js упал при построении плана — строка/);
-  // Геттер в объекте плана бросает уже при компиляции — мимо обёртки compilePlan вокруг buildPlan.
+  // Геттер в объекте плана бросает уже при компиляции — мимо обёртки compilePlan вокруг buildPlan,
+  // поэтому текст другой: не «упал при построении», а «бросил … при компиляции».
   writePlan("export default function buildPlan() {\n  return { get camera() { throw null; }, items: [] };\n}\n");
   assert.equal(await runCheck(), 2);
-  assert.equal(report().error, 'слой motion-v01: null');
+  assert.equal(report().error, 'слой motion-v01: src/plan.js бросил null при компиляции плана');
 });
 
 test('the profile comes from --profile, then layer.json, then avatar; an unknown one is an error report', { skip: !hasFfmpeg }, async (t) => {
@@ -258,27 +259,36 @@ async function waitFor(predicate, message, timeoutMs = 12_000) {
   assert.fail(message);
 }
 
-test('SIGTERM to the public automontage CLI stops its layer child too and exits 143', {
+// SIGINT/SIGTERM/SIGHUP — те же коды, что scripts/cli.js даёт публичной команде layer (Step 0 задачи
+// 33); закрытие терминала (SIGHUP) не должно оставлять ребёнка scripts/layer/cli.js висеть так же,
+// как явный Ctrl+C или kill. Цикл — по образцу tests/review-cli.test.js.
+const LAYER_SIGNAL_EXIT_CODES = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 };
+
+test('signals to the public automontage CLI stop its layer child too and exit with the right code', {
   skip: !hasFfmpeg ? 'нет ffmpeg' : process.platform === 'win32' ? 'POSIX signal lifecycle' : false,
   timeout: 45_000,
 }, async (t) => {
-  const { projectDir, writePlan } = await scaffold(t);
-  // План, который никогда не заканчивается: без передачи сигнала ребёнок жил бы после смерти внешнего процесса.
-  writePlan('export default function buildPlan() {\n  for (;;) { /* долгая команда */ }\n}\n');
-  const outer = spawn(process.execPath, [cli, 'layer', 'check', '--project-dir', projectDir, '--layer', 'motion-v01'],
-    { stdio: ['ignore', 'pipe', 'pipe'] });
-  let output = '';
-  outer.stdout.on('data', (chunk) => { output += chunk; });
-  outer.stderr.on('data', (chunk) => { output += chunk; });
-  let childPid = null;
-  t.after(() => {
-    for (const pid of [outer.pid, childPid]) if (pid && processIsAlive(pid)) process.kill(pid, 'SIGKILL');
-  });
-  await waitFor(() => Number.isInteger(childPid = childProcessPid(outer.pid, /scripts\/layer\/cli\.js/)), 'внешний CLI не запустил scripts/layer/cli.js');
-  // exit, а не close: утёкший ребёнок держит унаследованные pipe открытыми, и close не пришёл бы вовсе.
-  const exited = new Promise((resolve) => { outer.once('exit', (code, signal) => resolve({ code, signal })); });
-  outer.kill('SIGTERM');
-  const { code, signal } = await exited;
-  assert.deepEqual({ code, signal }, { code: 143, signal: null }, output);
-  await waitFor(() => !processIsAlive(childPid), 'scripts/layer/cli.js пережил внешний automontage', 5_000);
+  for (const signal of Object.keys(LAYER_SIGNAL_EXIT_CODES)) {
+    await t.test(signal, async (signalTest) => {
+      const { projectDir, writePlan } = await scaffold(signalTest);
+      // План, который никогда не заканчивается: без передачи сигнала ребёнок жил бы после смерти внешнего процесса.
+      writePlan('export default function buildPlan() {\n  for (;;) { /* долгая команда */ }\n}\n');
+      const outer = spawn(process.execPath, [cli, 'layer', 'check', '--project-dir', projectDir, '--layer', 'motion-v01'],
+        { stdio: ['ignore', 'pipe', 'pipe'] });
+      let output = '';
+      outer.stdout.on('data', (chunk) => { output += chunk; });
+      outer.stderr.on('data', (chunk) => { output += chunk; });
+      let childPid = null;
+      signalTest.after(() => {
+        for (const pid of [outer.pid, childPid]) if (pid && processIsAlive(pid)) process.kill(pid, 'SIGKILL');
+      });
+      await waitFor(() => Number.isInteger(childPid = childProcessPid(outer.pid, /scripts\/layer\/cli\.js/)), 'внешний CLI не запустил scripts/layer/cli.js');
+      // exit, а не close: утёкший ребёнок держит унаследованные pipe открытыми, и close не пришёл бы вовсе.
+      const exited = new Promise((resolve) => { outer.once('exit', (code, exitSignal) => resolve({ code, signal: exitSignal })); });
+      outer.kill(signal);
+      const result = await exited;
+      assert.deepEqual(result, { code: LAYER_SIGNAL_EXIT_CODES[signal], signal: null }, output);
+      await waitFor(() => !processIsAlive(childPid), 'scripts/layer/cli.js пережил внешний automontage', 5_000);
+    });
+  }
 });

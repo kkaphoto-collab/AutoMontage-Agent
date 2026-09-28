@@ -17,6 +17,9 @@ const { startReviewServer } = require('../scripts/review/server');
 const { runMediaProcess } = require('../scripts/review/media-process');
 const { makeReviewProject } = require('./helpers/review-project');
 
+// SIGHUP — закрытое окно терминала — убирается так же, как SIGINT/SIGTERM (Step 0 задачи 33).
+const REVIEW_SIGNAL_EXIT_CODES = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 };
+
 async function closeServer(server) {
   if (!server || !server.listening) return;
   await new Promise((resolve, reject) => server.close((error) => (
@@ -193,7 +196,7 @@ async function assertCleanSignalExit({ t, fixture, command, signal, request }) {
   const exit = childExit(command.child);
   command.child.kill(signal);
   assert.deepEqual(await exit, {
-    code: signal === 'SIGINT' ? 130 : 143,
+    code: REVIEW_SIGNAL_EXIT_CODES[signal],
     signal: null,
   });
   request.destroy();
@@ -217,7 +220,7 @@ async function assertCleanSignalExit({ t, fixture, command, signal, request }) {
   const retryExit = childExit(retry.child);
   retry.child.kill(signal);
   assert.deepEqual(await retryExit, {
-    code: signal === 'SIGINT' ? 130 : 143,
+    code: REVIEW_SIGNAL_EXIT_CODES[signal],
     signal: null,
   });
 }
@@ -287,10 +290,8 @@ test('review CLI reports only the secure handoff path for manual opening', () =>
 });
 
 test('review CLI signal handlers close the server, remove handoff and restore listeners', async (t) => {
-  for (const { signal, exitCode } of [
-    { signal: 'SIGINT', exitCode: 130 },
-    { signal: 'SIGTERM', exitCode: 143 },
-  ]) {
+  for (const signal of Object.keys(REVIEW_SIGNAL_EXIT_CODES)) {
+    const exitCode = REVIEW_SIGNAL_EXIT_CODES[signal];
     await t.test(signal, async (signalTest) => {
       const { projectDir } = makeReviewProject(signalTest);
       const handoffDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'automontage-review-signal-'));
@@ -319,8 +320,9 @@ test('review CLI signal handlers close the server, remove handoff and restore li
         abortActiveImport: () => preexistingSignals.push('abort-import'),
       });
       signalTest.after(restore);
-      assert.equal(processLike.listenerCount('SIGINT'), signal === 'SIGINT' ? 2 : 1);
-      assert.equal(processLike.listenerCount('SIGTERM'), signal === 'SIGTERM' ? 2 : 1);
+      for (const other of Object.keys(REVIEW_SIGNAL_EXIT_CODES)) {
+        assert.equal(processLike.listenerCount(other), other === signal ? 2 : 1);
+      }
 
       processLike.emit(signal);
 
@@ -329,7 +331,9 @@ test('review CLI signal handlers close the server, remove handoff and restore li
       assert.equal(fs.existsSync(session.handoffPath), false);
       assert.deepEqual(preexistingSignals, [signal, 'abort-import']);
       assert.deepEqual(processLike.listeners(signal), [preexistingListener]);
-      assert.equal(processLike.listenerCount(signal === 'SIGINT' ? 'SIGTERM' : 'SIGINT'), 0);
+      for (const other of Object.keys(REVIEW_SIGNAL_EXIT_CODES)) {
+        if (other !== signal) assert.equal(processLike.listenerCount(other), 0);
+      }
       restore();
       assert.deepEqual(processLike.listeners(signal), [preexistingListener]);
       processLike.removeListener(signal, preexistingListener);
@@ -450,7 +454,7 @@ test('real review CLI waits for partial-upload cleanup before signal exit', {
   skip: process.platform === 'win32' ? 'POSIX signal lifecycle' : false,
   timeout: 45_000,
 }, async (t) => {
-  for (const signal of ['SIGINT', 'SIGTERM']) {
+  for (const signal of Object.keys(REVIEW_SIGNAL_EXIT_CODES)) {
     await t.test(signal, async (signalTest) => {
       const fixture = makeReviewProject(signalTest);
       const command = await startRealReviewCommand(signalTest, fixture);
@@ -477,7 +481,7 @@ test('real review CLI waits for real ffmpeg cleanup before signal exit', {
   timeout: 60_000,
 }, async (t) => {
   const video = fs.readFileSync(path.join(ROOT, 'examples', 'demo-preview.mp4'));
-  for (const signal of ['SIGINT', 'SIGTERM']) {
+  for (const signal of Object.keys(REVIEW_SIGNAL_EXIT_CODES)) {
     await t.test(signal, async (signalTest) => {
       const fixture = makeReviewProject(signalTest);
       const command = await startRealReviewCommand(signalTest, fixture);
@@ -503,7 +507,7 @@ test('public review wrapper forwards signals and waits for child import cleanup'
   skip: process.platform === 'win32' ? 'POSIX signal lifecycle' : false,
   timeout: 45_000,
 }, async (t) => {
-  for (const signal of ['SIGINT', 'SIGTERM']) {
+  for (const signal of Object.keys(REVIEW_SIGNAL_EXIT_CODES)) {
     await t.test(signal, async (signalTest) => {
       const fixture = makeReviewProject(signalTest);
       const command = await startRealReviewCommand(signalTest, fixture, { publicCommand: true });

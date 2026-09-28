@@ -299,8 +299,12 @@ function buildLayerManifest(layerDir) {
   try {
     return kitCore.buildManifest(kitCore.compilePlan(mod.buildPlan, mod.ctx));
   } catch (error) {
-    // Не только Error: геттер в объекте плана, который читает compileLayer, может бросить что угодно.
-    throw layerError(name, root, error?.message ?? String(error), error, error?.cause);
+    // compilePlan уже оборачивает провал самого buildPlan в понятный Error («src/plan.js упал при
+    // построении плана — …»). А геттер в возвращённом объекте плана, который читает дальнейшая
+    // компиляция (compileLayer), может бросить что угодно, не только Error, — это уже не «упал при
+    // построении», а бросок уже после: отдельная человеческая фраза вместо голого текста значения.
+    const text = error instanceof Error ? error.message : `src/plan.js бросил ${String(error)} при компиляции плана`;
+    throw layerError(name, root, text, error, error?.cause);
   }
 }
 
