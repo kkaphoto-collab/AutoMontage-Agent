@@ -48,7 +48,7 @@ function help() {
                                       импорт проверенного слоя
   automontage layer brief --project-dir <p> --asset <ref> …
                                       draft brief со слоем на весь ролик
-  automontage layer --help           все команды layer (new/words/check/render/import/brief/stock/sheet)
+  automontage layer --help            все команды layer (new/words/check/render/import/brief/stock/sheet)
   automontage master --project-dir . --edit edit/v02-source.json
                                       собрать новую source-ревизию без повторного Whisper
   automontage master --project-dir . --edit edit/v02-takes.json

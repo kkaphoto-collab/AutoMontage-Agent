@@ -6,10 +6,21 @@ const { hashFile, writeJsonAtomic } = require('../pult/files');
 
 const LAYER_NAME = /^motion-v\d{2,3}$/u;
 
+// Ошибки называют флаг или файл: голые ENOENT с lstat и SyntaxError без имени файла не говорят, что чинить.
 function projectFrom(options) {
   if (!options['project-dir']) throw new Error('нужен --project-dir');
   const projectDir = path.resolve(options['project-dir']);
-  const manifest = readProjectManifest(projectDir);
+  if (!fs.statSync(projectDir, { throwIfNoEntry: false })?.isDirectory()) {
+    throw new Error(`--project-dir ${options['project-dir']}: папка не найдена`);
+  }
+  let manifest;
+  try {
+    manifest = readProjectManifest(projectDir);
+  } catch (error) {
+    if (error instanceof SyntaxError) throw new Error(`project.json: неверный JSON (${error.message})`);
+    if (String(error?.message).startsWith('project.json')) throw error;
+    throw new Error(`project.json: ${error?.message ?? String(error)}`);
+  }
   const sourcePath = resolveProjectPath(projectDir, manifest.source.localPath, { label: 'manifest.source.localPath', mustExist: true, type: 'file' });
   return { projectDir, manifest, sourcePath };
 }
@@ -24,7 +35,7 @@ function resolveLayer(options) {
   const name = options.layer;
   if (!LAYER_NAME.test(name || '')) throw new Error('--layer должен быть вида motion-v01');
   if (!fs.existsSync(path.join(project.projectDir, name))) {
-    throw new Error(`папка слоя ${name} не найдена — создайте: automontage layer new --project-dir <p>`);
+    throw new Error(`папка слоя ${name} не найдена — создайте: automontage layer new --project-dir ${project.projectDir}`);
   }
   let layerDir;
   try {

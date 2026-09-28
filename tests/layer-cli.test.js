@@ -5,10 +5,11 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { main, parseArgs } = require('../scripts/layer/cli');
+const { HELP, main, parseArgs } = require('../scripts/layer/cli');
 const {
-  nextLayerName, readJson, readLayerJson, relative, resolveLayer, sha256File, writeJson,
+  nextLayerName, projectFrom, readJson, readLayerJson, relative, resolveLayer, sha256File, writeJson,
 } = require('../scripts/layer/common');
+const { hashFile } = require('../scripts/pult/files');
 const { createOrOpenProject } = require('../scripts/project/workspace');
 
 const cli = path.resolve(__dirname, '../scripts/cli.js');
@@ -98,6 +99,35 @@ test('parseArgs rejects --flag=value with a hint, but keeps a leading-dash value
   assert.deepEqual(parseArgs(['--music-gain-db', '-16'], flags), { 'music-gain-db': '-16' });
 });
 
+test('parseArgs checks the key before = first: unknown key, bool flag and an empty value get their own message', () => {
+  const flags = { 'project-dir': 'value', wait: 'bool' };
+  // Неизвестный ключ — та же ошибка, что без =, а не совет «пишите --nope 1».
+  assert.throws(() => parseArgs(['--nope=1'], flags), (error) => {
+    assert.equal(error.message, 'неизвестный флаг --nope');
+    return true;
+  });
+  // Булев флаг значения не принимает вовсе — совет «пишите --wait 1» был бы неверным.
+  assert.throws(() => parseArgs(['--wait=1'], flags), (error) => {
+    assert.equal(error.message, 'флаг --wait без значения');
+    return true;
+  });
+  assert.throws(() => parseArgs(['--wait='], flags), /флаг --wait без значения/);
+  // Пустое значение после = — подсказка без двойного пробела.
+  assert.throws(() => parseArgs(['--project-dir='], flags), (error) => {
+    assert.equal(error.message, 'пишите --project-dir <значение> (без =)');
+    assert.doesNotMatch(error.message, / {2}/);
+    return true;
+  });
+});
+
+test('parseArgs reports help only at a flag position: -h right after a value flag is its value', () => {
+  const flags = { title: 'value', wait: 'bool' };
+  assert.deepEqual(parseArgs(['--title', '-h'], flags), { title: '-h' });
+  assert.equal(parseArgs(['--title', 'T', '-h'], flags), HELP);
+  assert.equal(parseArgs(['--wait', '-h'], flags), HELP);
+  assert.equal(parseArgs(['--help'], flags), HELP);
+});
+
 test('main() treats --help/-h anywhere in argv as the top-level usage, without touching subcommand modules', async () => {
   const outputs = [];
   const original = console.log;
@@ -111,6 +141,34 @@ test('main() treats --help/-h anywhere in argv as the top-level usage, without t
     console.log = original;
   }
   assert.equal(outputs.length, 3);
+  for (const out of outputs) assert.match(out, /usage: automontage layer/);
+});
+
+test('main() does not take a -h value for help, but a standalone --help still wins', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'automontage-layer-help-cmd-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'title-cmd.js');
+  fs.writeFileSync(file, `
+    module.exports = {
+      FLAGS: { title: 'value', wait: 'bool' },
+      async run(options) { module.exports.seen = options; return 0; },
+    };
+  `);
+  const outputs = [];
+  const original = console.log;
+  console.log = (...args) => outputs.push(args.join(' '));
+  try {
+    // «-h» — значение --title: подкоманда получает заголовок, помощь не печатается.
+    assert.equal(await main(['brief', '--title', '-h'], { commands: { brief: file } }), 0);
+    assert.deepEqual(require(file).seen, { title: '-h' });
+    assert.equal(outputs.length, 0);
+    // После булева флага -h стоит на месте флага — это помощь.
+    assert.equal(await main(['brief', '--wait', '-h'], { commands: { brief: file } }), 0);
+    assert.equal(await main(['brief', '--title', 'T', '--help'], { commands: { brief: file } }), 0);
+  } finally {
+    console.log = original;
+  }
+  assert.equal(outputs.length, 2);
   for (const out of outputs) assert.match(out, /usage: automontage layer/);
 });
 
@@ -147,7 +205,8 @@ test('the real CLI promotes a gate-command router failure to exit 2 through scri
     assert.equal(result.status, 2, result.stderr);
     assert.match(result.stderr, new RegExp(`❌ layer ${command} отменён`));
   }
-  // 'import'/'brief' остаются обычными командами: неизвестный флаг там — код 1, а не 2.
+  // У остальных команд отчёта нет, поэтому любой отказ роутера — код 1, а не 2. Модуля import ещё нет
+  // (Task 35): здесь отказ — «Cannot find module», а не неизвестный флаг; код от этого не зависит.
   const other = run('layer', 'import', '--bogus');
   assert.equal(other.status, 1, other.stderr);
   assert.match(other.stderr, /❌ layer import отменён/);
@@ -161,6 +220,8 @@ test('sha256File streams the file in chunks and matches crypto over its bytes', 
   fs.writeFileSync(file, bytes);
   const expected = crypto.createHash('sha256').update(bytes).digest('hex');
   assert.equal(sha256File(file), expected);
+  // Потоковое чтение кусками — это hashFile пульта, а не своя копия, читающая файл целиком.
+  assert.equal(sha256File, hashFile);
 });
 
 test('readJson names the file in a broken-JSON error, using a custom label when given', (t) => {
@@ -244,7 +305,13 @@ test('resolveLayer gives a friendly message for a missing layer and wraps other 
 
   assert.throws(
     () => resolveLayer({ 'project-dir': projectDir, layer: 'motion-v99' }),
-    /папка слоя motion-v99 не найдена — создайте: automontage layer new/,
+    (error) => {
+      assert.match(error.message, /папка слоя motion-v99 не найдена — создайте: automontage layer new/);
+      // Подсказка готова к копированию: настоящая папка проекта, а не заглушка <p>.
+      assert.ok(error.message.endsWith(`--project-dir ${projectDir}`), error.message);
+      assert.doesNotMatch(error.message, /<p>/);
+      return true;
+    },
   );
 
   fs.writeFileSync(path.join(projectDir, 'motion-v03'), 'x');
@@ -287,6 +354,38 @@ test('nextLayerName is the highest existing number + 1 and never reuses one, eve
 
   fs.symlinkSync(path.join(dir, 'nope'), path.join(dir, 'motion-v05'));
   assert.equal(nextLayerName(dir), 'motion-v06');
+});
+
+test('projectFrom names the flag for a missing project folder and the file for a broken project.json', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'automontage-layer-project-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const missing = path.join(dir, 'no-such-project');
+  assert.throws(() => projectFrom({ 'project-dir': missing }), (error) => {
+    assert.equal(error.message, `--project-dir ${missing}: папка не найдена`);
+    return true;
+  });
+  const file = path.join(dir, 'plain-file');
+  fs.writeFileSync(file, 'x');
+  assert.throws(() => projectFrom({ 'project-dir': file }), /--project-dir .*plain-file: папка не найдена/);
+
+  const { projectDir } = makeProjectFixture(t);
+  assert.equal(projectFrom({ 'project-dir': projectDir }).projectDir, projectDir);
+  fs.writeFileSync(path.join(projectDir, 'project.json'), '{"version": 1,');
+  assert.throws(() => projectFrom({ 'project-dir': projectDir }), /^Error: project\.json: неверный JSON \(/);
+  fs.writeFileSync(path.join(projectDir, 'project.json'), '{"version": 1}');
+  assert.throws(() => projectFrom({ 'project-dir': projectDir }), /^Error: project\.json: /);
+  fs.rmSync(path.join(projectDir, 'project.json'));
+  assert.throws(() => projectFrom({ 'project-dir': projectDir }), /^Error: project\.json не найден/);
+});
+
+test('top-level help lines keep one description column, including automontage layer --help', () => {
+  const lines = run('--help').stdout.split('\n');
+  const column = (prefix) => {
+    const line = lines.find((item) => item.startsWith(prefix));
+    assert.ok(line, prefix);
+    return line.slice(prefix.length).search(/\S/) + prefix.length;
+  };
+  assert.equal(column('  automontage layer --help'), column('  automontage --help'));
 });
 
 test('relative uses forward slashes for a nested layer path', () => {

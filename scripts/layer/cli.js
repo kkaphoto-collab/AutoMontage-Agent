@@ -22,17 +22,24 @@ const COMMANDS = Object.freeze({
 // У остальных команд отчёта нет вовсе, поэтому их ошибки остаются кодом 1.
 const GATE_COMMANDS = new Set(['check', 'render']);
 
+// Помощь на месте флага: parseArgs возвращает этот маркер вместо options.
+const HELP = Symbol('help');
+const isHelp = (token) => token === '--help' || token === '-h';
+
 function parseArgs(argv, flags) {
   const options = {};
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
+    if (isHelp(flag)) return HELP;
     if (!flag.startsWith('--')) throw new Error(`лишний аргумент «${flag}»`);
     const eq = flag.indexOf('=');
+    const key = flag.slice(2, eq === -1 ? undefined : eq);
+    if (!Object.hasOwn(flags, key)) throw new Error(`неизвестный флаг --${key}`);
     if (eq !== -1) {
-      throw new Error(`пишите --${flag.slice(2, eq)} ${flag.slice(eq + 1)} (без =)`);
+      if (flags[key] === 'bool') throw new Error(`флаг --${key} без значения`);
+      const value = flag.slice(eq + 1);
+      throw new Error(`пишите --${key} ${value === '' ? '<значение>' : value} (без =)`);
     }
-    const key = flag.slice(2);
-    if (!Object.hasOwn(flags, key)) throw new Error(`неизвестный флаг ${flag}`);
     if (Object.hasOwn(options, key)) throw new Error(`флаг ${flag} повторяется`);
     if (flags[key] === 'bool') {
       options[key] = true;
@@ -51,9 +58,10 @@ function parseArgs(argv, flags) {
 async function main(argv = process.argv.slice(2), { commands = COMMANDS } = {}) {
   // Ошибка plan.js покажет строку src/plan.js, а не строку бандла (Task 19).
   process.setSourceMapsEnabled(true);
-  // --help/-h где угодно в argv — не только первым токеном: `layer new --project-dir p --help`
-  // не должен требовать модуль new.js (пока не реализован) только чтобы показать помощь.
-  if (argv.includes('--help') || argv.includes('-h')) {
+  // Помощь видна без модуля подкоманды (`layer new --project-dir p --help` не требует new.js), но только
+  // на месте флага: `--help` значением быть не может (значения с -- отклоняются), а `-h` сразу после
+  // --флага может оказаться его значением (`--title -h`) — такой случай решает parseArgs по FLAGS модуля.
+  if (argv.some((token, i) => token === '--help' || (token === '-h' && !(argv[i - 1] || '').startsWith('--')))) {
     console.log(USAGE);
     return 0;
   }
@@ -68,7 +76,12 @@ async function main(argv = process.argv.slice(2), { commands = COMMANDS } = {}) 
   }
   try {
     const mod = require(commands[command]);
-    const code = await mod.run(parseArgs(rest, mod.FLAGS));
+    const options = parseArgs(rest, mod.FLAGS);
+    if (options === HELP) {
+      console.log(USAGE);
+      return 0;
+    }
+    const code = await mod.run(options);
     if (!Number.isInteger(code)) {
       throw new Error(`подкоманда вернула не код возврата: ${String(code)}`);
     }
@@ -83,4 +96,4 @@ async function main(argv = process.argv.slice(2), { commands = COMMANDS } = {}) 
 
 if (require.main === module) main().then((code) => { process.exitCode = code; });
 
-module.exports = { USAGE, main, parseArgs };
+module.exports = { HELP, USAGE, main, parseArgs };
