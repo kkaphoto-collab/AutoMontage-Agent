@@ -164,6 +164,28 @@ test('a failed rename cleans up its temp file instead of littering qa/', (t) => 
   assert.deepEqual(left.filter((name) => name.endsWith('.tmp') || name.includes('.tmp-')), []);
 });
 
+// Тот же приём, но сбой в другой точке: writeFileSync может успеть частично записать временный
+// файл (диск переполнился на середине, антивирус прервал запись) и только потом бросить — временный
+// файл должен исчезнуть точно так же, как при сбое renameSync, а не остаться битым мусором в qa/.
+test('a writeFileSync that writes a partial temp file and then throws also cleans it up', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-report-atomic-write-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const report = buildReport({ kind: 'layer-check', profile: 'avatar', gates: [] });
+  const brokenFileSystem = {
+    mkdirSync: fs.mkdirSync.bind(fs),
+    writeFileSync: (file, text, options) => {
+      // Реально пишем на диск только часть текста — временный файл существует, когда бросаем.
+      fs.writeFileSync(file, String(text).slice(0, 3), options);
+      throw new Error('диск переполнен');
+    },
+    renameSync: fs.renameSync.bind(fs),
+    rmSync: fs.rmSync.bind(fs),
+  };
+  assert.throws(() => writeReport(dir, 'layer-motion-v01-check', report, brokenFileSystem), /диск переполнен/);
+  const left = fs.readdirSync(path.join(dir, 'qa'));
+  assert.deepEqual(left.filter((name) => name.includes('.tmp-')), []);
+});
+
 test('gate() rejects a status outside pass/warn/fail/waived/skipped', () => {
   assert.throws(() => gate('G2', 'x', { status: 'weird' }), /status должен быть одним из/);
 });
@@ -193,7 +215,11 @@ test('formatReport shows only 3 spans and points at the full JSON report for the
   const text = formatReport(buildReport({ kind: 'preview', profile: 'avatar', gates: [gate('G1', 'x', { status: 'fail', spans })] }));
   assert.match(text, /n1[\s\S]*n2[\s\S]*n3/);
   assert.doesNotMatch(text, /n4/);
-  assert.match(text, /…и ещё 1 — полный список в qa\/<имя>\.json/);
+  // Раньше здесь печатался буквальный плейсхолдер «qa/<имя>.json»: formatReport не знает
+  // настоящего имени файла (его выбирает writeReport), печатать выдуманный путь — вводить в
+  // заблуждение. Указываем на JSON-отчёт рядом, не называя файл, которого formatReport не видел.
+  assert.doesNotMatch(text, /qa\/<имя>\.json/);
+  assert.match(text, /…и ещё 1 — полный список в JSON-отчёте рядом/);
 });
 
 // Мутационная проверка: подсказка не должна печататься для pass — иначе pass-гейт с заметкой

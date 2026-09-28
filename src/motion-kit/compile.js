@@ -10,13 +10,14 @@ const ITEM_KINDS = ['text', 'card', 'media'];
 // tests/motion-kit-compile.test.js. Не импортируем profiles.js напрямую: kit — ESM-слой, который
 // грузят и Remotion, и Node-манифест без CLI-инструментов гейтов, а profiles.js — CommonJS-часть
 // именно гейтовой обвязки, заводить между ними прямую зависимость незачем.
-export const WAIVABLE_GATES = ['G1', 'G4', 'G11'];
+export const WAIVABLE_GATES = Object.freeze(['G1', 'G4', 'G11']);
 
 // Автор плана — не гейт, а человек: битый waiver (не тот gate, пустая причина, объект вместо
 // массива) должен упасть сразу на layer check понятной русской строкой, а не тихо остаться
-// неприменённым или уронить applyWaivers TypeError'ом на форме входа.
+// неприменённым или уронить applyWaivers TypeError'ом на форме входа. null принимаем как отсутствие
+// поля: `waivers: null` — обычная запись «исключений нет» в сериализованном плане, не опечатка.
 function compileWaivers(waivers) {
-  if (waivers === undefined) return [];
+  if (waivers === undefined || waivers === null) return [];
   if (!Array.isArray(waivers)) throw new Error('waivers должен быть массивом {gate, reason}');
   return waivers.map((w, i) => {
     const okGate = WAIVABLE_GATES.includes(w?.gate);

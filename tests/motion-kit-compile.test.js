@@ -171,6 +171,20 @@ test('compileLayer keeps the same waivable gate list as scripts/qa/profiles.js W
   assert.deepEqual(kit.WAIVABLE_GATES, [...WAIVABLE]);
 });
 
+// Ревью Task 20 (Step 0 задачи 21): один и тот же список гейтов не должен незаметно расшириться —
+// ни plan.js, ни applyWaivers не имеют причины его менять.
+test('WAIVABLE_GATES is frozen, so nothing can silently widen the waivable gate list', () => {
+  assert.ok(Object.isFrozen(kit.WAIVABLE_GATES));
+});
+
+// plan.js без исключений часто пишет `waivers: null`, а не опускает поле вовсе (JSON.stringify
+// плана, дефолт схемы) — compileWaivers должен принимать null точно так же, как undefined, а не
+// падать на Array.isArray(null) === false с невнятным «waivers должен быть массивом».
+test('compileLayer treats waivers: null the same as an omitted field, not as a malformed entry', () => {
+  const layer = kit.compileLayer({ ...plan, waivers: null }, cfg);
+  assert.deepEqual(layer.waivers, []);
+});
+
 test('compilePlan rejects an async buildPlan without leaving an unhandled rejection', async () => {
   const unhandled = [];
   const onUnhandled = (reason) => unhandled.push(reason);

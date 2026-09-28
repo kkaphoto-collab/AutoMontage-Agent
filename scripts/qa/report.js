@@ -82,7 +82,9 @@ function formatReport(report) {
     const threshold = g.threshold == null ? '' : ` (порог ${typeof g.threshold === 'number' ? number(g.threshold) : g.threshold})`;
     lines.push(`${ICONS[g.status]} ${g.id} ${g.title}${value}${threshold}`);
     for (const span of g.spans.slice(0, 3)) lines.push(`   ${clock(span.fromSec)}–${clock(span.toSec)} ${span.note || ''}`.trimEnd());
-    if (g.spans.length > 3) lines.push(`   …и ещё ${g.spans.length - 3} — полный список в qa/<имя>.json`);
+    // Настоящее имя JSON-файла выбирает writeReport, а не formatReport — здесь нечего подставить
+    // вместо него, кроме выдуманного плейсхолдера. Указываем на файл рядом, не называя его.
+    if (g.spans.length > 3) lines.push(`   …и ещё ${g.spans.length - 3} — полный список в JSON-отчёте рядом`);
     if (g.hint && g.status !== 'pass') lines.push(`   → ${g.hint}`);
   }
   return lines.join('\n');
