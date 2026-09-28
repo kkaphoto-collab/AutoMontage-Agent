@@ -1552,6 +1552,29 @@ test('REAL KIT: the reviewer\'s typical drop (whoosh at 5.5 s dropped for an imp
   assert.match(s.note, /kit убрал заметный звук whoosh-in — конфликт с impact-low/);
 });
 
+// Шаг 0 ревью задачи 24, п.3: conflictWith в cues.dropped — служебный id оставшегося звука
+// (`impact-low@153#0`), сам по себе он ничего не говорит автору без расшифровки формата kit.
+// Ищем этот id среди cues.kept и показываем понятное имя и время удара вместо сырой строки.
+test('a dropped notable cue names the conflicting sound by its own name and hit time, not the raw id', () => {
+  const kept = [{ id: 'impact-low@153#0', name: 'impact-low', startFrame: 153, hitFrame: 153, notable: true, bed: false }];
+  const dropped = [{ id: 'whoosh-in@148#0', name: 'whoosh-in', hitFrame: 148, notable: true, conflictWith: 'impact-low@153#0', reason: 'notable-gap' }];
+  const g = gateSfxDensity(manifestFixture({ cues: { kept, dropped } }), avatar);
+  const s = g.spans.find((sp) => sp.note.includes('whoosh-in'));
+  assert.ok(s, JSON.stringify(g.spans));
+  assert.match(s.note, /kit убрал заметный звук whoosh-in — конфликт с impact-low \(6,12 с\)/);
+});
+
+// Ручная правка manifest.json может оставить conflictWith, для которого в kept уже нет записи
+// (например тот звук сам переименован или убран другим путём) — гейт откатывается на сырой id,
+// а не падает и не показывает пустое место вместо причины.
+test('an unresolved conflictWith id falls back to the raw id instead of crashing or going blank', () => {
+  const dropped = [{ id: 'whoosh-in@50#0', name: 'whoosh-in', hitFrame: 50, notable: true, conflictWith: 'ghost-sound@999#9', reason: 'notable-gap' }];
+  const g = gateSfxDensity(manifestFixture({ cues: { kept: [cue(55, true, 'impact-low')], dropped } }), avatar);
+  const s = g.spans.find((sp) => sp.note.includes('whoosh-in'));
+  assert.ok(s, JSON.stringify(g.spans));
+  assert.match(s.note, /kit убрал заметный звук whoosh-in — конфликт с ghost-sound@999#9/);
+});
+
 // Ревью задачи 24 (п.1): не-заметный дроп сам по себе гейт не проваливает — остаётся информационной
 // подсказкой при статусе pass. Числа dropped(2) и kept(3) намеренно разные — мутант, путающий
 // dropped.length с kept.length, должен на этом провалиться.
@@ -1578,6 +1601,17 @@ test('the hint text names the dominant issue kind: edge fade vs plain pair crowd
   assert.equal(edgeOnly.status, 'warn');
   assert.match(edgeOnly.hint, /движок глушит первые\/последние доли секунды слоя/);
   assert.notEqual(edgeOnly.hint, 'разнесите звуки по времени');
+});
+
+// Шаг 0 ревью задачи 24, п.1: тот же условие `startIssues.length || endIssues.length` собирает и
+// одиночный END-край — без отдельного пина мутант, проверяющий только startIssues, прошёл бы мимо
+// всех остальных тестов (все они либо про пары, либо про начало слоя). fps=25, seconds=10 →
+// durationInFrames=250, fadeFrames=3, порог конца — 247 (см. «the end-of-layer fade rule…» выше).
+test('the hint text also names the edge-fade cause for an end-edge-only issue, not "разнесите звуки"', () => {
+  const endOnly = gateSfxDensity(manifestFixture({ cues: { kept: [cue(247)], dropped: [] } }), avatar);
+  assert.equal(endOnly.status, 'warn');
+  assert.match(endOnly.hint, /движок глушит первые\/последние доли секунды слоя/);
+  assert.notEqual(endOnly.hint, 'разнесите звуки по времени');
 });
 
 // Ревью задачи 24 (п.4): порог строится из значений профиля через fmt и упоминает край слоя, а не
@@ -1663,6 +1697,10 @@ test('assertInserts refuses a non-array, a missing id/kind, or non-finite from/t
   assert.throws(() => assertInserts({ inserts: [{ id: 'a', from: 0, to: 10 }] }),
     /манифест повреждён: inserts\[0\] \(a\)\.kind должен быть непустой строкой/);
   assert.throws(() => assertInserts({ inserts: [{ id: 'a', kind: 'stock', from: NaN, to: 10 }] }),
+    /манифест повреждён: inserts\[0\] \(a\)\.from\/to должны быть конечными числами/);
+  // Шаг 0 ревью задачи 24, п.1: `from` уже пинован выше — `to` та же проверка (`||`), но своим
+  // пином не была закрыта; мутант, заменивший `||` на `&&`, пропустил бы NaN именно в `to`.
+  assert.throws(() => assertInserts({ inserts: [{ id: 'a', kind: 'stock', from: 0, to: NaN }] }),
     /манифест повреждён: inserts\[0\] \(a\)\.from\/to должны быть конечными числами/);
   assert.doesNotThrow(() => assertInserts({ inserts: [{ id: 'a', kind: 'stock', from: 0, to: 10 }] }));
   assert.doesNotThrow(() => assertInserts({ inserts: [] }));

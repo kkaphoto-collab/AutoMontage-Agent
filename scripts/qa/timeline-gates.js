@@ -547,23 +547,23 @@ function gateSfxDensity(manifest, profile) {
   const kept = manifest.cues.kept.filter((c) => !c.bed).sort((a, b) => a.hitFrame - b.hitFrame);
 
   // sanity-check «любые/заметные» пары (см. комментарий выше — на реальном выводе kit не срабатывают).
-  // Пары храним по ключу «id-id»: если оба правила нашли РОВНО одну и ту же пару, оставляем запись
-  // с более высоким приоритетом (2 — заметные, строже) вместо второй записи.
+  // Пары храним по ключу «id-id»: если оба правила нашли РОВНО одну и ту же пару, запись должна
+  // остаться от заметного правила (строже). Заметный проход всегда идёт вторым, поэтому простой
+  // перезаписи Map.set достаточно — приоритет и защита от «более слабый перетёр более сильный»
+  // раньше были не нужны (шаг 0 ревью задачи 24, п.2): к моменту заметного прохода более старая
+  // запись по этому ключу может быть только от первого («любые») правила.
   const byPair = new Map();
-  const addPair = (a, b, priority, note) => {
-    const key = `${a.id}\u0000${b.id}`;
-    const existing = byPair.get(key);
-    if (existing && existing.priority >= priority) return;
-    byPair.set(key, { frame: a.hitFrame, priority, item: span(a.hitFrame, b.hitFrame, fps, note) });
+  const addPair = (a, b, note) => {
+    byPair.set(`${a.id}\u0000${b.id}`, { frame: a.hitFrame, item: span(a.hitFrame, b.hitFrame, fps, note) });
   };
   for (let i = 1; i < kept.length; i += 1) {
     const gapSec = (kept[i].hitFrame - kept[i - 1].hitFrame) / fps;
-    if (gapSec < t.minGapSec - 1e-9) addPair(kept[i - 1], kept[i], 1, `звуки через ${fmt(gapSec)} с`);
+    if (gapSec < t.minGapSec - 1e-9) addPair(kept[i - 1], kept[i], `звуки через ${fmt(gapSec)} с`);
   }
   const notable = kept.filter((c) => c.notable);
   for (let i = 1; i < notable.length; i += 1) {
     const gapSec = (notable[i].hitFrame - notable[i - 1].hitFrame) / fps;
-    if (gapSec < t.notableGapSec - 1e-9) addPair(notable[i - 1], notable[i], 2, `заметные звуки через ${fmt(gapSec)} с`);
+    if (gapSec < t.notableGapSec - 1e-9) addPair(notable[i - 1], notable[i], `заметные звуки через ${fmt(gapSec)} с`);
   }
 
   // Движок глушит слой нарастанием/затуханием на sceneFadeSec с обоих концов (src/scenes/
@@ -582,17 +582,24 @@ function gateSfxDensity(manifest, profile) {
 
   // Настоящий сигнал: заметный (notable) дроп получает свой спан на hitFrame убранного звука — без
   // этого автор читает «✅ pass», даже когда kit сам решил убрать конфликтующий заметный звук.
-  const droppedNotable = manifest.cues.dropped.filter((d) => d.notable);
+  // conflictWith — служебный id оставшегося звука (`impact-low@158#0`), автору он ничего не говорит;
+  // ищем его в kept и показываем имя и время удара, а на ручную правку manifest.json без такого id
+  // в kept (шаг 0 ревью задачи 24, п.3) откатываемся на сырой id, а не падаем и не скрываем данные.
+  const dropped = manifest.cues.dropped;
+  const droppedNotable = dropped.filter((d) => d.notable);
+  const conflictLabel = (id) => {
+    const found = kept.find((k) => k.id === id);
+    return found ? `${found.name} (${fmt(found.hitFrame / fps)} с)` : id;
+  };
   const dropIssues = droppedNotable.map((d) => ({
     frame: d.hitFrame,
-    item: span(d.hitFrame, d.hitFrame + 1, fps, `kit убрал заметный звук ${d.name} — конфликт с ${d.conflictWith}`),
+    item: span(d.hitFrame, d.hitFrame + 1, fps, `kit убрал заметный звук ${d.name} — конфликт с ${conflictLabel(d.conflictWith)}`),
   }));
 
   // Хронологический порядок ДО обрезки до пяти: источники нарушений иначе отдали бы пять самых
   // ранних по виду появления в коде, а не по времени на экране.
   const issues = [...byPair.values(), ...startIssues, ...endIssues, ...dropIssues]
     .sort((a, b) => a.frame - b.frame).map((i) => i.item);
-  const droppedOther = manifest.cues.dropped.length - droppedNotable.length;
   const threshold = `любые ≥ ${fmt(t.minGapSec)} с, заметные ≥ ${fmt(t.notableGapSec)} с, `
     + `края слоя ≥ ${fmt(t.sceneFadeSec)} с (движок глушит вход/выход)`;
   const hint = droppedNotable.length
@@ -601,8 +608,11 @@ function gateSfxDensity(manifest, profile) {
       ? (startIssues.length || endIssues.length
         ? 'движок глушит первые/последние доли секунды слоя — перенесите такие звуки подальше от края'
         : 'разнесите звуки по времени')
-      : droppedOther
-        ? `kit убрал ${droppedOther} звук. из-за тесноты; проверьте, что важные остались`
+      // droppedNotable.length здесь всегда 0 (иначе сработала бы первая ветка), поэтому все дропы —
+      // «прочие»: dropped.length целиком, без вычитания уже посчитанного droppedNotable.length
+      // (шаг 0 ревью задачи 24, п.2 — то же мёртвое вычитание нуля, что и в addPair).
+      : dropped.length
+        ? `kit убрал ${dropped.length} звук. из-за тесноты; проверьте, что важные остались`
         : 'звуки в порядке';
   return gate('G9', 'Плотность звуков', {
     status: issues.length ? 'warn' : 'pass', value: kept.length, unit: 'звук.', threshold,
