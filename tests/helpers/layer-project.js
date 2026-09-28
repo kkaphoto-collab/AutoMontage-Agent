@@ -7,7 +7,8 @@
 //
 // Необязательные особые исходники (по умолчанию — обычный 25 fps, звук той же длины, без поворота):
 // fps (число или '30000/1001'), audioSeconds (звук длиннее видео), rotation (90/270 — телефонный
-// .mov с матрицей поворота: кадр хранится size, показывается повёрнутым).
+// .mov с матрицей поворота: кадр хранится size, показывается повёрнутым), audio: false (исходник
+// без звуковой дорожки).
 //
 // root       — временная папка теста (удаляется в t.after), в ней source.mp4 и projects/kit-fixture;
 // projectDir — папка проекта с project.json, input/source.mp4 и transcript/words.json;
@@ -22,14 +23,15 @@ const path = require('node:path');
 const { createOrOpenProject } = require('../../scripts/project/workspace');
 const { runTool } = require('./media-fixtures');
 
-function makeLayerProject(t, { seconds = 6, size = '540x960', fps = 25, audioSeconds = seconds, rotation = 0 } = {}) {
+function makeLayerProject(t, { seconds = 6, size = '540x960', fps = 25, audioSeconds = seconds, rotation = 0, audio = true } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'layer-project-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const encoded = path.join(root, rotation ? 'encoded.mov' : 'source.mp4');
   runTool('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y',
     '-f', 'lavfi', '-i', `testsrc2=s=${size}:r=${fps}:d=${seconds}`,
-    '-f', 'lavfi', '-i', `aevalsrc='0.4*sin(2*PI*220*t)*gt(sin(2*PI*1.3*t),0)':s=48000:d=${audioSeconds}`,
-    ...(audioSeconds > seconds ? [] : ['-shortest']), '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-c:a', 'aac', encoded]);
+    ...(audio ? ['-f', 'lavfi', '-i', `aevalsrc='0.4*sin(2*PI*220*t)*gt(sin(2*PI*1.3*t),0)':s=48000:d=${audioSeconds}`,
+      ...(audioSeconds > seconds ? [] : ['-shortest']), '-c:a', 'aac'] : []),
+    '-pix_fmt', 'yuv420p', '-c:v', 'libx264', encoded]);
   let source = encoded;
   if (rotation) {
     source = path.join(root, 'source.mov');
@@ -45,4 +47,17 @@ function makeLayerProject(t, { seconds = 6, size = '540x960', fps = 25, audioSec
   return { root, projectDir, workspace, sfxDir };
 }
 
-module.exports = { makeLayerProject };
+// Фикстура локальной библиотеки звуков: короткие lavfi-звуки, роль — по имени файла (pop, whoosh, shutter).
+// Тест ставит process.env.AUTOMONTAGE_SFX_DIR = makeSfxLibrary(root) — тогда у шаблона слоя есть звуки
+// (pop титула, затвор скриншота, whoosh стока) и в манифесте появляются cues.kept.
+function makeSfxLibrary(root) {
+  const dir = path.join(root, 'sfx-library');
+  fs.mkdirSync(dir, { recursive: true });
+  for (const [name, seconds] of Object.entries({ pop: 0.15, whoosh: 0.6, shutter: 0.2 })) {
+    runTool('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i',
+      `aevalsrc='0.8*sin(2*PI*900*t)*exp(-8*t)':s=48000:d=${seconds}`, path.join(dir, `${name}.wav`)]);
+  }
+  return dir;
+}
+
+module.exports = { makeLayerProject, makeSfxLibrary };
