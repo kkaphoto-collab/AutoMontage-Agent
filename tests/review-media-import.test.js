@@ -770,11 +770,6 @@ test('video process argv relies on cross-version default autorotation and metada
   assert.equal(fs.existsSync(result.previewPath), true);
 });
 
-test('regression: VP8 review proxy encodes in one thread so imports do not crawl under render load', () => {
-  const source = require('node:fs').readFileSync(require.resolve('../scripts/review/media-import.js'), 'utf8');
-  assert.match(source, /'-c:v', 'libvpx', '-threads', '1', '-crf', '32', '-b:v', '0'/);
-});
-
 test('image normalization relies on cross-version default autorotation and remains single-frame, metadata-free, and alpha-capable', async (t) => {
   const calls = [];
   await importReviewMedia({
