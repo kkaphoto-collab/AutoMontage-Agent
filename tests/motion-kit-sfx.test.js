@@ -45,6 +45,27 @@ test('typing is a bed that lasts as long as the text types and picks the long lo
   assert.deepEqual([cue.name, cue.durationFrames, cue.bed], ['typing-long', 100, true]);
 });
 
+// BAD CASE (ревью Task 30, п.2): бед — зацикленный звук (typing/typing-long), и его самый громкий
+// момент (peakSec) — это случайный акцент цикла, а не «удар», который нужно подвести под старт
+// набора текста. Библиотека реального пакета даёт typing-long peakSec≈10.9 при lengthSec=12 —
+// раньше это утаскивало бы startFrame к frame 300 - round(10.9*25)=573, что клэмпилось до 0, и
+// бед начинал звучать не с той точки цикла, что реально видно на кадре набора текста.
+test('a bed (typing) ignores the sound\'s peakSec as a lead unless leadFrames is explicit', () => {
+  const loudLoopLibrary = { sounds: { 'typing-long': { file: 'sfx/typing-long.wav', lengthSec: 12, peakSec: 10.9 } } };
+  const [cue] = kit.sfxFromItems([{ from: 0, typeFrom: 300, typeTo: 400 }], [],
+    { fps: 25, library: loudLoopLibrary, durationInFrames: 500 });
+  assert.equal(cue.startFrame, 300);
+});
+
+test('an explicit leadFrames on a bed is still honoured (the author asked for it on purpose)', () => {
+  const loudLoopLibrary = { sounds: { 'typing-long': { file: 'sfx/typing-long.wav', lengthSec: 12, peakSec: 10.9 } } };
+  const cues = kit.sfxFromItems(
+    [{ from: 0, typeFrom: 300, typeTo: 400, typeSfx: { name: 'typing-long', leadFrames: 5 } }], [],
+    { fps: 25, library: loudLoopLibrary, durationInFrames: 500 },
+  );
+  assert.equal(cues[0].startFrame, 295);
+});
+
 test('thinning keeps one notable sound per second and 0.3 s between any sounds', () => {
   const cues = kit.sfxFromItems([
     { from: 100, sfx: 'whoosh-in' }, { from: 110, sfx: 'whoosh-in' }, { from: 104, sfx: 'pop' },

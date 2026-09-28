@@ -9,6 +9,13 @@ import { CAPTION_FONT, FONTS, InsertContent, SceneContent } from './scenes.jsx';
 import sfxLibrary from './sfx-library.js';
 import words from './words.js';
 
+// Опечатка в CAPTION_FONT (имя семьи не из FONTS) не должна тихо уйти в Subtitles как
+// несуществующий шрифт: FontLoader никогда не догрузит его и никогда не снимет delayRender —
+// рендер слоя зависнет без единой явной причины. Проверяем один раз при загрузке модуля.
+if (!FONTS.some((face) => face.family === CAPTION_FONT)) {
+  throw new Error(`Root.jsx: CAPTION_FONT «${CAPTION_FONT}» отсутствует среди FONTS слоя (scenes.jsx)`);
+}
+
 // Сток — StockInsert; остальные полноэкранные (cover) вставки — FullscreenReveal с содержимым ролика,
 // иначе спикер уходит под вставку, а кадр остаётся чёрным. Вставку без cover (donor) ролик рисует сам.
 // Другое сочетание kind/cover разошлось бы с манифестом гейтов (G4 читает cover) — стоп.

@@ -44,8 +44,12 @@ export function sfxFromItems(items, extra, { fps, library, durationInFrames }) {
     // leadFrames — в кадрах эталона 25 fps, как и все остальные длительности kit (см. ref25 в
     // time.js/camera.js/motion.js), а не в кадрах композиции — иначе один и тот же plan.js звучит
     // по-разному на разных fps. Math.round без минимума в 1, поэтому leadFrames:0 остаётся 0.
+    // BAD CASE (ревью Task 30, п.2): бед (typing/typing-long) — зацикленный звук; его peakSec —
+    // самый громкий акцент цикла, а не «удар», который нужно подвести под старт элемента. Без
+    // явного leadFrames бед обязан стартовать ровно с hitFrame (набор текста начинается со своей
+    // точки), а не утаскиваться к случайному месту в петле.
     const lead = typeof spec === 'object' && Number.isFinite(spec.leadFrames)
-      ? Math.round((spec.leadFrames * fps) / 25) : Math.round((sound.peakSec || 0) * fps);
+      ? Math.round((spec.leadFrames * fps) / 25) : (bedFrames !== null ? 0 : Math.round((sound.peakSec || 0) * fps));
     const startFrame = Math.max(0, hitFrame - lead);
     const natural = Math.max(1, Math.round(sound.lengthSec * fps));
     const durationFrames = Math.max(1, Math.min(bedFrames ?? natural, natural, durationInFrames - startFrame));

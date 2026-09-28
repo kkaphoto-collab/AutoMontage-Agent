@@ -3,7 +3,7 @@ import { AbsoluteFill, OffthreadVideo, Sequence, staticFile, useVideoConfig } fr
 import { BrowserFrame, REVEAL_FRAMES, ScrollShot, closeWindow, ref25, revealCard } from '@automontage/motion-kit';
 
 // Шрифты ролика — кириллические OFL, свои под тему; Root.jsx только регистрирует их через
-// FontLoader и не выбирает их сам. CAPTION_FONT — тот же список, что и шрифт субтитров.
+// FontLoader и не выбирает их сам. CAPTION_FONT — какая из семей FONTS достаётся субтитрам.
 export const FONTS = [{ family: 'KitOnest', file: 'fonts/Onest.ttf' }, { family: 'KitOswald', file: 'fonts/Oswald.ttf' }];
 export const CAPTION_FONT = 'KitOnest';
 

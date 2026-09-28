@@ -29,6 +29,9 @@ test('template imports only the kit, never another reel or an absolute path', ()
   // FontLoader — гейт: оборачивает весь слой, а не стоит рядом пустым элементом.
   assert.match(root, /<FontLoader faces=\{FONTS\}>[\s\S]*<SpeakerLayer[\s\S]*<Subtitles[\s\S]*<\/FontLoader>/);
   assert.doesNotMatch(root, /<FontLoader[^>]*\/>/);
+  // Шрифты выбирает scenes.jsx (ревью Task 30, п.7): Root.jsx — чистая инфраструктура, без своего
+  // хардкода семьи шрифта или прямого пути к файлу шрифта.
+  assert.doesNotMatch(root, /KitOnest|KitOswald|fonts\//);
   // Одна точка сборки с Node-манифестом layer check (Task 19).
   assert.match(root, /compilePlan\(buildPlan/);
   assert.doesNotMatch(root, /compileLayer/);
@@ -324,8 +327,10 @@ test('a screen insert an agent adds to plan.js hides captions and is drawn throu
   assert.doesNotMatch(inside, /data-kit-text="captions"/);
 });
 
-// Решение D6/README: голос донора продолжается, поэтому субтитры остаются поверх cover-донора —
-// в отличие от screen/scene/stock (пункт выше), где спикер и его речь физически закрыты вставкой.
+// Решение D6/README: donor-вставка рисуется muted (см. InsertContent) — реальный звук, который
+// слышит зритель, остаётся голосом СПИКЕРА в общем миксе слоя, донор его не перебивает. Субтитры
+// поэтому не прячутся под cover-донором — в отличие от screen/scene/stock (пункт выше), где вставка
+// и есть весь кадр и разговор физически визуально закрыт.
 test('a cover donor an agent adds to plan.js keeps captions visible over it — the voice keeps going', (t) => {
   const { layerDir, layer } = makeLayer(t);
   patchPlan(layerDir, 'const inserts = [];',
@@ -336,6 +341,15 @@ test('a cover donor an agent adds to plan.js keeps captions visible over it — 
   const inside = renderRoot(layerDir, layer, donor.from + 10);
   assert.match(inside, /data-kit-bleed="donor-1"/);
   assert.match(inside, /data-kit-text="captions"/, 'голос донора продолжается — субтитры обязаны остаться поверх него');
+});
+
+// Ревью Task 30, п.7: CAPTION_FONT — опечатка в scenes.jsx (имя семьи не из FONTS) не должна тихо
+// уйти в Subtitles как несуществующий шрифт — FontLoader тогда никогда не догрузит его и никогда
+// не снимет delayRender, и рендер слоя просто зависнет без единой явной причины.
+test('Root.jsx refuses to build the layer if CAPTION_FONT names a family missing from FONTS', (t) => {
+  const { layerDir, layer } = makeLayer(t);
+  patchScenes(layerDir, "export const CAPTION_FONT = 'KitOnest';", "export const CAPTION_FONT = 'KitOnestTypo';");
+  assert.throws(() => renderRoot(layerDir, layer, 0), /CAPTION_FONT/);
 });
 
 test('BAD CASE: a stock insert with cover: false cannot slip past G4 — the layer does not compile', (t) => {
