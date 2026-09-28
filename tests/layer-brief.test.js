@@ -40,12 +40,12 @@ test('live profile keeps the engine default ducking and a brief without music st
 
 // Нормализованный слой без Remotion (lavfi) длиной seconds на месте motion-v01/renders/layer-NN.mp4 и
 // проходящий отчёт layer render той же формы, что пишет scripts/layer/render.js, для текущего исходника.
-function renderCheckedLayer(project, { n = 1, seconds = 2 } = {}) {
+function renderCheckedLayer(project, { n = 1, seconds = 2, audio = true } = {}) {
   const name = `layer-${String(n).padStart(2, '0')}.mp4`;
   const file = path.join(project.projectDir, 'motion-v01', 'renders', name);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   runTool('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', `testsrc2=s=540x960:r=25:d=${seconds}`,
-    '-f', 'lavfi', '-i', `sine=frequency=900:duration=${seconds}`, '-shortest', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-c:a', 'aac', file]);
+    ...(audio ? ['-f', 'lavfi', '-i', `sine=frequency=900:duration=${seconds}`, '-shortest', '-c:a', 'aac'] : []), '-pix_fmt', 'yuv420p', '-c:v', 'libx264', file]);
   const inputs = [
     { role: 'layer', path: `motion-v01/renders/${name}`, sha256: sha256File(file) },
     { role: 'source', path: project.workspace.manifest.source.localPath, sha256: sha256File(project.workspace.sourcePath) },
@@ -58,9 +58,9 @@ function renderCheckedLayer(project, { n = 1, seconds = 2 } = {}) {
 }
 
 // Проект с исходником 2 с и импортированным проверенным слоем (layer import) длиной layerSeconds.
-async function layerProject(t, { layerSeconds = 2 } = {}) {
+async function layerProject(t, { layerSeconds = 2, layerAudio = true } = {}) {
   const project = makeLayerProject(t, { seconds: 2 });
-  const layer = renderCheckedLayer(project, { seconds: layerSeconds });
+  const layer = renderCheckedLayer(project, { seconds: layerSeconds, audio: layerAudio });
   await layerImport.run({ 'project-dir': project.projectDir, file: layer.file }, { log: () => {} });
   const [imported] = readRegistry(project.projectDir).imports;
   const logs = [];
@@ -179,4 +179,24 @@ test('a layer shorter than the source (any frame) or longer by more than a frame
       && /создайте новый слой: automontage layer new --project-dir ".+" → layer render → layer import/.test(error.message));
     nothingPublished(p.projectDir);
   }
+});
+
+test('regression: a layer rendered for an earlier source is refused after the source bytes change', { skip: !hasFfmpeg }, async (t) => {
+  const p = await layerProject(t);
+  // Та же длина, другие байты: проверка длины этого не видит — только sha256 исходника из отчёта layer render.
+  const replacement = `${p.workspace.sourcePath}.new.mp4`;
+  runTool('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc=s=540x960:r=25:d=2',
+    '-f', 'lavfi', '-i', 'sine=frequency=300:duration=2', '-shortest', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-c:a', 'aac', replacement]);
+  fs.renameSync(replacement, p.workspace.sourcePath);
+  await assert.rejects(p.run(), /слой собран для другого исходника \(отчёт qa\/layer-motion-v01-render-01\.json\) — создайте новый слой: automontage layer new --project-dir ".+" → layer render → layer import/);
+  nothingPublished(p.projectDir);
+});
+
+test('a layer without an audio track is refused with the layer sound on, and works muted', { skip: !hasFfmpeg }, async (t) => {
+  const p = await layerProject(t, { layerAudio: false });
+  await assert.rejects(p.run(), /в слое нет звука — укажите --audio mute или пересоберите слой со звуками/);
+  nothingPublished(p.projectDir);
+  assert.equal(await p.run({ audio: 'mute' }), 0);
+  const brief = readBrief(p.projectDir, readProjectManifest(p.projectDir).currentBrief);
+  assert.equal(brief.scenes[0].brollMedia.audioMode, 'mute');
 });

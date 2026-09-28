@@ -13,7 +13,9 @@ const { probeVideo } = require('../media-probe');
 const { copyProjectFileNoReplace, createOrOpenProject, publishBriefRevision, resolveProjectPath } = require('../project/workspace');
 const { PROFILES } = require('../qa/profiles');
 const { formatNumber, projectFrom, relative, sha256File } = require('./common');
-const { findByCanonical, findByReference, findRenderReport, layerAsset, renderReportProblem } = require('./registry');
+const {
+  assertReportSource, findByCanonical, findByReference, findRenderReport, layerAsset, renderReportProblem,
+} = require('./registry');
 
 const FLAGS = { 'project-dir': 'value', asset: 'value', title: 'value', 'head-cream': 'value', 'head-orange': 'value',
   audio: 'value', music: 'value', 'music-gain-db': 'value', 'music-start-sec': 'value' };
@@ -51,8 +53,9 @@ function buildLayerBrief({ sourcePath, probe, entry, title, headCream, headOrang
 }
 
 // --asset (ссылка assets/broll/video/…/media.mp4 или sha256 ассета) — слой kit из реестра, чей отчёт layer
-// render (тот же рендер: sha256 и путь во входе «layer») всё ещё целый и пройденный, а сам ассет цел.
-function checkedLayer(projectDir, asset) {
+// render (тот же рендер: sha256 и путь во входе «layer») всё ещё целый, пройденный и собран для текущего
+// исходника, а сам ассет цел.
+function checkedLayer(projectDir, sourcePath, asset) {
   const refuse = (why) => new Error(`ассет не импортирован как проверенный слой (${why}) — сначала automontage layer import `
     + `--project-dir "${projectDir}" --file motion-vNN/renders/layer-NN.mp4`);
   const entry = SHA256.test(asset) ? findByCanonical(projectDir, asset) : findByReference(projectDir, asset);
@@ -65,6 +68,7 @@ function checkedLayer(projectDir, asset) {
   if (!report) throw refuse(`нет отчёта layer render для ${entry.renderFile}`);
   const problem = renderReportProblem(report, { layer: entry.layer });
   if (problem) throw refuse(problem);
+  assertReportSource(report, { projectDir, sourcePath });
   const record = layerAsset(projectDir, entry);
   if (!record || record.mediaKind !== 'video') throw refuse(`ассет ${entry.reference} повреждён или удалён`);
   return { entry, record };
@@ -130,7 +134,9 @@ async function run(options, deps = {}) {
   const gainDb = numberFlag(options, 'music-gain-db');
   const startSec = numberFlag(options, 'music-start-sec') ?? 0;
 
-  const { entry, record } = checkedLayer(projectDir, options.asset);
+  const { entry, record } = checkedLayer(projectDir, sourcePath, options.asset);
+  // Без звуковой дорожки слой с mix preview отверг бы позже (BROLL_MEDIA_AUDIO_REQUIRED).
+  if (audioMode !== 'mute' && record.hasAudio !== true) throw new Error('в слое нет звука — укажите --audio mute или пересоберите слой со звуками');
   const profile = PROFILES[entry.profile];
   const probe = probeVideo(sourcePath);
   assertFullLength({ record, probe, profile, projectDir });

@@ -5,7 +5,7 @@ const path = require('node:path');
 const { readJsonIfExists } = require('../pult/files');
 const { inspectImportedAssetBundle } = require('../review/imported-assets');
 const { summarize } = require('../qa/report');
-const { writeJson } = require('./common');
+const { sha256File, writeJson } = require('./common');
 
 const LABEL = 'qa/layer-imports.json';
 const RENDER_REPORT = /^layer-.+-render-(\d+)\.json$/u;
@@ -117,9 +117,23 @@ function renderReportProblem(report, { layer } = {}) {
   return null;
 }
 
+// Отчёт layer render собран для текущего исходника проекта: sha256 входа «source» равен sha256 исходника сейчас.
+// Старый рендер до замены исходника не проходит; перерендер того же слоя не поможет (layer render откажет в
+// assertLayerSource) — нужен новый слой. Проверяют layer import и layer brief.
+function assertReportSource(report, { projectDir, sourcePath }) {
+  const source = (Array.isArray(report.inputs) ? report.inputs : []).find((input) => input?.role === 'source');
+  if (typeof source?.sha256 !== 'string') {
+    throw new Error(`qa/${report.fileName}: в отчёте нет sha256 исходника — пересоберите: automontage layer render --project-dir "${projectDir}" --layer ${report.layer}`);
+  }
+  if (source.sha256 !== sha256File(sourcePath)) {
+    throw new Error(`слой собран для другого исходника (отчёт qa/${report.fileName}) — создайте новый слой: `
+      + `automontage layer new --project-dir "${projectDir}" → layer render → layer import`);
+  }
+}
+
 // Слой прошёл layer render: целый отчёт без ошибки, итог «пройдено» или «только предупреждения».
 const renderPassed = (report, options) => Boolean(report) && renderReportProblem(report, options) === null;
 
 module.exports = {
-  appendRegistry, findByCanonical, findByReference, findByRender, findRenderReport, layerAsset, readRegistry, renderPassed, renderReportProblem,
+  appendRegistry, assertReportSource, findByCanonical, findByReference, findByRender, findRenderReport, layerAsset, readRegistry, renderPassed, renderReportProblem,
 };

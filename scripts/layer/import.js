@@ -11,8 +11,8 @@ const { openReadOnlyFlags } = require('../filesystem-capabilities');
 const { probeVideo } = require('../media-probe');
 const { VIDEO_MAX_BYTES, createImportController, importReviewMedia } = require('../review/media-import');
 const { runMediaProcess } = require('../review/media-process');
-const { projectFrom, relative, sha256File } = require('./common');
-const { appendRegistry, findByRender, findRenderReport, layerAsset, renderReportProblem } = require('./registry');
+const { projectFrom, relative } = require('./common');
+const { appendRegistry, assertReportSource, findByRender, findRenderReport, layerAsset, renderReportProblem } = require('./registry');
 
 const FLAGS = { 'project-dir': 'value', file: 'value' };
 const HINT = 'motion-vNN/renders/layer-NN.mp4';
@@ -93,14 +93,7 @@ function checkedReport(projectDir, { renderSha256, relativePath, sourcePath, opt
   }
   const problem = renderReportProblem(report, { layer: relativePath.split('/')[0] });
   if (problem) throw new Error(problem);
-  const rerender = `пересоберите: automontage layer render --project-dir "${projectDir}" --layer ${report.layer}`;
-  const source = report.inputs.find((input) => input?.role === 'source');
-  if (typeof source?.sha256 !== 'string') throw new Error(`qa/${report.fileName}: в отчёте нет sha256 исходника — ${rerender}`);
-  // Перерендер того же слоя не поможет: layer render откажет в assertLayerSource — нужен новый слой.
-  if (source.sha256 !== sha256File(sourcePath)) {
-    throw new Error(`слой собран для другого исходника (отчёт qa/${report.fileName}) — создайте новый слой: `
-      + `automontage layer new --project-dir "${projectDir}" → layer render → layer import`);
-  }
+  assertReportSource(report, { projectDir, sourcePath });
   return report;
 }
 
