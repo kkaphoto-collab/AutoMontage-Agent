@@ -319,13 +319,25 @@ function assertTexts(manifest) {
   const texts = manifest && manifest.texts;
   if (!Array.isArray(texts)) throw new Error('манифест повреждён: texts должен быть массивом');
   const isBox = (b) => Array.isArray(b) && b.length === 4 && b.every(Number.isFinite);
+  const isInt = (v) => Number.isFinite(v) && Number.isInteger(v);
   texts.forEach((text, k) => {
     if (!text || typeof text.id !== 'string' || !text.id) {
       throw new Error(`манифест повреждён: texts[${k}] должен иметь строковый id`);
     }
+    // Step 0 задачи 24: from — кадр начала жизни текста, обязан быть конечным целым для ЛЮБОГО
+    // текста (и статичной полосы, и покадрового) — battle-tested места ниже (item.from + i, span())
+    // складывают и делят это число, и дробный/NaN from молча испортил бы весь спан.
+    if (!isInt(text.from)) {
+      throw new Error(`манифест повреждён: texts[${k}] (${text.id}).from должен быть конечным целым числом`);
+    }
     if (text.static !== undefined) {
       if (!isBox(text.static)) {
         throw new Error(`манифест повреждён: texts[${k}] (${text.id}).static должен быть массивом из 4 конечных чисел`);
+      }
+      // until — конец жизни статичной полосы (caption-<n>): обязан быть целым и строго больше from,
+      // иначе спан [from, until) окажется пустым или развёрнутым, а гейт молча ничего не покажет.
+      if (!isInt(text.until) || text.until <= text.from) {
+        throw new Error(`манифест повреждён: texts[${k}] (${text.id}).until должен быть конечным целым числом больше from`);
       }
       return;
     }
@@ -379,6 +391,10 @@ function gateSafeZone(manifest) {
   // её одним элементом в value и в spans, а не по числу кусков (Step 0 задачи 23).
   const captions = found.filter((v) => v.caption);
   const items = found.filter((v) => !v.caption);
+  // Считаем ДО push ниже: items после push всегда содержит хотя бы саму полосу субтитров, если
+  // captions.length — нужно знать, был ли обычный (не-caption) элемент вне зоны ДО этой добавки
+  // (Step 0 задачи 24), иначе подсказка про captions.lane скрывала бы отдельную проблему с items.
+  const hasNonCaptionIssue = items.length > 0;
   if (captions.length) {
     const max = {};
     for (const v of captions) for (const [side, px] of Object.entries(v.max)) max[side] = Math.max(max[side] || 0, px);
@@ -395,9 +411,13 @@ function gateSafeZone(manifest) {
   items.sort((a, b) => a.fromFrame - b.fromFrame);
 
   const note = (v) => `${v.id}: ${Object.entries(v.max).map(([side, px]) => `${SAFE_SIDES[side]} до +${px} px`).join(', ')}`;
+  const captionHint = 'полоса субтитров выходит за safe-зону — поправьте captions.lane или уберите свою lane';
+  const itemHint = 'держите влёт, перелёт и выход внутри safe-зоны: уменьшите сдвиг входа или переставьте box';
+  // Step 0 задачи 24: обе подсказки нужны одновременно, когда в отчёте ОБА вида нарушения — иначе
+  // автор поправит только captions.lane и не узнает, что другой элемент тоже вышел за safe-зону.
   const hint = captions.length
-    ? 'полоса субтитров выходит за safe-зону — поправьте captions.lane или уберите свою lane'
-    : 'держите влёт, перелёт и выход внутри safe-зоны: уменьшите сдвиг входа или переставьте box';
+    ? (hasNonCaptionIssue ? `${captionHint}; ${itemHint}` : captionHint)
+    : itemHint;
   return gate('G5', 'Safe-zone текста', {
     status: items.length ? 'fail' : 'pass', value: items.length, unit: 'элем.',
     threshold: safeZoneThreshold(manifest.width, manifest.height),

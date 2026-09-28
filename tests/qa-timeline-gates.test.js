@@ -1181,21 +1181,45 @@ test('static caption lanes are checked once and pass inside the safe zone', () =
 // делят один и тот же static-прямоугольник captions.lane — это ОДНА структурная проблема разметки,
 // а не N текстов. Схлопываем их в один элемент отчёта «субтитры (полоса)»: value считает её один
 // раз, и подсказка называет причину (captions.lane), а не общий совет про влёт/box.
-// Первый кусок нарушает СИЛЬНЕЕ (+50 px) второго (+30 px) — схлопка обязана взять МАКСИМУМ среди
-// всех кусков, а не последний по порядку (мутант «max[side] = px» вместо Math.max пережил бы тест
-// с одинаковым выходом у обоих кусков).
+// Первый кусок нарушает СЛАБЕЕ (+30 px) второго (+50 px) — схлопка обязана взять МАКСИМУМ среди
+// всех кусков, а не первый по порядку (Step 0 задачи 24: мутант «взять только первый кусок»
+// пережил бы старый порядок, где больший выход случайно совпадал с первым элементом).
 test('caption pieces collapse into a single "субтитры (полоса)" violation, keeping the largest overflow', () => {
   const m = manifestFixture({ texts: [
-    { id: 'caption-1', from: 0, until: 25, static: [20, 1398, 950, 1482] },
-    { id: 'caption-1b', from: 25, until: 50, static: [40, 1398, 950, 1482] },
+    { id: 'caption-1', from: 0, until: 25, static: [40, 1398, 950, 1482] },
+    { id: 'caption-1b', from: 25, until: 50, static: [20, 1398, 950, 1482] },
   ] });
   const g = gateSafeZone(m);
   assert.equal(g.status, 'fail');
   assert.equal(g.value, 1, 'два куска одной и той же полосы считаются одним нарушением');
   assert.equal(g.spans.length, 1);
   assert.deepEqual([g.spans[0].fromSec, g.spans[0].toSec], [0, 2]);
-  assert.match(g.spans[0].note, /субтитры \(полоса\): слева до \+50 px/, 'обязан остаться максимум (+50), а не последний кусок (+30)');
+  assert.match(g.spans[0].note, /субтитры \(полоса\): слева до \+50 px/, 'обязан остаться максимум (+50 из второго куска), а не первый (+30)');
   assert.match(g.hint, /captions\.lane/);
+});
+
+// Step 0 задачи 24: когда в одном отчёте есть И нарушение полосы субтитров, И нарушение обычного
+// элемента, гейт обязан показать ОБЕ подсказки, а не только подсказку про captions.lane — иначе
+// автор поправит полосу и не узнает, что второй текст тоже вышел за safe-зону.
+test('G5 hint joins the caption hint and the item hint when both violation kinds are present', () => {
+  const m = manifestFixture({ texts: [
+    { id: 'caption-1', from: 0, until: 25, static: [20, 1398, 950, 1482] },
+    { id: 'title', from: 0, frames: [[40, 300, 440, 400]] },
+  ] });
+  const g = gateSafeZone(m);
+  assert.equal(g.status, 'fail');
+  assert.equal(g.value, 2, 'полоса субтитров и обычный текст — два разных нарушения');
+  assert.equal(g.hint,
+    'полоса субтитров выходит за safe-зону — поправьте captions.lane или уберите свою lane; '
+    + 'держите влёт, перелёт и выход внутри safe-зоны: уменьшите сдвиг входа или переставьте box');
+});
+
+// Только полоса субтитров нарушена — подсказка про обычный элемент не нужна (соло, без «;»).
+test('G5 hint stays caption-only when no non-caption element is out of the safe zone', () => {
+  const m = manifestFixture({ texts: [{ id: 'caption-1', from: 0, until: 25, static: [20, 1398, 950, 1482] }] });
+  const g = gateSafeZone(m);
+  assert.equal(g.status, 'fail');
+  assert.equal(g.hint, 'полоса субтитров выходит за safe-зону — поправьте captions.lane или уберите свою lane');
 });
 
 // Порог называет геометрию ЭТОГО кадра, а не хардкод: 9:16 1080×1920 и 16:9 1920×1080 отдают разные
@@ -1300,4 +1324,33 @@ test('gateSafeZone refuses a malformed static box and a text missing its frames 
     /манифест повреждён: texts\[0\] \(x\)\.static должен быть массивом из 4 конечных чисел/);
   assert.throws(() => gateSafeZone(manifestFixture({ texts: [{ id: 'x', from: 0 }] })),
     /манифест повреждён: texts\[0\] \(x\)\.frames должен быть массивом/);
+});
+
+// Step 0 задачи 24: `from` — кадр начала, обязан быть конечным целым числом для ЛЮБОГО текста
+// (и статичной полосы, и покадрового). Битый `from` (дробный, NaN, строка, отсутствует) не должен
+// молча пройти мимо overflow() дальше по коду — манифест обязан упасть понятной ошибкой, как и
+// остальные поля texts (Step 0 ревью задачи 23).
+test('gateSafeZone refuses a non-integer or missing `from` on any text', () => {
+  assert.throws(() => gateSafeZone(manifestFixture({ texts: [{ id: 'x', from: 1.5, frames: [] }] })),
+    /манифест повреждён: texts\[0\] \(x\)\.from должен быть конечным целым числом/);
+  assert.throws(() => gateSafeZone(manifestFixture({ texts: [{ id: 'x', from: NaN, frames: [] }] })),
+    /манифест повреждён: texts\[0\] \(x\)\.from должен быть конечным целым числом/);
+  assert.throws(() => gateSafeZone(manifestFixture({ texts: [{ id: 'x', frames: [] }] })),
+    /манифест повреждён: texts\[0\] \(x\)\.from должен быть конечным целым числом/);
+  assert.doesNotThrow(() => gateSafeZone(manifestFixture({ texts: [{ id: 'x', from: 0, frames: [] }] })));
+});
+
+// Step 0 задачи 24: для статичной полосы `until` обязан быть конечным целым числом строго БОЛЬШЕ
+// `from` — ноль или отрицательная длина полосы (испорченный captionSpans) должна быть отловлена
+// здесь же, а не дать безобидный на вид, но бессмысленный спан [from, from) или [from, until<from).
+test('gateSafeZone refuses a static text whose `until` is not a finite integer greater than `from`', () => {
+  assert.throws(() => gateSafeZone(manifestFixture({ texts: [{ id: 'x', from: 10, static: [70, 1398, 950, 1482] }] })),
+    /манифест повреждён: texts\[0\] \(x\)\.until должен быть конечным целым числом больше from/);
+  assert.throws(() => gateSafeZone(manifestFixture({ texts: [{ id: 'x', from: 10, until: 10, static: [70, 1398, 950, 1482] }] })),
+    /манифест повреждён: texts\[0\] \(x\)\.until должен быть конечным целым числом больше from/);
+  assert.throws(() => gateSafeZone(manifestFixture({ texts: [{ id: 'x', from: 10, until: 9, static: [70, 1398, 950, 1482] }] })),
+    /манифест повреждён: texts\[0\] \(x\)\.until должен быть конечным целым числом больше from/);
+  assert.throws(() => gateSafeZone(manifestFixture({ texts: [{ id: 'x', from: 10, until: 10.5, static: [70, 1398, 950, 1482] }] })),
+    /манифест повреждён: texts\[0\] \(x\)\.until должен быть конечным целым числом больше from/);
+  assert.doesNotThrow(() => gateSafeZone(manifestFixture({ texts: [{ id: 'x', from: 10, until: 11, static: [70, 1398, 950, 1482] }] })));
 });

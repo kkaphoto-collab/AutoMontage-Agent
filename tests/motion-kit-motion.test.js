@@ -79,18 +79,27 @@ test('a fully closed mask on its very first frame is not shown (reveal 0), even 
 // Пружина Remotion пересчитывает физику от кадра 0 на каждый вызов (O(кадр) внутри) — без клэмпа
 // кадра (settledFrame) манифест из многих долгоживущих items становится квадратичным по длине
 // (ревью задачи 23). measureSpring() определяет момент оседания (within threshold) — после него
-// клэмпнутый и настоящий кадр обязаны давать один и тот же результат (это чистая оптимизация, а
-// не приближение).
+// клэмпнутый и настоящий кадр обязаны давать визуально тот же результат (разница ≤ 1e-6 px), а не
+// грубое приближение. Step 0 задачи 24 (усиление): раньше проверялись только две точки далеко за
+// оседанием на одном fps — теперь сканируем окно в 50 кадров СРАЗУ после самой точки оседания (где
+// клэмп и настоящий кадр впервые расходятся, если расходятся вообще) на 25 и 60 fps.
 test('the spring clamp used to avoid a quadratic manifest build does not change animOf output for a long-lived item', () => {
-  const { spring } = require('remotion');
-  const longPop = { id: 'p2', kind: 'text', from: 0, until: 100000, box, enter: { kind: 'pop' } };
-  const longFly = { id: 'f2', kind: 'text', from: 0, until: 100000, box, enter: { kind: 'fly', from: [-200, 0] } };
-  for (const [item, config] of [[longPop, kit.SPRINGS.pop], [longFly, kit.SPRINGS.fly]]) {
-    for (const frame of [500, 20000]) {
-      const a = kit.animOf(item, frame, 25);
-      const sp = spring({ frame, fps: 25, config });
-      const expectedS = item === longPop ? 0.5 + 0.5 * sp : 0.92 + 0.08 * sp;
-      assert.ok(Math.abs(a.s - expectedS) < 1e-6, `${item.id} frame ${frame}: s=${a.s} vs unclamped ${expectedS}`);
+  const { spring, measureSpring } = require('remotion');
+  const longPop = { id: 'p2', kind: 'text', from: 0, until: 10000000, box, enter: { kind: 'pop' } };
+  const longFly = { id: 'f2', kind: 'text', from: 0, until: 10000000, box, enter: { kind: 'fly', from: [-200, 0] } };
+  for (const fps of [25, 60]) {
+    for (const [item, config] of [[longPop, kit.SPRINGS.pop], [longFly, kit.SPRINGS.fly]]) {
+      const expectedS = (sp) => (item === longPop ? 0.5 + 0.5 * sp : 0.92 + 0.08 * sp);
+      const settle = measureSpring({ fps, config, threshold: 1e-9 });
+      const frames = [];
+      for (let frame = settle; frame < settle + 50; frame += 1) frames.push(frame);
+      frames.push(settle + 500, settle + 20000);
+      for (const frame of frames) {
+        const a = kit.animOf(item, frame, fps);
+        const sp = spring({ frame, fps, config });
+        assert.ok(Math.abs(a.s - expectedS(sp)) < 1e-6,
+          `${item.id} fps=${fps} frame ${frame}: s=${a.s} vs unclamped ${expectedS(sp)}`);
+      }
     }
   }
 });
