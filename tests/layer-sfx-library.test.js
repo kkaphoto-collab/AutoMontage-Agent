@@ -427,3 +427,81 @@ test('a fresh, not-yet-existing target still copies normally', { skip: !toolAvai
   assert.deepEqual(Object.keys(result.library.sounds), ['pop']);
   assert.deepEqual(fs.readdirSync(target), ['pop.wav']);
 });
+
+// Правило «только пустая папка» закреплено с обеих сторон: любой файл (не только *.wav) — отказ,
+// уже существующая, но пустая папка — обычное копирование.
+test('a target holding only notes.txt is refused and the note is not touched', { skip: !toolAvailable('ffmpeg') }, (t) => {
+  const { lib, target } = tmpDirs(t);
+  fs.mkdirSync(lib, { recursive: true });
+  genPop(lib);
+  fs.mkdirSync(target, { recursive: true });
+  fs.writeFileSync(path.join(target, 'notes.txt'), 'заметка пользователя');
+  const before = snapshotFiles(target);
+  assert.throws(() => copySfxLibrary(lib, target), /не пуста/);
+  assertFilesUnchanged(target, before);
+});
+
+test('an existing empty target copies normally', { skip: !toolAvailable('ffmpeg') }, (t) => {
+  const { lib, target } = tmpDirs(t);
+  fs.mkdirSync(lib, { recursive: true });
+  genPop(lib);
+  fs.mkdirSync(target, { recursive: true });
+  const result = copySfxLibrary(lib, target);
+  assert.deepEqual(Object.keys(result.library.sounds), ['pop']);
+  assert.deepEqual(fs.readdirSync(target), ['pop.wav']);
+});
+
+test('a target path that is an existing file is a Russian error, not a raw EEXIST, and the file survives', { skip: !toolAvailable('ffmpeg') }, (t) => {
+  const { root, lib } = tmpDirs(t);
+  fs.mkdirSync(lib, { recursive: true });
+  genPop(lib);
+  const file = path.join(root, 'sfx');
+  fs.writeFileSync(file, 'не папка');
+  assert.throws(() => copySfxLibrary(lib, file), (error) => {
+    assert.match(error.message, /папка звуков слоя .* — это файл/);
+    assert.doesNotMatch(error.message, /EEXIST/);
+    return true;
+  });
+  assert.equal(fs.readFileSync(file, 'utf8'), 'не папка');
+});
+
+// Гонка между проверкой пустоты и копированием: файл или символическая ссылка, появившиеся в target
+// ПОСЛЕ проверки, не перезаписываются (COPYFILE_EXCL → EEXIST), а уборка не удаляет то, что создал не
+// этот вызов. Момент «после проверки» воспроизводим подменой fs.readdirSync: настоящий ответ
+// (пустой список) возвращается, а файл подкладывается сразу за ним.
+function plantAfterEmptinessCheck(t, target, plant) {
+  const original = fs.readdirSync;
+  let planted = false;
+  t.mock.method(fs, 'readdirSync', (dir, ...rest) => {
+    const result = original.call(fs, dir, ...rest);
+    if (!planted && path.resolve(String(dir)) === path.resolve(target)) {
+      planted = true;
+      plant();
+    }
+    return result;
+  });
+  return () => planted;
+}
+
+test('a file planted in the target after the emptiness check is not overwritten and not deleted', { skip: !toolAvailable('ffmpeg') }, (t) => {
+  const { lib, target } = tmpDirs(t);
+  fs.mkdirSync(lib, { recursive: true });
+  genPop(lib);
+  const planted = plantAfterEmptinessCheck(t, target, () => fs.writeFileSync(path.join(target, 'pop.wav'), 'чужой файл'));
+  assert.throws(() => copySfxLibrary(lib, target), /library\/sfx pop\.wav: .*уже (есть|появился)/);
+  assert.ok(planted(), 'подмена сработала после проверки пустоты');
+  assert.equal(fs.readFileSync(path.join(target, 'pop.wav'), 'utf8'), 'чужой файл');
+});
+
+test('a symlink planted in the target after the emptiness check is not followed: the file it points to is untouched', { skip: !toolAvailable('ffmpeg') }, (t) => {
+  const { root, lib, target } = tmpDirs(t);
+  fs.mkdirSync(lib, { recursive: true });
+  genPop(lib);
+  const outside = path.join(root, 'outside.wav');
+  fs.writeFileSync(outside, 'файл вне слоя');
+  const link = path.join(target, 'pop.wav');
+  plantAfterEmptinessCheck(t, target, () => fs.symlinkSync(outside, link));
+  assert.throws(() => copySfxLibrary(lib, target), /library\/sfx pop\.wav: .*уже (есть|появился)/);
+  assert.equal(fs.readFileSync(outside, 'utf8'), 'файл вне слоя');
+  assert.ok(fs.lstatSync(link).isSymbolicLink(), 'чужую ссылку уборка не удаляет');
+});

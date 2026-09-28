@@ -172,6 +172,10 @@ function copySfxLibrary(libraryDir, targetDir) {
   names.sort();
   skipped.sort();
 
+  // Файл на месте папки — понятная ошибка, а не голый EEXIST из mkdirSync.
+  if (fs.statSync(targetDir, { throwIfNoEntry: false })?.isDirectory() === false) {
+    throw new Error(`папка звуков слоя ${targetDir} — это файл, а не папка`);
+  }
   fs.mkdirSync(targetDir, { recursive: true });
   const leftovers = fs.readdirSync(targetDir);
   if (leftovers.length) {
@@ -190,7 +194,15 @@ function copySfxLibrary(libraryDir, targetDir) {
       if (!stat) throw new Error('файл недоступен — возможно, битая символическая ссылка');
       if (!stat.isFile()) throw new Error('не обычный файл (папка с этим именем?)');
       const destination = path.join(targetDir, fileName);
-      fs.copyFileSync(source, destination);
+      // COPYFILE_EXCL: файл или ссылка, появившиеся в target после проверки пустоты, не перезаписываются
+      // (и ссылка не уводит запись наружу). EEXIST вылетает ДО try с уборкой ниже, поэтому rmSync
+      // удаляет только файл, который создал этот вызов.
+      try {
+        fs.copyFileSync(source, destination, fs.constants.COPYFILE_EXCL);
+      } catch (error) {
+        if (error?.code === 'EEXIST') throw new Error('в папке звуков слоя уже появился файл с этим именем — не перезаписываю', { cause: error });
+        throw error;
+      }
       try {
         const sha256 = sha256File(destination);
         const { lengthSec, peakSec: measuredPeak } = measure(destination);
