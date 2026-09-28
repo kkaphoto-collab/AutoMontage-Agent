@@ -38,6 +38,11 @@ function help() {
                                       добавить дубли одного ролика и локально расшифровать каждый
   automontage takes pack --project-dir .
                                       сводка фраз всех дублей для выбора лучших кусков
+  automontage layer new --project-dir <p>          motion-слой из деталей motion-kit (камера, звуки, вставки, субтитры)
+  automontage layer check --project-dir <p> --layer motion-v01    гейты ритма, safe-zone, звуков по плану
+  automontage layer render --project-dir <p> --layer motion-v01   рендер слоя, когда машина свободна, + гейты
+  automontage layer import --project-dir <p> --file <mp4>         импорт проверенного слоя
+  automontage layer brief --project-dir <p> --asset <ref> …       draft brief со слоем на весь ролик
   automontage master --project-dir . --edit edit/v02-source.json
                                       собрать новую source-ревизию без повторного Whisper
   automontage master --project-dir . --edit edit/v02-takes.json
@@ -131,6 +136,16 @@ if (argv[0] === 'master') {
 if (argv[0] === 'takes') {
   try {
     execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'project', 'takes-cli.js'), ...argv.slice(1)], {
+      stdio: 'inherit', cwd: process.cwd(), shell: false,
+    });
+  } catch (e) { process.exit(e.status || 1); }
+  process.exit(0);
+}
+
+// motion-слой из деталей motion-kit и его проверки: отдельный скрипт, аргументы не попадают в build.js
+if (argv[0] === 'layer') {
+  try {
+    execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'layer', 'cli.js'), ...argv.slice(1)], {
       stdio: 'inherit', cwd: process.cwd(), shell: false,
     });
   } catch (e) { process.exit(e.status || 1); }
