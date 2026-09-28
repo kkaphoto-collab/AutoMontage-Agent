@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { spawn, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
-const { toolAvailable } = require('./helpers/media-fixtures');
+const { runTool, toolAvailable } = require('./helpers/media-fixtures');
 const { makeLayerProject } = require('./helpers/layer-project');
 const { buildLayerManifest } = require('../scripts/motion-kit-node');
 const { hashFile } = require('../scripts/pult/files');
@@ -221,6 +221,55 @@ test('a G1 waiver on a layer where G1 only warns is unused: a waiver lifts a sto
   assert.equal(json.gates.find((g) => g.id === 'G1').status, 'warn');
   assert.deepEqual(json.unusedWaivers, [{ gate: 'G1', reason: 'длинные планы' }]);
   assert.match(reportText(), /^ℹ️ исключение G1 не понадобилось: длинные планы — уберите его из plan\.js\n {3}→ G1 даёт только предупреждение — исключение снимает лишь стоп$/m);
+});
+
+// Короткий сток замирает на последнем кадре до конца вставки: layer check меряет клип ffprobe и предупреждает.
+const g10 = (json) => json.gates.find((g) => g.id === 'G10');
+const shortClip = (file, seconds) => runTool('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', `testsrc2=s=540x960:r=25:d=${seconds}`,
+  '-an', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', file]);
+
+test('a stock clip of 1 s on a 2 s insert warns in G10 with a hint to re-fetch it, exit 0', { skip: !hasFfmpeg }, async (t) => {
+  const { layerDir, runCheck, report, reportText } = await scaffold(t);
+  assert.equal(await runCheck(), 0);
+  assert.ok(!g10(report()).spans.some((s) => /сток/.test(s.note)), 'заглушка шаблона 4 с не короче вставки 2 с');
+  const placeholder = path.join(layerDir, 'public', 'stock', 'placeholder.mp4');
+  fs.rmSync(placeholder);
+  shortClip(placeholder, 1);
+  assert.equal(await runCheck(), 0);
+  const gate = g10(report());
+  assert.equal(gate.status, 'warn');
+  const span = gate.spans.find((s) => /сток/.test(s.note));
+  assert.ok(span, JSON.stringify(gate));
+  assert.equal(span.note, 'сток stock/placeholder.mp4 короче вставки stock-1 на 1 с — последний кадр замрёт');
+  assert.ok(Math.abs(span.fromSec - 3.6) < 0.05 && Math.abs(span.toSec - 5.6) < 0.05, JSON.stringify(span));
+  assert.match(gate.hint, /automontage layer stock --insert stock-1/);
+  assert.match(reportText(), /сток stock\/placeholder\.mp4 короче вставки stock-1/);
+});
+
+test('a missing stock file warns in G10 instead of failing the check', { skip: !hasFfmpeg }, async (t) => {
+  const { layerDir, runCheck, report } = await scaffold(t);
+  fs.rmSync(path.join(layerDir, 'public', 'stock', 'placeholder.mp4'));
+  assert.equal(await runCheck(), 0);
+  const gate = g10(report());
+  assert.equal(gate.status, 'warn');
+  assert.ok(gate.spans.some((s) => s.note === 'нет public/stock/placeholder.mp4 — вставка stock-1 останется пустой'), JSON.stringify(gate));
+});
+
+test('a short stock turns a passing G10 into a warning; a src outside public/ is not probed', { skip: !hasFfmpeg }, async (t) => {
+  const { layerDir, runCheck, report, writePlan } = await scaffold(t);
+  const plan = (src) => STATIC_PLAN.replace("items: [] }", `items: [], waivers: [{ gate: 'G1', reason: 'статичный план теста' }], inserts: [
+    { id: 's1', kind: 'stock', from: 3, to: 4, src: 'stock/placeholder.mp4' }, { id: 's2', kind: 'stock', from: 4.5, to: 5.5, src: ${JSON.stringify(src)} }] }`);
+  writePlan(plan('stock/placeholder.mp4'));
+  assert.equal(await runCheck(), 0);
+  assert.equal(g10(report()).status, 'pass');
+  shortClip(path.join(layerDir, 'public', 'stock', 'half.mp4'), 0.5);
+  writePlan(plan('stock/half.mp4'));
+  assert.equal(await runCheck(), 0);
+  assert.equal(g10(report()).status, 'warn');
+  assert.deepEqual(g10(report()).spans.map((s) => s.note), ['сток stock/half.mp4 короче вставки s2 на 0,5 с — последний кадр замрёт']);
+  writePlan(plan('../layer.json'));
+  assert.equal(await runCheck(), 0);
+  assert.deepEqual(g10(report()).spans.map((s) => s.note), ['src ../layer.json вставки s2 — вне public/ слоя']);
 });
 
 test('the real CLI shows the src/plan.js line of an exception thrown by buildPlan and exits 2', { skip: !hasFfmpeg }, async (t) => {

@@ -9,7 +9,7 @@ const USAGE = `usage: automontage layer new|words|check|render|import|brief|stoc
   layer import --project-dir P --file <motion-v01/renders/layer-01.mp4>       импорт проверенного слоя
   layer brief  --project-dir P --asset <assets/broll/video/…/media.mp4> --title T --head-cream C --head-orange O
                [--audio mix|mute] [--music <файл> --music-gain-db -16 --music-start-sec 0]
-  layer stock  --project-dir P --layer motion-v01 --query "english" --query-original "фраза" [--sec 2.5] [--pick 1] [--list]
+  layer stock  --project-dir P --layer motion-v01 --query "english" --query-original "фраза" [--insert stock-1] [--sec 2.5] [--pick 1] [--list]
   layer sheet  --project-dir P                                                контакт-лист preview и кадры правок пульта`;
 
 const COMMANDS = Object.freeze({

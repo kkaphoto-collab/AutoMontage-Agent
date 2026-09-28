@@ -3,11 +3,12 @@
 // Код: 0 — пройдено или только предупреждения, 1 — стоп, 2 — оценить нельзя.
 const fs = require('node:fs');
 const path = require('node:path');
+const { probeVideo } = require('../media-probe');
 const { buildLayerManifest } = require('../motion-kit-node');
 const { getProfile } = require('../qa/profiles');
 const { buildReport, exitCodeFor, formatReport, writeReport } = require('../qa/report');
 const { runTimelineGates } = require('../qa/timeline-gates');
-const { assertLayerSource, readLayerJson, relative, resolveLayer, sha256File, writeJson } = require('./common');
+const { assertLayerSource, formatNumber, readLayerJson, relative, resolveLayer, sha256File, writeJson } = require('./common');
 
 const FLAGS = { 'project-dir': 'value', layer: 'value', profile: 'value' };
 
@@ -17,6 +18,46 @@ const FLAGS = { 'project-dir': 'value', layer: 'value', profile: 'value' };
 function removeOldManifest(layerDir) {
   const outDir = path.join(layerDir, 'out');
   if (fs.lstatSync(outDir, { throwIfNoEntry: false })?.isDirectory()) fs.rmSync(path.join(outDir, 'manifest.json'), { force: true });
+}
+
+// Сток короче своей вставки замирает на последнем кадре до её конца (StockInsert держит видео до to):
+// меряем public/<src> каждой stock-вставки ffprobe. Короче окна больше чем на кадр, нет файла или src
+// вне public/ — предупреждение G10 с местом вставки, не стоп.
+function warnShortStock(gates, manifest, layerDir, probe = probeVideo) {
+  const gate = gates.find((g) => g.id === 'G10');
+  if (!gate) return;
+  const { fps } = manifest;
+  const publicDir = path.resolve(layerDir, 'public');
+  const spans = [];
+  for (const insert of manifest.inserts) {
+    if (insert.kind !== 'stock' || typeof insert.src !== 'string' || !insert.src) continue;
+    const span = (note) => spans.push({ fromSec: insert.from / fps, toSec: insert.to / fps, note, insert: insert.id });
+    const file = path.resolve(publicDir, insert.src);
+    if (path.isAbsolute(insert.src) || !file.startsWith(publicDir + path.sep)) {
+      span(`src ${insert.src} вставки ${insert.id} — вне public/ слоя`);
+      continue;
+    }
+    if (!fs.statSync(file, { throwIfNoEntry: false })?.isFile()) {
+      span(`нет public/${insert.src} — вставка ${insert.id} останется пустой`);
+      continue;
+    }
+    let duration;
+    try {
+      duration = probe(file, { stage: `layer check stock ${insert.src}` }).duration;
+    } catch {
+      span(`public/${insert.src} не читается как видео — вставка ${insert.id} останется пустой`);
+      continue;
+    }
+    const windowSec = (insert.to - insert.from) / fps;
+    if (duration < windowSec - 1 / fps) {
+      span(`сток ${insert.src} короче вставки ${insert.id} на ${formatNumber(Math.max(0.1, Math.round((windowSec - duration) * 10) / 10))} с — последний кадр замрёт`);
+    }
+  }
+  if (!spans.length) return;
+  if (gate.status === 'pass') gate.status = 'warn';
+  gate.spans.push(...spans.map(({ insert, ...rest }) => rest));
+  const ids = [...new Set(spans.map((s) => s.insert))];
+  gate.hint = `${gate.hint}; клип под длину вставки: ${ids.map((id) => `automontage layer stock --insert ${id}`).join(', ')}`;
 }
 
 // deps.buildLayerManifest — подмена сборки в тестах (испорченный манифест, брошенный не-Error).
@@ -43,6 +84,7 @@ async function run(options, deps = {}) {
     writeJson(manifestPath, manifest);
     inputs = [{ path: relative(projectDir, manifestPath), sha256: sha256File(manifestPath) }];
     const gates = runTimelineGates(manifest, profile);
+    warnShortStock(gates, manifest, layerDir, deps.probeVideo);
     // Исключение, которое ничего не сняло (гейт прошёл или дал только warn), показываем автору.
     const waivers = Array.isArray(manifest.waivers) ? manifest.waivers : [];
     const unusedWaivers = waivers.filter((w) => !gates.some((g) => g.id === w.gate && g.status === 'waived'));
@@ -56,4 +98,4 @@ async function run(options, deps = {}) {
   return exitCodeFor(report);
 }
 
-module.exports = { FLAGS, run };
+module.exports = { FLAGS, run, warnShortStock };
