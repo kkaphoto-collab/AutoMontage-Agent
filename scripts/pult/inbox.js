@@ -159,7 +159,10 @@ function formatInbox(items, { projectsDir, cwd = process.cwd() }) {
 }
 
 function parseInboxOptions(argv, { root = ROOT } = {}) {
-  const options = { projectsDir: path.join(root, 'projects'), accept: null };
+  // AUTOMONTAGE_PROJECTS_DIR переменная окружения для решения проблемы hard links на ExFAT.
+  const envProjectsDir = process.env.AUTOMONTAGE_PROJECTS_DIR;
+  const defaultProjectsDir = envProjectsDir ? path.resolve(envProjectsDir) : path.join(root, 'projects');
+  const options = { projectsDir: defaultProjectsDir, accept: null };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === '--projects-dir') {

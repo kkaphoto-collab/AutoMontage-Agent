@@ -140,6 +140,26 @@ legacy/developer opt-in и не входит в стандартный путь 
 Все доступные переменные и пояснения находятся в [`.env.example`](.env.example). Настоящий
 `.env` остаётся только на компьютере пользователя и исключён из Git и npm-пакета.
 
+#### Если репозиторий на диске без поддержки hard links (ExFAT, FAT32)
+
+Движок использует hard links для атомарной записи метаданных проектов (`project.json`, brief, рендеры).
+ExFAT и FAT32 не поддерживают hard links → попытка создать проект падает с ошибкой `ENOTSUP`.
+
+**Решение:** указать другой путь через переменную окружения:
+
+```bash
+export AUTOMONTAGE_PROJECTS_DIR=/Volumes/DOC/AutoMontage-projects
+# Вместо /Volumes/DOC используй диск с поддержкой hard links (APFS, HFS+, ext4, etc)
+```
+
+Добавь эту строку в локальный `.env` файл (не коммитьте!):
+```
+AUTOMONTAGE_PROJECTS_DIR=/path/to/fast-disk/AutoMontage-projects
+```
+
+После этого все команды (`automontage pult`, `automontage inbox`, монтаж нового ролика) будут работать
+с проектами на правильном диске. Путь может быть абсолютным; относительные пути разрешены, но менее надёжны.
+
 ---
 
 ## Motion-reel: от темы до анимационного MP4

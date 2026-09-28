@@ -28,7 +28,11 @@ const USAGE = `Пульт роликов AutoMontage
   --no-open               не открывать окно`;
 
 function parsePultOptions(argv, { root = ROOT } = {}) {
-  const options = { mode: 'open', projectsDir: path.join(root, 'projects'), open: true };
+  // AUTOMONTAGE_PROJECTS_DIR переменная окружения для решения проблемы hard links на ExFAT:
+  // если projects/ находится на диске без поддержки hard links, укажите альтернативный путь.
+  const envProjectsDir = process.env.AUTOMONTAGE_PROJECTS_DIR;
+  const defaultProjectsDir = envProjectsDir ? path.resolve(envProjectsDir) : path.join(root, 'projects');
+  const options = { mode: 'open', projectsDir: defaultProjectsDir, open: true };
   const seen = new Set();
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
