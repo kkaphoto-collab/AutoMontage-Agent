@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { readJsonIfExists } = require('../pult/files');
+const { inspectImportedAssetBundle } = require('../review/imported-assets');
 const { summarize } = require('../qa/report');
 const { writeJson } = require('./common');
 
@@ -44,6 +45,19 @@ function appendRegistry(projectDir, entry) {
   registry.imports = registry.imports.filter((e) => !(e?.renderSha256 === entry.renderSha256
     || e?.canonicalSha256 === entry.canonicalSha256 || e?.reference === entry.reference)).concat(entry);
   writeJson(path.join(projectDir, 'qa', 'layer-imports.json'), registry);
+}
+
+// Ассет записи реестра, если он цел целиком — так, как его проверяет preview (media.mp4, VP8-прокси и asset.json
+// с их sha256), — и это именно он (та же ссылка и тот же sha256): запись об ассете бывает правлена руками.
+// Иначе null. Повторный импорт того же рендера переиспользует такой ассет, layer brief берёт из него длину.
+function layerAsset(projectDir, entry) {
+  if (typeof entry?.reference !== 'string') return null;
+  try {
+    const record = inspectImportedAssetBundle({ projectDir, assetDirectory: path.join(projectDir, path.posix.dirname(entry.reference)) });
+    return record && record.reference === entry.reference && record.canonicalSha256 === entry.canonicalSha256 ? record : null;
+  } catch {
+    return null;
+  }
 }
 
 const findBy = (key) => (projectDir, value) => readRegistry(projectDir).imports.find((e) => e?.[key] === value) || null;
@@ -107,5 +121,5 @@ function renderReportProblem(report, { layer } = {}) {
 const renderPassed = (report, options) => Boolean(report) && renderReportProblem(report, options) === null;
 
 module.exports = {
-  appendRegistry, findByCanonical, findByReference, findByRender, findRenderReport, readRegistry, renderPassed, renderReportProblem,
+  appendRegistry, findByCanonical, findByReference, findByRender, findRenderReport, layerAsset, readRegistry, renderPassed, renderReportProblem,
 };

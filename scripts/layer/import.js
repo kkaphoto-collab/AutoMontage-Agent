@@ -9,11 +9,10 @@ const path = require('node:path');
 const { configureMediaToolPath } = require('../env');
 const { openReadOnlyFlags } = require('../filesystem-capabilities');
 const { probeVideo } = require('../media-probe');
-const { inspectImportedAssetBundle } = require('../review/imported-assets');
 const { VIDEO_MAX_BYTES, createImportController, importReviewMedia } = require('../review/media-import');
 const { runMediaProcess } = require('../review/media-process');
 const { projectFrom, relative, sha256File } = require('./common');
-const { appendRegistry, findByRender, findRenderReport, renderReportProblem } = require('./registry');
+const { appendRegistry, findByRender, findRenderReport, layerAsset, renderReportProblem } = require('./registry');
 
 const FLAGS = { 'project-dir': 'value', file: 'value' };
 const HINT = 'motion-vNN/renders/layer-NN.mp4';
@@ -105,18 +104,6 @@ function checkedReport(projectDir, { renderSha256, relativePath, sourcePath, opt
   return report;
 }
 
-// Ассет прошлого импорта цел целиком — так, как его проверяет preview (media.mp4, VP8-прокси и asset.json
-// с их sha256), — тогда повторный импорт того же рендера его переиспользует, иначе импортирует заново.
-function bundleIntact(projectDir, entry) {
-  if (typeof entry.reference !== 'string') return false;
-  try {
-    const record = inspectImportedAssetBundle({ projectDir, assetDirectory: path.join(projectDir, path.posix.dirname(entry.reference)) });
-    return Boolean(record) && record.reference === entry.reference && record.canonicalSha256 === entry.canonicalSha256;
-  } catch {
-    return false;
-  }
-}
-
 // Импорт из проверенного дескриптора с начала файла. Поток владеет дескриптором: destroy закрывает его и
 // дожидается незаконченного чтения. Пока дескриптор открыт, после импорта проверяем, что файл не менялся.
 // Ошибка закрытия дескриптора приходит событием error: пустой слушатель не даёт ей стать необработанной.
@@ -180,7 +167,8 @@ async function run(options, deps = {}) {
     const report = checkedReport(projectDir, { renderSha256, relativePath, sourcePath, option: options.file });
     const existing = findByRender(projectDir, renderSha256);
     let asset;
-    if (existing && bundleIntact(projectDir, existing)) {
+    // Ассет прошлого импорта цел (layerAsset) — переиспользуем, иначе импортируем заново.
+    if (existing && layerAsset(projectDir, existing)) {
       asset = existing;
       log(`Этот рендер уже импортирован: ${existing.reference} — новый ассет не создан`);
     } else {
