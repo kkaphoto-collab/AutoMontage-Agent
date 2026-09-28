@@ -56,3 +56,15 @@ test('captions.hide splits a single chunk into caption-N/caption-Nb, and a hide 
   const dropped = kit.buildManifest(kit.compileLayer(droppedPlan, { ...cfg, words }));
   assert.equal(dropped.texts.filter((t) => t.id.startsWith('caption-')).length, 0, 'окно hide, целиком накрывающее chunk, не должно оставить ни одной записи');
 });
+
+// Задача 22: манифест несёт cover (закрывает ли вставка лицо, читает G4) и src (короткий сток,
+// читает предупреждение Task 38) у каждой вставки.
+test('manifest inserts carry cover and src for the gates', () => {
+  const m = kit.buildManifest(kit.compileLayer({ ...plan, inserts: [
+    { kind: 'stock', from: 1, to: 2, src: 'stock/a.mp4' }, { kind: 'donor', from: 2.5, to: 3, src: 'donor.mp4' },
+  ] }, cfg));
+  assert.deepEqual(m.inserts, [
+    { id: 'stock-1', kind: 'stock', from: 25, to: 50, cover: true, src: 'stock/a.mp4' },
+    { id: 'donor-2', kind: 'donor', from: 63, to: 75, cover: false, src: 'donor.mp4' },
+  ]);
+});

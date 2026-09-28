@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { getProfile } = require('../scripts/qa/profiles');
-const { assertCameraArrays, detectCameraEvents, gateRhythm, gateWeakCuts, speakerPlans } = require('../scripts/qa/timeline-gates');
+const { assertCameraArrays, detectCameraEvents, gateDonor, gateHook, gateRhythm, gateScale, gateStock, gateWeakCuts, speakerPlans } = require('../scripts/qa/timeline-gates');
 const { cutsEvery, manifestFixture } = require('./helpers/manifest-fixtures');
 
 const avatar = getProfile('avatar');
@@ -688,4 +688,113 @@ test('riseStart computes top over the whole punch window, not only at the flagge
   assert.deepEqual(d.events.map((e) => e.kind), ['punch']);
   assert.equal(d.events[0].frame, 58,
     'top должен считаться по максимуму окна (кадр 59, +8 %), а не только на флагнутом кадре (61, +1 %)');
+});
+
+// --- Задача 22: G3 «Масштаб», G4 «Спикер в первые 3 с», G10 «Сток», G11 «Чужое видео» ---
+
+test('scale above 1.25 stops, a punch eaten by the limit warns', () => {
+  assert.equal(gateScale(manifestFixture({ camera: () => ({ s: 1.3 }) }), avatar).status, 'fail');
+  assert.equal(gateScale(manifestFixture({ camera: () => ({ s: 1.25, requested: 1.36 }) }), avatar).status, 'warn');
+  assert.equal(gateScale(manifestFixture({ camera: cutsEvery(2) }), avatar).status, 'pass');
+});
+
+// Ступенька в пресет выше предела — проблема самого пресета, а не «панч упёрся в потолок»
+// (уточнение после ревью пакета 1: G3 наследует Step 0). Формулировка обязана называть пресет и
+// не должна путать это с зависшим панчем.
+test('a hard step into an over-limit preset is reported by G3 as a preset problem, not a stuck punch', () => {
+  const stepClamp = manifestFixture({ seconds: 3, camera: (f) => (f < 50
+    ? { s: 1.0, requested: 1.0 }
+    : { s: 1.25, requested: 1.35 }) });
+  const g = gateScale(stepClamp, avatar);
+  assert.equal(g.status, 'warn');
+  assert.match(g.spans[0].note, /пресет/);
+  assert.doesNotMatch(g.spans[0].note, /панч-ин упёрся/);
+  assert.match(g.hint, /пресет/);
+});
+
+// А настоящая спираль панча (не ступенька), клэмпнутая у потолка, сохраняет прежнюю формулировку.
+test('a gradual punch spring clamped by the scale limit keeps the original "stuck punch" wording', () => {
+  const ramp = manifestFixture({ seconds: 3, camera: (f) => {
+    if (f < 50) return { s: 1, requested: 1 };
+    const t = Math.min(1, (f - 50) / 10);
+    const req = 1 + 0.35 * t;
+    return { s: Math.min(1.25, req), requested: req };
+  } });
+  const g = gateScale(ramp, avatar);
+  assert.equal(g.status, 'warn');
+  assert.match(g.spans[0].note, /панч-ин упёрся/);
+  assert.doesNotMatch(g.spans[0].note, /пресет/);
+});
+
+test('gateScale throws the same clear error as the other manifest gates on a malformed manifest', () => {
+  const bad = { fps: 25, width: 1080, height: 1920, durationInFrames: 3,
+    camera: { s: [1, 1], requested: [1, 1], dx: [0, 0], dy: [0, 0], blur: [0, 0], opacity: [1, 1] } };
+  assert.throws(() => gateScale(bad, avatar), /манифест повреждён: camera\.s должен быть массивом из 3 конечных чисел/);
+});
+
+test('speaker must be seen in the first 3 s unless the hook is an enumeration', () => {
+  const hidden = { camera: (f) => ({ s: 1, opacity: f < 100 ? 0 : 1 }) };
+  assert.equal(gateHook(manifestFixture(hidden), avatar).status, 'fail');
+  assert.equal(gateHook(manifestFixture({ ...hidden, hook: 'enumeration' }), avatar).status, 'pass');
+  assert.equal(gateHook(manifestFixture({ camera: (f) => ({ s: 1, blur: 20, opacity: f < 10 ? 1 : 0 }) }), avatar).status, 'pass');
+});
+
+test('gateHook throws the same clear error as the other manifest gates on a malformed manifest', () => {
+  const bad = { fps: 25, width: 1080, height: 1920, durationInFrames: 3,
+    camera: { s: [1, 1], requested: [1, 1], dx: [0, 0], dy: [0, 0], blur: [0, 0], opacity: [1, 1] }, inserts: [] };
+  assert.throws(() => gateHook(bad, avatar), /манифест повреждён: camera\.s должен быть массивом из 3 конечных чисел/);
+});
+
+test('stock count warns below the minimum for the video length', () => {
+  const stock = (n) => Array.from({ length: n }, (_, i) => ({ id: `stock-${i + 1}`, kind: 'stock', from: i * 100, to: i * 100 + 50 }));
+  assert.equal(gateStock(manifestFixture({ seconds: 60, inserts: stock(3) }), avatar).status, 'pass');
+  assert.equal(gateStock(manifestFixture({ seconds: 60, inserts: stock(1) }), avatar).status, 'warn');
+  assert.equal(gateStock(manifestFixture({ seconds: 30, inserts: stock(2) }), avatar).status, 'pass');
+});
+
+test('a donor clip longer than 3 s in a row stops the layer', () => {
+  const donor = (from, to) => [{ id: 'donor-1', kind: 'donor', from, to }];
+  assert.equal(gateDonor(manifestFixture({ inserts: donor(33, 85) }), avatar).status, 'pass');
+  const g = gateDonor(manifestFixture({ inserts: donor(33, 133) }), avatar);
+  assert.equal(g.status, 'fail');
+  assert.equal(g.value, 4);
+});
+
+// Уточнение оркестратора: «подряд» значит последовательно — донорские вставки, которые
+// касаются или пересекаются (зазор ≤ 1 кадра), должны слиться в один прогон ДО измерения. Два
+// соседних донора по 2 с = 4 с подряд → fail, а спан называет обе объединённые id.
+test('two adjacent donor inserts that touch are merged before measuring "подряд"', () => {
+  const inserts = [
+    { id: 'donor-1', kind: 'donor', from: 0, to: 50 },
+    { id: 'donor-2', kind: 'donor', from: 50, to: 100 },
+  ];
+  const g = gateDonor(manifestFixture({ inserts }), avatar);
+  assert.equal(g.status, 'fail');
+  assert.equal(g.value, 4);
+  assert.match(g.spans[0].note, /donor-1/);
+  assert.match(g.spans[0].note, /donor-2/);
+});
+
+test('donor inserts with a real gap between them stay separate runs', () => {
+  const inserts = [
+    { id: 'donor-1', kind: 'donor', from: 0, to: 50 },
+    { id: 'donor-2', kind: 'donor', from: 60, to: 110 },
+  ];
+  assert.equal(gateDonor(manifestFixture({ inserts }), avatar).status, 'pass');
+});
+
+// Уточнение оркестратора: подсказка G11 напоминает про cover для полноэкранного донора.
+test('G11 hint tells the author to use cover: true for a full-screen donor', () => {
+  const g = gateDonor(manifestFixture({ inserts: [{ id: 'donor-1', kind: 'donor', from: 0, to: 100 }] }), avatar);
+  assert.match(g.hint, /cover: true/);
+});
+
+// BAD CASE (уточнение после ревью пакета 1): cover-вставка с 0 с закрывает лицо карточкой сразу,
+// даже пока уход камеры ещё гаснет (opacity > 0,01 первых 8 кадров) — G4 обязан считать спикера
+// невидимым внутри неё, какой бы ни была camera.opacity.
+test('BAD CASE: a cover insert from 0 s hides the speaker even while the camera is still fading out', () => {
+  const insert = (cover, to = 80) => [{ id: 'stock-1', kind: 'stock', from: 0, to, cover }];
+  assert.equal(gateHook(manifestFixture({ inserts: insert(true) }), avatar).status, 'fail');
+  assert.equal(gateHook(manifestFixture({ inserts: insert(false) }), avatar).status, 'pass');
+  assert.equal(gateHook(manifestFixture({ inserts: insert(true, 25) }), avatar).status, 'pass');
 });

@@ -46,7 +46,9 @@ export function buildManifest(compiled) {
     maxScale: compiled.camera.maxScale,
     camera,
     texts,
-    inserts: compiled.inserts.map((insert) => ({ id: insert.id, kind: insert.kind, from: insert.from, to: insert.to })),
+    // cover и src — с Task 22: G4 читает cover (закрыта ли вставкой сцена под ней), Task 38 читает
+    // src в предупреждении о коротком стоковом файле.
+    inserts: compiled.inserts.map((insert) => ({ id: insert.id, kind: insert.kind, from: insert.from, to: insert.to, cover: insert.cover, src: insert.src })),
     cues: {
       kept: compiled.cues.kept.map((cue) => ({ id: cue.id, name: cue.name, startFrame: cue.startFrame, hitFrame: cue.hitFrame, notable: cue.notable, bed: cue.bed })),
       dropped: compiled.cues.dropped.map((entry) => ({ id: entry.cue.id, conflictWith: entry.conflictWith, reason: entry.reason })),

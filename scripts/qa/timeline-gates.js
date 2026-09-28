@@ -179,4 +179,115 @@ function gateWeakCuts(manifest, profile) {
   });
 }
 
-module.exports = { assertCameraArrays, detectCameraEvents, gateRhythm, gateWeakCuts, speakerPlans };
+// G3: масштаб аватара не крупнее profile.scale.max (1,25). «Съеденные» (клэмпнутые лимитом) кадры
+// группируются в зоны подряд идущих кадров и судятся по ПЕРВОМУ кадру зоны: жёсткий рез (Step 0 —
+// та же ступенька, что не подавляется в G2) в пресет выше предела — проблема самого пресета, а не
+// зависшего панча, даже если дальше камера просто стоит на клэмпнутом уровне.
+function gateScale(manifest, profile) {
+  assertCameraArrays(manifest);
+  const { s, requested } = manifest.camera;
+  const { eatenPunch, weakScale } = profile.camera;
+  const n = s.length;
+  const flat = (g) => g < 1 || g >= n || factor(s[g], s[g - 1]) < 1.01;
+  const isStep = (g) => g >= 1 && factor(s[g], s[g - 1]) >= 1 + weakScale && flat(g - 1) && flat(g + 1);
+  const max = s.reduce((m, v) => Math.max(m, v), 0);
+  const zones = [];
+  let open = null;
+  for (let f = 0; f < n; f += 1) {
+    const eaten = requested[f] / s[f] > eatenPunch;
+    if (eaten && open) open.to = f + 1;
+    else if (eaten) open = { from: f, to: f + 1, step: isStep(f) };
+    else if (open) { zones.push(open); open = null; }
+  }
+  if (open) zones.push(open);
+  const stepZones = zones.filter((z) => z.step);
+  const punchZones = zones.filter((z) => !z.step);
+  const overLimit = max > profile.scale.max + 1e-3;
+  const status = overLimit ? 'fail' : zones.length ? 'warn' : 'pass';
+  const spans = [];
+  if (punchZones.length) {
+    spans.push(span(punchZones[0].from, punchZones[punchZones.length - 1].to, manifest.fps, 'панч-ин упёрся в предел'));
+  }
+  if (stepZones.length) {
+    spans.push(span(stepZones[0].from, stepZones[stepZones.length - 1].to, manifest.fps, 'жёсткий рез в пресет выше предела масштаба'));
+  }
+  const hint = overLimit
+    ? 'исходник аватара растянут из 720p: крупнее 1,25 будет мыло'
+    : stepZones.length
+      ? 'пресет камеры крупнее предела масштаба — уменьшите сам пресет, а не панч'
+      : 'ставьте панч-ин на общем плане W';
+  return gate('G3', 'Масштаб аватара', {
+    status, value: Math.round(max * 1000) / 1000, threshold: `≤ ${fmt(profile.scale.max)}`,
+    spans, hint,
+  });
+}
+
+// G4: спикер обязан быть виден (резко или размыто — важна только непрозрачность) хотя бы часть
+// первых profile.hook.sec секунд, если хук не объявлен как «перечисление». Кадр внутри cover-
+// вставки — лицо закрыто карточкой независимо от camera.opacity, даже пока уход камеры ещё гаснет
+// (уточнение после ревью пакета 1: CAMERA_DEFAULTS.away.enterFrames не даёт opacity погаснуть
+// мгновенно).
+function gateHook(manifest, profile) {
+  assertCameraArrays(manifest);
+  const frames = Math.min(manifest.durationInFrames, Math.round(profile.hook.sec * manifest.fps));
+  const threshold = `спикер виден до ${fmt(profile.hook.sec)} с`;
+  const covered = (f) => manifest.inserts.some((i) => i.cover && f >= i.from && f < i.to);
+  if (manifest.camera.opacity.slice(0, frames).some((o, f) => o > 0.01 && !covered(f))) return gate('G4', 'Спикер в первые 3 с', { threshold });
+  if (manifest.hook === 'enumeration') {
+    return gate('G4', 'Спикер в первые 3 с', { threshold, hint: 'хук-перечисление: спикер появляется после объектов' });
+  }
+  return gate('G4', 'Спикер в первые 3 с', {
+    status: 'fail', threshold, spans: [span(0, frames, manifest.fps, 'спикера нет в кадре')],
+    hint: 'покажите спикера хотя бы частью первых 3 с (можно размытым) или объявите hook: "enumeration"',
+  });
+}
+
+// G10: минимальное число стоковых вставок по длине ролика — вкусовой порог, только предупреждение.
+function gateStock(manifest, profile) {
+  const count = manifest.inserts.filter((i) => i.kind === 'stock').length;
+  const seconds = manifest.durationInFrames / manifest.fps;
+  const min = seconds < profile.stock.shortSec ? profile.stock.minShort : profile.stock.min;
+  return gate('G10', 'Стоковые вставки', {
+    status: count >= min ? 'pass' : 'warn', value: count, unit: 'шт.', threshold: `≥ ${min}`,
+    hint: 'заполните пустые участки B-roll по смыслу фраз: automontage layer stock',
+  });
+}
+
+// Сливает подряд идущие (касающиеся или пересекающиеся, зазор ≤ 1 кадра) вставки одного прогона в
+// один диапазон перед измерением «подряд» для G11 — два соседних донора по 2 с обязаны читаться
+// как 4 с одного эпизода, а не как два отдельных прохождения лимита.
+function mergeRuns(inserts) {
+  const sorted = [...inserts].sort((a, b) => a.from - b.from);
+  const runs = [];
+  for (const insert of sorted) {
+    const last = runs[runs.length - 1];
+    if (last && insert.from - last.to <= 1) {
+      last.to = Math.max(last.to, insert.to);
+      last.ids.push(insert.id);
+    } else {
+      runs.push({ from: insert.from, to: insert.to, ids: [insert.id] });
+    }
+  }
+  return runs;
+}
+
+// G11: чужое видео — не дольше profile.donor.maxSec подряд. Донорская вставка без cover — оверлей
+// поверх спикера (лицо остаётся в кадре); полноэкранный донор ставит cover: true сам автор плана.
+function gateDonor(manifest, profile) {
+  const { fps } = manifest;
+  const donors = manifest.inserts.filter((i) => i.kind === 'donor');
+  const runs = mergeRuns(donors);
+  const long = runs.filter((r) => (r.to - r.from) / fps > profile.donor.maxSec + 1e-9);
+  return gate('G11', 'Чужое видео', {
+    status: long.length ? 'fail' : 'pass',
+    value: long.length ? r2(Math.max(...long.map((r) => (r.to - r.from) / fps))) : 0, unit: 'с',
+    threshold: `≤ ${fmt(profile.donor.maxSec)} с подряд`,
+    spans: long.map((r) => span(r.from, r.to, fps, r.ids.join('+'))),
+    hint: 'чужой ролик — только 2–3 с для контекста, дальше собственные анимации по смыслу; '
+      + 'донорская вставка без cover — оверлей поверх спикера, полноэкранный донор ставьте с cover: true',
+  });
+}
+
+module.exports = {
+  assertCameraArrays, detectCameraEvents, gateDonor, gateHook, gateRhythm, gateScale, gateStock, gateWeakCuts, speakerPlans,
+};
