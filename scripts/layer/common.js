@@ -81,9 +81,19 @@ function readJson(file, label) {
 // Неверный sfxMasterDb ловится при чтении, а не на рендере: та же проверка, что в SfxTrack.
 // Отдельно отсекаем не-объект (массив, null, примитив через валидный JSON) — иначе assertMasterDb
 // упал бы на «Cannot read properties of null» вместо понятного сообщения про сам layer.json.
+//
+// Папка без layer.json — след оборванного layer new (layer.json он пишет последним, а SIGKILL уборку
+// не даёт): вместо голого ENOENT с абсолютным путём говорим, что это и что делать.
 function readLayerJson(layerDir) {
   const file = path.join(layerDir, 'layer.json');
-  const layer = readJson(file, 'layer.json');
+  let layer;
+  try {
+    layer = readJson(file, 'layer.json');
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+    throw new Error(`${path.basename(layerDir)} собран не до конца (нет layer.json) — удалите папку или создайте новый слой: `
+      + `automontage layer new --project-dir "${path.dirname(layerDir)}"`, { cause: error });
+  }
   if (layer === null || typeof layer !== 'object' || Array.isArray(layer)) {
     throw new Error('layer.json должен быть объектом');
   }
@@ -94,6 +104,36 @@ function readLayerJson(layerDir) {
 // Стриминг кусками по 1 МиБ (renders весят сотни МБ) — та же hashFile, что уже считает sha256
 // превью и финалов в пульте, вместо повторного чтения всего файла в память.
 const sha256File = hashFile;
+
+const SHA256 = /^[a-f0-9]{64}$/u;
+
+// Размер и mtime исходника те же, что записал layer new, — байты считаем теми же (как make и rsync) и
+// не хешируем исходник на сотни МБ при каждой команде. Старый layer.json без них — всегда sha256.
+const sameStat = (recorded, stat) => Number.isFinite(recorded.size) && Number.isFinite(recorded.mtimeMs)
+  && recorded.size === stat.size && recorded.mtimeMs === stat.mtimeMs;
+
+// Слой живёт с одним исходником: кадры speaker.mp4, длина слоя, слова и манифест гейтов должны быть
+// от одного файла. layer.json.source записывает layer new; если в проекте теперь другой исходник
+// (путь, ревизия или байты), слой разошёлся бы с ним — нужен новый слой. project — результат
+// resolveLayer.
+function assertLayerSource({ projectDir, manifest, sourcePath, layerName }, layer) {
+  const recorded = layer.source;
+  if (recorded === null || typeof recorded !== 'object' || typeof recorded.localPath !== 'string' || !SHA256.test(String(recorded.sha256))) {
+    throw new Error(`layer.json: нет source (путь и sha256 исходника) — не видно, от какого исходника слой ${layerName}; создайте новый слой: automontage layer new --project-dir "${projectDir}"`);
+  }
+  const current = { localPath: manifest.source.localPath, revision: manifest.source.revision };
+  let sha = null;
+  let same = recorded.localPath === current.localPath && (recorded.revision === undefined || recorded.revision === current.revision);
+  if (same && !sameStat(recorded, fs.statSync(sourcePath))) {
+    sha = sha256File(sourcePath);
+    same = sha === recorded.sha256;
+  }
+  if (same) return;
+  const describe = ({ localPath, revision }, hash) => [localPath, Number.isInteger(revision) ? `ревизия ${revision}` : null,
+    hash ? `sha256 ${hash.slice(0, 12)}…` : null].filter(Boolean).join(', ');
+  throw new Error(`исходник проекта сменился после создания слоя ${layerName}: слой собран на ${describe(recorded, recorded.sha256)}, `
+    + `а в проекте сейчас ${describe(current, sha)} — кадры и слова слоя разошлись бы с ним; создайте новый слой: automontage layer new --project-dir "${projectDir}"`);
+}
 
 // writeJsonAtomic (scripts/pult/files.js) уже даёт: временный файл + rename (обрыв записи не
 // оставит половинчатый JSON), проверку, что папка назначения не симлинк, и chmod. Название и
@@ -108,5 +148,5 @@ const relative = (projectDir, file) => path.relative(projectDir, file).split(pat
 const formatNumber = (value) => String(Number(Number(value).toFixed(2))).replace('.', ',');
 
 module.exports = {
-  LAYER_NAME, formatNumber, nextLayerName, projectFrom, readJson, readLayerJson, relative, resolveLayer, sha256File, writeJson,
+  LAYER_NAME, assertLayerSource, formatNumber, nextLayerName, projectFrom, readJson, readLayerJson, relative, resolveLayer, sha256File, writeJson,
 };

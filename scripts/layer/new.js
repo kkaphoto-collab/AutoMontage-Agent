@@ -15,7 +15,8 @@ const TEMPLATE_FILES = ['src/index.jsx', 'src/Root.jsx', 'src/plan.js', 'src/sce
 const FONTS = ['Onest.ttf', 'OFL-Onest.txt', 'Oswald.ttf', 'OFL-Oswald.txt'];
 // Папка слоя свежая: копия поверх уже лежащего файла — ошибка, а не тихая перезапись.
 const { COPYFILE_EXCL, COPYFILE_FICLONE } = fs.constants;
-const SIGNALS = ['SIGINT', 'SIGTERM'];
+// SIGHUP — закрытое окно терминала: без обработчика процесс умер бы с недостроенной папкой.
+const SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'];
 const NO_VIDEO = 'в исходнике нет видеодорожки — layer new работает с видео-исходником';
 
 // Есть ли в файле настоящая видеодорожка (обложка аудиофайла — attached_pic — не в счёт). Вызывается
@@ -97,22 +98,34 @@ function releaseNote({ name }, status) {
   return null;
 }
 
+function interruptNote(signal, claim, status) {
+  const cleanup = !claim ? 'папка слоя ещё не занята' : releaseNote(claim, status) || `недостроенная папка ${claim.name} удалена`;
+  return `layer new прерван сигналом ${signal} — ${cleanup}`;
+}
+
 function withReleaseNote(error, claim, status) {
   const note = releaseNote(claim, status);
   return note ? new Error(`${error?.message ?? String(error)} (${note})`, { cause: error }) : error;
 }
 
-// Ctrl+C или SIGTERM, пока слой собирается: обработчик убирает занятую папку (та же проверка dev/ino)
-// и повторяет сигнал уже со стандартным действием — процесс завершается как прерванный, а не
+// Ctrl+C, SIGTERM или SIGHUP, пока слой собирается: обработчик убирает занятую папку (та же проверка
+// dev/ino) и повторяет сигнал уже со стандартным действием — процесс завершается как прерванный, а не
 // оставляет готовый с виду слой. Сборка синхронная, поэтому сигнал доходит до обработчика на первом
 // обороте цикла событий после неё; settle() даёт этот оборот, пока обработчики ещё стоят.
-function interruptGuard({ signals, kill }) {
+// Строка в stderr — до повторного сигнала: он завершает процесс сразу, и throw в run() уже никто не
+// напечатает. report не должен помешать уборке и сигналу, поэтому его сбой глотаем.
+function interruptGuard({ signals, kill, report }) {
   const state = { claim: null, interrupted: null, released: null };
   const handlers = SIGNALS.map((signal) => [signal, () => {
     if (state.interrupted) return;
     state.interrupted = signal;
     stop();
     if (state.claim) state.released = releaseLayerDir(state.claim);
+    try {
+      report(interruptNote(signal, state.claim, state.released));
+    } catch {
+      // stderr закрыт (например, вместе с терминалом) — сигнал всё равно повторяем
+    }
     kill(signal);
   }]);
   function stop() {
@@ -147,6 +160,9 @@ function scaffold({ projectDir, manifest, sourcePath, layerDir, source, profile,
   writeJson(path.join(layerDir, 'spelling.json'), {});
   writeLayerWords(projectDir, manifest, layerDir, { durationSec: source.durationInFrames / source.fps, warn: (line) => notes.push(line) });
   const speaker = path.join(layerDir, 'public', 'speaker.mp4');
+  // Размер и mtime исходника — до копии: если файл меняют во время копирования, его mtime уйдёт вперёд
+  // записанного, и следующая команда пересчитает sha256, а не поверит устаревшим числам.
+  const { size, mtimeMs } = fs.statSync(sourcePath);
   fs.copyFileSync(sourcePath, speaker, COPYFILE_EXCL | COPYFILE_FICLONE);
   const speakerSha = sha256File(speaker);
   const { localPath, revision } = manifest.source;
@@ -172,8 +188,9 @@ function scaffold({ projectDir, manifest, sourcePath, layerDir, source, profile,
     // В project.json точки лица нет — стартовая точка по умолчанию, агент уточняет её в layer.json.
     face: { x: Math.round(source.width * 0.5), y: Math.round(source.height * 0.41) },
     profile, sfxMasterDb: -5, speaker: { src: 'speaker.mp4', lastFrame: source.lastFrame },
-    // Один исходник на слой: layer words (и гейты) сверяют с ним текущий исходник проекта.
-    source: { localPath, sha256: speakerSha, ...(Number.isInteger(revision) ? { revision } : {}) },
+    // Один исходник на слой: layer words и layer check сверяют с ним текущий исходник проекта
+    // (assertLayerSource); size и mtimeMs избавляют от sha256 неизменившегося файла.
+    source: { localPath, sha256: speakerSha, size, mtimeMs, ...(Number.isInteger(revision) ? { revision } : {}) },
   });
   return sfx;
 }
@@ -181,6 +198,7 @@ function scaffold({ projectDir, manifest, sourcePath, layerDir, source, profile,
 async function run(options, deps = {}) {
   const log = deps.log || console.log;
   const warn = deps.warn || console.warn;
+  const reportError = deps.error || console.error;
   const runToolImpl = deps.runToolImpl || runTool;
   const { projectDir, manifest, sourcePath } = projectFrom(options);
   if (options.dir !== undefined && !LAYER_NAME.test(options.dir)) throw new Error('--dir должен быть вида motion-v01');
@@ -191,7 +209,7 @@ async function run(options, deps = {}) {
   transcriptPath(projectDir, manifest);
   const source = inspectSource(sourcePath, manifest, { probeVideoImpl: deps.probeVideo || probeVideo, probeMediaImpl: deps.probeMedia || probeMediaPath });
 
-  const guard = interruptGuard({ signals: deps.signals || process, kill: deps.kill || ((signal) => process.kill(process.pid, signal)) });
+  const guard = interruptGuard({ signals: deps.signals || process, kill: deps.kill || ((signal) => process.kill(process.pid, signal)), report: reportError });
   const notes = [];
   let claim;
   let sfx;
@@ -209,9 +227,7 @@ async function run(options, deps = {}) {
     guard.stop();
   }
   const { interrupted, released } = guard.state;
-  if (interrupted) {
-    throw new Error(`layer new прерван сигналом ${interrupted} — ${releaseNote(claim, released) || `недособранная папка ${claim.name} убрана`}`);
-  }
+  if (interrupted) throw new Error(interruptNote(interrupted, claim, released));
   if (failure) throw failure;
   const { name } = claim;
   for (const note of notes) warn(note);

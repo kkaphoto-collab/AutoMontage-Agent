@@ -283,6 +283,21 @@ test('readLayerJson validates sfxMasterDb the same way SfxTrack does, and reject
   assert.throws(() => readLayerJson(layerDir), /layer\.json должен быть объектом/);
 });
 
+test('readLayerJson explains a layer folder left without layer.json (a killed layer new) instead of a raw ENOENT', (t) => {
+  const { projectDir } = makeProjectFixture(t);
+  // SIGKILL посреди layer new: папка и часть файлов есть, layer.json (он пишется последним) — нет.
+  const layerDir = path.join(projectDir, 'motion-v02');
+  fs.mkdirSync(path.join(layerDir, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(layerDir, 'src', 'plan.js'), '// недостроено\n');
+  assert.throws(() => readLayerJson(layerDir), (error) => {
+    assert.equal(error.message, 'motion-v02 собран не до конца (нет layer.json) — удалите папку или создайте новый слой: '
+      + `automontage layer new --project-dir "${projectDir}"`);
+    assert.doesNotMatch(error.message, /ENOENT/);
+    assert.ok(!error.message.includes(path.join(layerDir, 'layer.json')), 'нет абсолютного пути к layer.json');
+    return true;
+  });
+});
+
 test('resolveLayer accepts a real layer directory and rejects names failing the motion-vNN pattern', (t) => {
   const { projectDir } = makeProjectFixture(t);
   fs.mkdirSync(path.join(projectDir, 'motion-v01'));

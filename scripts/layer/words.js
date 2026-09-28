@@ -4,10 +4,9 @@ const { randomUUID } = require('node:crypto');
 const { resolveProjectPath } = require('../project/workspace');
 const { loadKitCore } = require('../motion-kit-node');
 const { ensureDirectory } = require('../pult/files');
-const { formatNumber, readJson, readLayerJson, resolveLayer, sha256File } = require('./common');
+const { assertLayerSource, formatNumber, readJson, readLayerJson, resolveLayer } = require('./common');
 
 const FLAGS = { 'project-dir': 'value', layer: 'value' };
-const SHA256 = /^[a-f0-9]{64}$/u;
 
 // Транскрипт проекта: путь из project.json, обязан существовать. layer new проверяет его ещё до
 // создания папки слоя, чтобы отказ не оставлял половины слоя.
@@ -81,28 +80,6 @@ function writeLayerWords(projectDir, manifest, layerDir, { durationSec, warn = (
   for (const note of wordNotes(words, spelling, durationSec, core.normWord)) warn(note);
   writeTextAtomic(path.join(layerDir, 'src', 'words.js'), `// Сгенерировано automontage layer words — не править руками.\nexport default ${JSON.stringify(words)};\n`);
   return words.length;
-}
-
-// Слой живёт с одним исходником: кадры speaker.mp4, длина слоя и слова должны быть от одного файла.
-// layer.json.source записывает layer new; если в проекте теперь другой исходник (путь, ревизия или
-// байты), слова нового исходника разошлись бы с кадрами слоя — нужен новый слой.
-function assertLayerSource({ projectDir, manifest, sourcePath, layerName }, layer) {
-  const recorded = layer.source;
-  if (recorded === null || typeof recorded !== 'object' || typeof recorded.localPath !== 'string' || !SHA256.test(String(recorded.sha256))) {
-    throw new Error(`layer.json: нет source (путь и sha256 исходника) — не видно, от какого исходника слой ${layerName}; создайте новый слой: automontage layer new --project-dir "${projectDir}"`);
-  }
-  const current = { localPath: manifest.source.localPath, revision: manifest.source.revision };
-  let sha = null;
-  let same = recorded.localPath === current.localPath && (recorded.revision === undefined || recorded.revision === current.revision);
-  if (same) {
-    sha = sha256File(sourcePath);
-    same = sha === recorded.sha256;
-  }
-  if (same) return;
-  const describe = ({ localPath, revision }, hash) => [localPath, Number.isInteger(revision) ? `ревизия ${revision}` : null,
-    hash ? `sha256 ${hash.slice(0, 12)}…` : null].filter(Boolean).join(', ');
-  throw new Error(`исходник проекта сменился после создания слоя ${layerName}: слой собран на ${describe(recorded, recorded.sha256)}, `
-    + `а в проекте сейчас ${describe(current, sha)} — слова разошлись бы с кадрами слоя; создайте новый слой: automontage layer new --project-dir "${projectDir}"`);
 }
 
 async function run(options, deps = {}) {

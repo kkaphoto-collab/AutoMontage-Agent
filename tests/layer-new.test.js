@@ -72,10 +72,12 @@ test('the scaffolded layer follows the contract: layer.json, template copies, sp
   const dir = path.join(projectDir, 'motion-v01');
   // source — какой исходник проекта лежит в слое: слой живёт с одним исходником (layer words сверяет).
   const sourceSha = hashFile(workspace.sourcePath);
+  // size и mtimeMs — чтобы следующие команды не хешировали неизменившийся исходник заново.
+  const { size, mtimeMs } = fs.statSync(workspace.sourcePath);
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'layer.json'), 'utf8')), {
     version: 1, composition: 'Layer', fps: 25, width: 540, height: 960, durationInFrames: 150,
     face: { x: 270, y: 394 }, profile: 'live', sfxMasterDb: -5, speaker: { src: 'speaker.mp4', lastFrame: 149 },
-    source: { localPath: 'input/source.mp4', sha256: sourceSha, revision: 1 },
+    source: { localPath: 'input/source.mp4', sha256: sourceSha, size, mtimeMs, revision: 1 },
   });
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'spelling.json'), 'utf8')), {});
   // Стартовые файлы — побайтовые копии шаблона.
@@ -255,16 +257,24 @@ test('layer.json is written last: it does not exist yet while the placeholder ff
 // Настоящий Ctrl+C во время синхронной сборки доходит до обработчика на первом же обороте цикла
 // событий после неё — тест воспроизводит ровно это: сигнал ставится в очередь (setImmediate) изнутри
 // сборки, обработчик получает его через подменный emitter, а повторная отправка сигнала — через kill.
+// events — порядок строки в stderr (deps.error) и повторного сигнала (deps.kill): со стандартным
+// действием сигнал завершает процесс сразу, поэтому строка обязана быть раньше.
 function signalDeps() {
   const signals = new EventEmitter();
   const killed = [];
-  return { signals, killed, deps: { ...quiet().deps, signals, kill: (signal) => killed.push(signal) } };
+  const events = [];
+  return { signals, killed, events, deps: { ...quiet().deps, signals,
+    error: (line) => events.push(`error: ${line}`),
+    kill: (signal) => { killed.push(signal); events.push(`kill: ${signal}`); } } };
 }
+
+const GUARDED = ['SIGINT', 'SIGTERM', 'SIGHUP'];
+const guardListeners = (emitter) => GUARDED.reduce((sum, signal) => sum + emitter.listenerCount(signal), 0);
 
 test('Ctrl+C that lands during the scaffold removes the whole claimed folder and re-raises the signal', { skip: !hasFfmpeg }, async (t) => {
   const { projectDir, sfxDir } = makeLayerProject(t);
   useSfxDir(t, sfxDir);
-  const { signals, killed, deps } = signalDeps();
+  const { signals, killed, events, deps } = signalDeps();
   const runToolImpl = (command, args, options) => {
     if (options.stage === 'layer placeholder screenshot') setImmediate(() => signals.emit('SIGINT'));
     return runRealTool(command, args, options);
@@ -272,13 +282,14 @@ test('Ctrl+C that lands during the scaffold removes the whole claimed folder and
   await assert.rejects(newLayer.run({ 'project-dir': projectDir }, { ...deps, runToolImpl }), /layer new прерван сигналом SIGINT/);
   assert.deepEqual(motionDirs(projectDir), []);
   assert.deepEqual(killed, ['SIGINT']);
-  assert.equal(signals.listenerCount('SIGINT') + signals.listenerCount('SIGTERM'), 0);
+  assert.deepEqual(events, ['error: layer new прерван сигналом SIGINT — недостроенная папка motion-v01 удалена', 'kill: SIGINT']);
+  assert.equal(guardListeners(signals), 0);
 });
 
 test('SIGTERM that kills the placeholder ffmpeg removes the folder and is re-raised after the cleanup', { skip: !hasFfmpeg }, async (t) => {
   const { projectDir, sfxDir } = makeLayerProject(t);
   useSfxDir(t, sfxDir);
-  const { signals, killed, deps } = signalDeps();
+  const { signals, killed, events, deps } = signalDeps();
   const runToolImpl = () => {
     setImmediate(() => signals.emit('SIGTERM'));
     throw Object.assign(new Error('layer placeholder stock: ffmpeg завершён сигналом SIGTERM'), { signal: 'SIGTERM' });
@@ -286,25 +297,61 @@ test('SIGTERM that kills the placeholder ffmpeg removes the folder and is re-rai
   await assert.rejects(newLayer.run({ 'project-dir': projectDir }, { ...deps, runToolImpl }), /layer new прерван сигналом SIGTERM/);
   assert.deepEqual(motionDirs(projectDir), []);
   assert.deepEqual(killed, ['SIGTERM']);
+  assert.deepEqual(events, ['error: layer new прерван сигналом SIGTERM — недостроенная папка motion-v01 удалена', 'kill: SIGTERM']);
+});
+
+test('SIGHUP (the terminal was closed) is handled like Ctrl+C: folder removed, one stderr line, then the signal again', { skip: !hasFfmpeg }, async (t) => {
+  const { projectDir, sfxDir } = makeLayerProject(t);
+  useSfxDir(t, sfxDir);
+  const { signals, killed, events, deps } = signalDeps();
+  const runToolImpl = (command, args, options) => {
+    if (options.stage === 'layer placeholder stock') setImmediate(() => signals.emit('SIGHUP'));
+    return runRealTool(command, args, options);
+  };
+  await assert.rejects(newLayer.run({ 'project-dir': projectDir }, { ...deps, runToolImpl }), /layer new прерван сигналом SIGHUP/);
+  assert.deepEqual(motionDirs(projectDir), []);
+  assert.deepEqual(killed, ['SIGHUP']);
+  assert.deepEqual(events, ['error: layer new прерван сигналом SIGHUP — недостроенная папка motion-v01 удалена', 'kill: SIGHUP']);
+  assert.equal(guardListeners(signals), 0);
+});
+
+test('a second signal during the cleanup is ignored: one line and one re-raise', { skip: !hasFfmpeg }, async (t) => {
+  const { projectDir, sfxDir } = makeLayerProject(t);
+  useSfxDir(t, sfxDir);
+  const { signals, killed, events, deps } = signalDeps();
+  const runToolImpl = (command, args, options) => {
+    if (options.stage === 'layer placeholder stock') {
+      setImmediate(() => {
+        // Первый обработчик снимает все три — поэтому второй сигнал слушателей уже не находит.
+        signals.emit('SIGINT');
+        signals.emit('SIGHUP');
+      });
+    }
+    return runRealTool(command, args, options);
+  };
+  await assert.rejects(newLayer.run({ 'project-dir': projectDir }, { ...deps, runToolImpl }), /layer new прерван сигналом SIGINT/);
+  assert.deepEqual(killed, ['SIGINT']);
+  assert.equal(events.filter((line) => line.startsWith('error: ')).length, 1);
 });
 
 test('signal handlers live only while the folder is being built', { skip: !hasFfmpeg }, async (t) => {
   const { projectDir, sfxDir } = makeLayerProject(t);
   useSfxDir(t, sfxDir);
-  const { signals, killed, deps } = signalDeps();
+  const { signals, killed, events, deps } = signalDeps();
   let during = 0;
   const runToolImpl = (command, args, options) => {
-    during = signals.listenerCount('SIGINT') + signals.listenerCount('SIGTERM');
+    during = guardListeners(signals);
     return runRealTool(command, args, options);
   };
   assert.equal(await newLayer.run({ 'project-dir': projectDir }, { ...deps, runToolImpl }), 0);
-  assert.equal(during, 2);
-  assert.equal(signals.listenerCount('SIGINT') + signals.listenerCount('SIGTERM'), 0);
+  assert.equal(during, 3);
+  assert.equal(guardListeners(signals), 0);
   assert.deepEqual(killed, []);
+  assert.deepEqual(events, []);
   // Настоящий process: обработчики тоже снимаются.
-  const before = [process.listenerCount('SIGINT'), process.listenerCount('SIGTERM')];
+  const before = GUARDED.map((signal) => process.listenerCount(signal));
   assert.equal(await newLayer.run({ 'project-dir': projectDir }, quiet().deps), 0);
-  assert.deepEqual([process.listenerCount('SIGINT'), process.listenerCount('SIGTERM')], before);
+  assert.deepEqual(GUARDED.map((signal) => process.listenerCount(signal)), before);
 });
 
 // --- Исходник: поворот, видео без дорожки, длина по контейнеру, последний кадр видео ---
@@ -327,6 +374,20 @@ test('an audio-only source is refused with a Russian message, no folder is claim
   fs.writeFileSync(path.join(projectDir, 'transcript', 'words.json'), '[]');
   useSfxDir(t, path.join(videoProject, 'no-library'));
   await assert.rejects(newLayer.run({ 'project-dir': projectDir }, quiet().deps), /в исходнике нет видеодорожки — layer new работает с видео-исходником/);
+  assert.deepEqual(motionDirs(projectDir), []);
+});
+
+test('an image source is refused with a Russian message, no folder is claimed', { skip: !hasFfmpeg }, async (t) => {
+  const { root, projectDir: videoProject } = makeLayerProject(t);
+  const image = path.join(root, 'still.png');
+  runTool('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=0x336699:s=540x960', '-frames:v', '1', image]);
+  const projectDir = path.join(path.dirname(videoProject), 'image-source');
+  const { createOrOpenProject } = require('../scripts/project/workspace');
+  createOrOpenProject({ projectDir, name: 'image source', sourcePath: image });
+  fs.mkdirSync(path.join(projectDir, 'transcript'), { recursive: true });
+  fs.writeFileSync(path.join(projectDir, 'transcript', 'words.json'), '[]');
+  useSfxDir(t, path.join(videoProject, 'no-library'));
+  await assert.rejects(newLayer.run({ 'project-dir': projectDir }, quiet().deps), /исходник — картинка, а не видео: layer new работает с видео-исходником/);
   assert.deepEqual(motionDirs(projectDir), []);
 });
 
@@ -450,4 +511,86 @@ test('layer words replaces a symlinked src/words.js instead of writing through i
   assert.ok(fs.lstatSync(words).isFile() && !fs.lstatSync(words).isSymbolicLink());
   assert.match(fs.readFileSync(words, 'utf8'), /"t":"Привет,"/);
   assert.deepEqual(fs.readdirSync(path.dirname(words)).filter((name) => name.includes('.tmp')), []);
+});
+
+test('layer words: a word past the end is one that STARTS at or after the source end — a word crossing the end stays', { skip: !hasFfmpeg }, async (t) => {
+  const { projectDir, sfxDir, workspace } = makeLayerProject(t);
+  useSfxDir(t, sfxDir);
+  await newLayer.run({ 'project-dir': projectDir }, quiet().deps);
+  const transcript = path.join(projectDir, workspace.manifest.transcript.words);
+  const segments = JSON.parse(fs.readFileSync(transcript, 'utf8'));
+  // Исходник — ровно 6 с (150 кадров при 25 fps). «через» начинается до конца и кончается после (s < 6 < e),
+  // «ровно» начинается точно на конце (s = 6): судит word.s, а не word.e.
+  segments[0].words.push({ w: ' через', s: 5.8, e: 6.2 }, { w: ' ровно', s: 6, e: 6.3 });
+  fs.writeFileSync(transcript, JSON.stringify(segments));
+  const { deps, out } = quiet();
+  assert.equal(await layerWords.run({ 'project-dir': projectDir, layer: 'motion-v01' }, deps), 0);
+  assert.equal(out.warn.length, 1, out.warn.join('\n'));
+  assert.match(out.warn[0], /после конца исходника \(6 с\) — в слое их не будет: «ровно»$/);
+  assert.doesNotMatch(out.warn[0], /через/);
+});
+
+// Слой, у которого исходник проекта записан с целой секундой mtime: utimesSync с Date переносит
+// только миллисекунды, а mtimeMs файловой системы бывает дробным — так «вернуть прежнее время» точно.
+async function layerWithPinnedSource(t) {
+  const project = makeLayerProject(t);
+  useSfxDir(t, project.sfxDir);
+  const pinned = new Date('2026-01-01T00:00:00Z');
+  fs.utimesSync(project.workspace.sourcePath, pinned, pinned);
+  await newLayer.run({ 'project-dir': project.projectDir }, quiet().deps);
+  const words = (options = {}) => layerWords.run({ 'project-dir': project.projectDir, layer: 'motion-v01', ...options }, quiet().deps);
+  // Та же длина, другой байт в середине — и при желании прежнее время изменения.
+  const flipByte = (time) => {
+    const file = project.workspace.sourcePath;
+    const bytes = fs.readFileSync(file);
+    const middle = Math.floor(bytes.length / 2);
+    bytes[middle] ^= 0xff;
+    fs.writeFileSync(file, bytes);
+    if (time) fs.utimesSync(file, time, time);
+  };
+  return { ...project, pinned, words, flipByte, layerFile: path.join(project.projectDir, 'motion-v01', 'layer.json') };
+}
+
+test('layer new records the size and mtime of the project source next to its sha256', { skip: !hasFfmpeg }, async (t) => {
+  const { workspace, pinned, layerFile } = await layerWithPinnedSource(t);
+  const { source } = JSON.parse(fs.readFileSync(layerFile, 'utf8'));
+  assert.equal(source.size, fs.statSync(workspace.sourcePath).size);
+  assert.equal(source.mtimeMs, pinned.getTime());
+  assert.equal(source.sha256, hashFile(workspace.sourcePath));
+});
+
+test('layer words trusts an unchanged size and mtime without hashing, and hashes when either differs', { skip: !hasFfmpeg }, async (t) => {
+  const { pinned, words, flipByte } = await layerWithPinnedSource(t);
+  // Длина и время прежние — sha256 не считается (как make и rsync): даже подменённый байт не заметен.
+  flipByte(pinned);
+  assert.equal(await words(), 0);
+  // Вернули байт, но время новое (touch): считается sha256, он совпадает с записанным — слой тот же.
+  flipByte(new Date('2026-02-01T00:00:00Z'));
+  assert.equal(await words(), 0);
+  // Та же длина, новое время и другие байты — sha256 не совпал, отказ.
+  flipByte(new Date('2026-03-01T00:00:00Z'));
+  await assert.rejects(words(), /исходник проекта сменился после создания слоя motion-v01/);
+});
+
+test('layer words on an older layer.json without size and mtime always hashes the source', { skip: !hasFfmpeg }, async (t) => {
+  const { pinned, words, flipByte, layerFile } = await layerWithPinnedSource(t);
+  const layer = JSON.parse(fs.readFileSync(layerFile, 'utf8'));
+  delete layer.source.size;
+  delete layer.source.mtimeMs;
+  fs.writeFileSync(layerFile, JSON.stringify(layer));
+  assert.equal(await words(), 0);
+  flipByte(pinned);
+  await assert.rejects(words(), /исходник проекта сменился после создания слоя motion-v01/);
+});
+
+test('layer words names a layer folder that a killed layer new left without layer.json', { skip: !hasFfmpeg }, async (t) => {
+  const { projectDir, sfxDir } = makeLayerProject(t);
+  useSfxDir(t, sfxDir);
+  await newLayer.run({ 'project-dir': projectDir }, quiet().deps);
+  fs.rmSync(path.join(projectDir, 'motion-v01', 'layer.json'));
+  await assert.rejects(layerWords.run({ 'project-dir': projectDir, layer: 'motion-v01' }, quiet().deps), (error) => {
+    assert.match(error.message, /^motion-v01 собран не до конца \(нет layer\.json\) — удалите папку или создайте новый слой: automontage layer new --project-dir "/);
+    assert.doesNotMatch(error.message, /ENOENT/);
+    return true;
+  });
 });
