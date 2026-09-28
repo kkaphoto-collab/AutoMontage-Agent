@@ -2,6 +2,7 @@
 // по 50 мс в dBFS, корреляция Пирсона, поиск короткой/сдвинутой утечки голоса в звуке слоя (окно +
 // лаг) и доля звука слоя вне известных вставок (G7, Task 26).
 const { spawnSync } = require('node:child_process');
+const os = require('node:os');
 
 const SAMPLE_RATE = 8000;
 const BLOCK = 400; // 50 мс при 8 кГц
@@ -54,16 +55,21 @@ function pcmFromFfmpeg(inputArgs, { maxBuffer = 256 * 1024 * 1024, spawnImpl = s
   return samples;
 }
 
-// Полная полоса для громкости (G8): float32, каналы чередуются. Без округления до 16 бит —
-// K-взвешивание поднимает верха на 4 дБ, и s16 обрезал бы пики громкого голоса.
+// Полная полоса для громкости (G8): float32, каналы чередуются, без округления до 16 бит на выходе.
+// Формат ВЫХОДА не меняет формат фильтров: ffmpeg ведёт цепочку в формате входа (s16-исходник идёт
+// через biquad как s16p и обрезается уже там), поэтому перед фильтрами, поднимающими уровень,
+// вызывающий код сам ставит aformat=sample_fmts=fltp (mix-gates.js).
 function floatPcmFromFfmpeg(inputArgs, { sampleRate, channels, maxBuffer = 256 * 1024 * 1024, spawnImpl = spawnSync } = {}) {
   if (!(Number.isInteger(sampleRate) && sampleRate > 0 && Number.isInteger(channels) && channels > 0)) {
     throw new Error('floatPcmFromFfmpeg: sampleRate и channels должны быть целыми числами > 0');
   }
   const bytes = ffmpegPcmBytes(inputArgs, ['-ac', String(channels), '-ar', String(sampleRate), '-f', 'f32le', '-acodec', 'pcm_f32le'],
     { maxBuffer, spawnImpl });
-  const samples = new Float32Array(Math.floor(bytes.length / 4));
-  for (let i = 0; i < samples.length; i += 1) samples[i] = bytes.readFloatLE(i * 4);
+  const count = Math.floor(bytes.length / 4);
+  // Буфер ffmpeg обычно выровнен: читаем его видом без копии; иначе — побайтно.
+  if (bytes.byteOffset % 4 === 0 && os.endianness() === 'LE') return new Float32Array(bytes.buffer, bytes.byteOffset, count);
+  const samples = new Float32Array(count);
+  for (let i = 0; i < count; i += 1) samples[i] = bytes.readFloatLE(i * 4);
   return samples;
 }
 

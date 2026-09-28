@@ -86,15 +86,15 @@ test('the music stem is measured with the same ffmpeg inputs as the preview musi
   const output = ['-ac', '2', '-ar', '48000', '-f', 'f32le', '-acodec', 'pcm_f32le', '-'];
   const stem = calls.find((call) => call.args.includes('-filter_complex')).args;
   // Входы и их опции (порядок, -stream_loop, абсолютные пути) — один в один; граф — stem без
-  // изменений, к которому дописано только K-взвешивание на 48 кГц.
+  // изменений, к которому дописано только K-взвешивание на 48 кГц во float.
   assert.deepEqual(inputs(stem), inputs(production));
   assert.equal(stem[stem.indexOf('-filter_complex') + 1],
-    `${buildMusicFilter(mixOptions, { stem: 'music' })};[aout]aresample=48000,${K_WEIGHTING}[k]`);
+    `${buildMusicFilter(mixOptions, { stem: 'music' })};[aout]aresample=48000,aformat=sample_fmts=fltp,${K_WEIGHTING}[k]`);
   assert.deepEqual(stem.slice(stem.indexOf('-map')), ['-map', '[k]', '-t', '0.3', ...output]);
   // Голос проходит тот же формат, что ветка [v] в графе микса, и то же K-взвешивание.
   const voice = calls.find((call) => !call.args.includes('-filter_complex')).args;
   assert.deepEqual(voice.slice(voice.indexOf('-i')), ['-i', path.resolve('stage/finished.mp4'), '-map', '0:a:0', '-vn',
-    '-af', `${MIX_AUDIO_FORMAT},aresample=48000,${K_WEIGHTING}`, '-t', '0.3', ...output]);
+    '-af', `${MIX_AUDIO_FORMAT},aresample=48000,aformat=sample_fmts=fltp,${K_WEIGHTING}`, '-t', '0.3', ...output]);
   assert.ok(buildMusicFilter(mixOptions).split(';')[1].startsWith(`[0:a]${MIX_AUDIO_FORMAT},asplit=2[v]`));
   assert.ok(calls.every((call) => call.command === 'ffmpeg'));
 });
@@ -227,6 +227,23 @@ test('the loudness gap is the power ratio over whole speech-window blocks', () =
   }
 });
 
+// Голос и музыка оба в цифровой тишине: сначала вердикт про голос — без голоса разрыв не значит ничего,
+// а «музыки под речью нет» отправило бы чинить музыку.
+test('silent voice and silent music read as a silent voice, not as missing music', () => {
+  const zeros = new Float64Array(40);
+  const both = loudnessGap(zeros, zeros, [{ s: 0, e: 2 }]);
+  assert.equal(both.gapLu, -Infinity);
+  assert.equal(both.voiceLufs, -Infinity);
+  assert.equal(both.musicLufs, -Infinity);
+  const g = gateVoiceMusic(both, avatar);
+  assert.equal(g.status, 'fail');
+  assert.equal(g.value, 'голос не звучит');
+  assert.doesNotMatch(g.hint, /музык/);
+  // Замер, собранный не нашим loudnessGap, с тихим голосом и gapLu Infinity — тоже вердикт про голос.
+  assert.equal(gateVoiceMusic({ gapLu: Infinity, voiceLufs: -Infinity, musicLufs: -Infinity, blocks: 40 }, avatar).value,
+    'голос не звучит');
+});
+
 // Старая медиана по блокам со слышимой музыкой здесь давала 0 дБ и «музыка громкая»: музыка звучит
 // вровень с голосом всего в 2 блоках из 400, в остальных её нет.
 test('music audible in a few blocks only reads as barely audible, never as loud', () => {
@@ -270,6 +287,34 @@ test('G8 statuses follow the profile corridor and speak in LU with commas', () =
   assert.match(gateVoiceMusic(null, profile, { hasMusic: false }).hint, /нет музыки/);
   // Замер старой формы ({ median }) — ошибка вызова, а не тихий pass.
   assert.throws(() => gateVoiceMusic({ median: 0.5, blocks: 100 }, profile), /gapLu/);
+});
+
+// Схема brief ограничивает music.gainDb диапазоном −60…0 дБ: совет не выводит за край, а когда края
+// не хватает — предлагает трек громче/тише или мягче/сильнее ducking.
+test('G8 advice never pushes music.gainDb outside −60…0 dB', () => {
+  const profile = { ...avatar, voiceMusic: { stopLow: 3, warnLow: 7.5, target: 10.5, warnHigh: 13.5, stopHigh: 18.5 } };
+  const at = (gapLu, gainDb) => gateVoiceMusic({ gapLu, voiceLufs: -14, musicLufs: -14 - gapLu, blocks: 100 }, profile,
+    { gainDb }).hint;
+  // Запаса хватает — совет прежний.
+  assert.equal(at(16, -22), 'музыка на 16 LU тише голоса: музыку почти не слышно — увеличьте music.gainDb примерно на 5,5 дБ (цель 10,5 LU)');
+  assert.equal(at(2, -20), 'музыка на 2 LU тише голоса: слишком громко под речью — уменьшите music.gainDb примерно на 8,5 дБ (цель 10,5 LU)');
+  // Ровно до края — ещё обычный совет.
+  assert.match(at(16, -5.5), /увеличьте music\.gainDb примерно на 5,5 дБ/);
+  assert.match(at(2, -51.5), /уменьшите music\.gainDb примерно на 8,5 дБ/);
+  // Край не даёт всего шага: до края и что делать дальше.
+  assert.equal(at(16, -2), 'музыка на 16 LU тише голоса: музыку почти не слышно — увеличьте music.gainDb до 0 дБ (выше схема не даёт); '
+    + 'не хватит ещё ~3,5 дБ — возьмите трек громче или ослабьте ducking: выше ducking.thresholdDb или меньше ducking.ratio (цель 10,5 LU)');
+  assert.equal(at(2, -55), 'музыка на 2 LU тише голоса: слишком громко под речью — уменьшите music.gainDb до −60 дБ (ниже схема не даёт); '
+    + 'не хватит ещё ~3,5 дБ — возьмите трек тише или усильте ducking: ниже ducking.thresholdDb или больше ducking.ratio (цель 10,5 LU)');
+  // Уже на краю — только трек и ducking.
+  assert.equal(at(16, 0), 'музыка на 16 LU тише голоса: музыку почти не слышно — music.gainDb уже 0 дБ (максимум схемы): '
+    + 'возьмите трек громче или ослабьте ducking: выше ducking.thresholdDb или меньше ducking.ratio (цель 10,5 LU)');
+  assert.equal(at(2, -60), 'музыка на 2 LU тише голоса: слишком громко под речью — music.gainDb уже −60 дБ (минимум схемы): '
+    + 'возьмите трек тише или усильте ducking: ниже ducking.thresholdDb или больше ducking.ratio (цель 10,5 LU)');
+  for (const hint of [at(16, -2), at(16, 0)]) assert.doesNotMatch(hint, /до [1-9]/);
+  // В коридоре gainDb не нужен и не мешает; сломанное значение — ошибка вызова.
+  assert.equal(at(10.5, 0), 'музыка на 10,5 LU тише голоса');
+  for (const gainDb of [NaN, Infinity, '−16']) assert.throws(() => at(16, gainDb), /gateVoiceMusic: gainDb/);
 });
 
 // Две «музыки» с совсем разными спектрами: низкий гул и яркие хэты (шум выше 5 кГц щелчками).
@@ -354,4 +399,37 @@ test('a mono voice measures like the stereo copy the mix actually plays', { skip
   const stereo = measure('stereo.wav').gapLu;
   assert.ok(Math.abs(stereo - 10) < 0.2, `стерео-голос: ${stereo} LU`);
   assert.ok(Math.abs(mono - stereo) < 0.2, `моно ${mono} LU против стерео ${stereo} LU`);
+});
+
+// ffmpeg ведёт фильтры в формате входа: s16-исходник шёл через K-взвешивание как s16p, и полка
+// +4 дБ обрезала пики громкого верха внутри biquad ещё до float-выхода. Громкий 6 кГц s16 обязан
+// читаться как его float-копия.
+test('a full-scale s16 voice is not clipped inside the K weighting', { skip: !hasFfmpeg }, (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-mix-s16-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const source = "aevalsrc='sin(2*PI*6000*t)':s=48000:d=3";
+  for (const [file, codec] of [['s16.wav', 'pcm_s16le'], ['f32.wav', 'pcm_f32le']]) {
+    runTool('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', source, '-ac', '2', '-c:a', codec, path.join(dir, file)]);
+  }
+  runTool('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=300:sample_rate=48000:duration=3', '-ac', '2',
+    path.join(dir, 'music.wav')]);
+  const measure = (voice) => measureVoiceMusic({ voicePath: path.join(dir, voice), musicPath: path.join(dir, 'music.wav'),
+    durationSec: 3, windows: [{ s: 0.5, e: 2.5 }], mixOptions: parseMixOptions(['--gain', '-10', '--threshold', '1', '--ratio', '1', '--duration', '3']) });
+  const s16 = measure('s16.wav');
+  const f32 = measure('f32.wav');
+  assert.ok(Math.abs(s16.voiceLufs - f32.voiceLufs) <= 0.05, `s16 ${s16.voiceLufs.toFixed(2)} против float ${f32.voiceLufs.toFixed(2)} LUFS`);
+  assert.ok(Math.abs(s16.gapLu - f32.gapLu) <= 0.05, `разрыв s16 ${s16.gapLu.toFixed(2)} против float ${f32.gapLu.toFixed(2)} LU`);
+});
+
+test('a preview with silent voice and silent music says the voice is silent', { skip: !hasFfmpeg }, (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-mix-silent-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  for (const file of ['voice.wav', 'music.wav']) {
+    runTool('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo', '-t', '2', path.join(dir, file)]);
+  }
+  const result = measureVoiceMusic({ voicePath: path.join(dir, 'voice.wav'), musicPath: path.join(dir, 'music.wav'), durationSec: 2,
+    windows: [{ s: 0.2, e: 1.8 }], mixOptions: parseMixOptions(['--gain', '-16', '--duration', '2']) });
+  const g = gateVoiceMusic(result, avatar, { gainDb: -16 });
+  assert.equal(g.status, 'fail');
+  assert.equal(g.value, 'голос не звучит');
 });

@@ -208,8 +208,8 @@ test('ffmpeg failures are errors, never a silent pass', () => {
   assert.deepEqual([...pcmFromFfmpeg([], { spawnImpl: ok })], [1, -1]);
 });
 
-// Полная полоса для громкости (G8): float без округления до 16 бит — K-взвешивание поднимает
-// верха на 4 дБ, и s16 обрезал бы пики громкого голоса.
+// Полная полоса для громкости (G8): float без округления до 16 бит на выходе. Сами фильтры
+// вызывающий код переводит во float отдельно (aformat=sample_fmts=fltp, см. mix-gates.js).
 test('floatPcmFromFfmpeg asks for float PCM at the given rate and channels and keeps ffmpeg errors', () => {
   const calls = [];
   const bytes = Buffer.alloc(12);
@@ -226,6 +226,23 @@ test('floatPcmFromFfmpeg asks for float PCM at the given rate and channels and k
     /в clip\.mp4 нет звуковой дорожки/);
   for (const bad of [{ sampleRate: 0, channels: 2 }, { sampleRate: 48000, channels: 0 }, { sampleRate: 48000.5, channels: 2 }, {}]) {
     assert.throws(() => floatPcmFromFfmpeg(['-i', 'x.wav'], { ...bad, spawnImpl: ok }), /floatPcmFromFfmpeg: sampleRate и channels/);
+  }
+});
+
+// Быстрое чтение видом Float32Array на выровненном буфере и медленное побайтное на невыровненном
+// дают одно и то же; хвост короче 4 байт отбрасывается.
+test('floatPcmFromFfmpeg reads aligned and unaligned buffers alike and drops a partial tail', () => {
+  const values = [0.25, -0.75, 1.5];
+  const aligned = Buffer.alloc(14);
+  values.forEach((v, i) => aligned.writeFloatLE(v, i * 4));
+  const unaligned = Buffer.alloc(15).subarray(1);
+  values.forEach((v, i) => unaligned.writeFloatLE(v, i * 4));
+  assert.equal(unaligned.byteOffset % 4, 1);
+  for (const stdout of [aligned, unaligned]) {
+    const spawnImpl = () => ({ status: 0, stdout, stderr: Buffer.alloc(0) });
+    const samples = floatPcmFromFfmpeg(['-i', 'x.wav'], { sampleRate: 48000, channels: 1, spawnImpl });
+    assert.ok(samples instanceof Float32Array);
+    assert.deepEqual([...samples], values);
   }
 });
 

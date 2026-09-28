@@ -1,8 +1,10 @@
 // G8 «Голос и музыка» (D8): разрыв громкости голоса и музыки на участках речи по настоящим дорожкам
 // preview. Голос — звук после finish.js (голос + эффекты слоя, нормализация), музыка — ветка музыки
 // после того же sidechaincompress, что в mix-music.js. Громкость — как LUFS (BS.1770): K-взвешивание
-// на 48 кГц, сумма мощностей каналов, блоки 50 мс внутри окон речи; без гейтинга, потому что окна
-// речи уже выбраны по транскрипту. Разрыв = 10·log10(ΣP голоса / ΣP музыки) в LU.
+// на 48 кГц, сумма мощностей каналов, блоки 50 мс внутри окон речи. Разрыв = 10·log10(ΣP голоса /
+// ΣP музыки) в LU. Гейтинга НАМЕРЕННО нет: окна речи уже выбраны по транскрипту, а тихие места музыки
+// под речью должны тянуть разрыв вверх — это то, что в среднем слышно под голосом. На музыке с
+// паузами он поэтому расходится с gated ebur128; при калибровке это не ошибка, которую надо исправлять.
 const { BLOCK_SEC, floatPcmFromFfmpeg, formatSeconds } = require('./audio');
 const { gate } = require('./report');
 const { MIX_AUDIO_FORMAT, buildMusicFilter, mixMusicInputArgs } = require('../mix-music');
@@ -52,8 +54,9 @@ function blockPowers(samples, { sampleRate = RATE, channels = CHANNELS } = {}) {
   return out;
 }
 
-// Разрыв громкости по целым блокам внутри окон. null — ни одного блока (нет речи); gapLu Infinity —
-// под речью цифровая тишина музыки. voiceLufs/musicLufs — громкость участков речи без гейтинга.
+// Разрыв громкости по целым блокам внутри окон. null — ни одного блока (нет речи); gapLu −Infinity —
+// голос в окнах речи не звучит (даже если и музыка молчит: сначала чинить голос); Infinity — под речью
+// цифровая тишина музыки. voiceLufs/musicLufs — громкость участков речи без гейтинга.
 function loudnessGap(voicePowers, musicPowers, windows) {
   let voice = 0;
   let music = 0;
@@ -73,7 +76,7 @@ function loudnessGap(voicePowers, musicPowers, windows) {
   if (!blocks) return null;
   const lufs = (sum) => (sum > 0 ? -0.691 + 10 * Math.log10(sum / blocks) : -Infinity);
   return {
-    gapLu: music > 0 ? 10 * Math.log10(voice / music) : Infinity,
+    gapLu: !(voice > 0) ? -Infinity : music > 0 ? 10 * Math.log10(voice / music) : Infinity,
     voiceLufs: lufs(voice), musicLufs: lufs(music), blocks,
   };
 }
@@ -93,7 +96,8 @@ function measureVoiceMusic({ voicePath, musicPath, mixOptions, durationSec, wind
   }
   if (!Array.isArray(windows)) throw new Error('measureVoiceMusic: windows должен быть массивом окон речи');
   const duration = formatSeconds(durationSec);
-  const weighting = `aresample=${RATE},${K_WEIGHTING}`;
+  // fltp до K-взвешивания: иначе s16-вход идёт через biquad в s16p и полка +4 дБ обрезает пики.
+  const weighting = `aresample=${RATE},aformat=sample_fmts=fltp,${K_WEIGHTING}`;
   const decode = (inputArgs) => floatPcmFromFfmpeg(inputArgs, {
     sampleRate: RATE, channels: CHANNELS, spawnImpl,
     maxBuffer: Math.ceil(durationSec * RATE) * CHANNELS * 4 + 1024 * 1024,
@@ -115,27 +119,59 @@ function gapWords(gapLu) {
   return `музыка на ${number(amount)} LU ${gapLu > 0 ? 'тише' : 'громче'} голоса`;
 }
 
-function gateVoiceMusic(result, profile, { hasMusic = true } = {}) {
+// Границы music.gainDb в схеме brief (lesson-brief и motion-brief).
+const GAIN_MIN_DB = -60;
+const GAIN_MAX_DB = 0;
+const QUIETER = 'возьмите трек тише или усильте ducking: ниже ducking.thresholdDb или больше ducking.ratio';
+const LOUDER = 'возьмите трек громче или ослабьте ducking: выше ducking.thresholdDb или меньше ducking.ratio';
+
+// Совет по music.gainDb. Sidechain сжимает музыку по уровню голоса, поэтому gainDb сдвигает разрыв
+// ровно на столько же — но не за пределы схемы: gainDb (текущее значение brief) ограничивает шаг краем
+// −60/0 дБ, остаток предлагается добрать треком или ducking. Без gainDb край неизвестен.
+function gainAdvice(m, v, gainDb) {
+  const target = `(цель ${number(v.target)} LU)`;
+  if (m < v.warnLow) {
+    const step = v.target - m;
+    const room = gainDb === undefined ? Infinity : gainDb - GAIN_MIN_DB;
+    if (step <= room + EPS) return `: слишком громко под речью — уменьшите music.gainDb примерно на ${number(r1(step))} дБ ${target}`;
+    if (room <= EPS) return `: слишком громко под речью — music.gainDb уже −60 дБ (минимум схемы): ${QUIETER} ${target}`;
+    return `: слишком громко под речью — уменьшите music.gainDb до −60 дБ (ниже схема не даёт); `
+      + `не хватит ещё ~${number(r1(step - room))} дБ — ${QUIETER} ${target}`;
+  }
+  if (m > v.warnHigh) {
+    const step = m - v.target;
+    const room = gainDb === undefined ? Infinity : GAIN_MAX_DB - gainDb;
+    if (step <= room + EPS) return `: музыку почти не слышно — увеличьте music.gainDb примерно на ${number(r1(step))} дБ ${target}`;
+    if (room <= EPS) return `: музыку почти не слышно — music.gainDb уже 0 дБ (максимум схемы): ${LOUDER} ${target}`;
+    return `: музыку почти не слышно — увеличьте music.gainDb до 0 дБ (выше схема не даёт); `
+      + `не хватит ещё ~${number(r1(step - room))} дБ — ${LOUDER} ${target}`;
+  }
+  return '';
+}
+
+// gainDb — текущий music.gainDb из brief: с ним совет не выходит за −60…0 дБ схемы.
+function gateVoiceMusic(result, profile, { hasMusic = true, gainDb } = {}) {
   const title = 'Голос и музыка';
   const v = profile.voiceMusic;
   const threshold = `${number(v.warnLow)}–${number(v.warnHigh)} LU, стоп < ${number(v.stopLow)} или > ${number(v.stopHigh)}`;
+  if (gainDb !== undefined && gainDb !== null && !(typeof gainDb === 'number' && Number.isFinite(gainDb))) {
+    throw new Error(`gateVoiceMusic: gainDb должен быть конечным числом (music.gainDb из brief), получено ${String(gainDb)}`);
+  }
   if (!hasMusic) return gate('G8', title, { status: 'skipped', threshold, hint: 'в brief нет музыки' });
   if (!result) return gate('G8', title, { status: 'skipped', threshold, hint: 'в диапазоне preview нет речи' });
   const m = result.gapLu;
   if (typeof m !== 'number' || Number.isNaN(m)) throw new Error('gateVoiceMusic: в замере нет gapLu (результат measureVoiceMusic)');
+  // Сначала голос: если молчат обе дорожки, «музыки под речью нет» отправило бы чинить не то.
+  if (m === -Infinity || result.voiceLufs === -Infinity) {
+    return gate('G8', title, { status: 'fail', value: 'голос не звучит', threshold,
+      hint: 'в окнах речи голос не звучит: проверьте звук preview после finish.js' });
+  }
   if (m === Infinity) {
     return gate('G8', title, { status: 'fail', value: 'музыки под речью нет', threshold,
       hint: 'музыки под речью нет (цифровая тишина): проверьте файл музыки и music.gainDb' });
   }
-  if (m === -Infinity) {
-    return gate('G8', title, { status: 'fail', value: 'голос не звучит', threshold,
-      hint: 'в окнах речи голос не звучит: проверьте звук preview после finish.js' });
-  }
   const status = m < v.stopLow || m > v.stopHigh ? 'fail' : m < v.warnLow || m > v.warnHigh ? 'warn' : 'pass';
-  // Sidechain сжимает музыку по уровню голоса, поэтому music.gainDb сдвигает разрыв ровно на столько же.
-  const change = number(r1(Math.abs(v.target - m)));
-  const advice = m < v.warnLow ? `: слишком громко под речью — уменьшите music.gainDb примерно на ${change} дБ (цель ${number(v.target)} LU)`
-    : m > v.warnHigh ? `: музыку почти не слышно — увеличьте music.gainDb примерно на ${change} дБ (цель ${number(v.target)} LU)` : '';
+  const advice = gainAdvice(m, v, gainDb === null ? undefined : gainDb);
   return gate('G8', title, { status, value: r1(m), unit: 'LU', threshold, hint: `${gapWords(m)}${advice}` });
 }
 
