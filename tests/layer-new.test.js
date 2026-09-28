@@ -334,6 +334,66 @@ test('a second signal during the cleanup is ignored: one line and one re-raise',
   assert.equal(events.filter((line) => line.startsWith('error: ')).length, 1);
 });
 
+test('where the signal cannot be re-raised (SIGHUP on Windows: ENOSYS), layer new exits with 128 + its number after the cleanup', { skip: !hasFfmpeg }, async (t) => {
+  const { projectDir, sfxDir } = makeLayerProject(t);
+  useSfxDir(t, sfxDir);
+  const { signals, events, deps } = signalDeps();
+  const runToolImpl = (command, args, options) => {
+    if (options.stage === 'layer placeholder stock') setImmediate(() => signals.emit('SIGHUP'));
+    return runRealTool(command, args, options);
+  };
+  const noReraise = { ...deps, runToolImpl,
+    kill: (signal) => { events.push(`kill: ${signal}`); throw Object.assign(new Error('kill ENOSYS'), { code: 'ENOSYS' }); },
+    exit: (code) => events.push(`exit: ${code}`) };
+  await assert.rejects(newLayer.run({ 'project-dir': projectDir }, noReraise), /layer new прерван сигналом SIGHUP/);
+  assert.deepEqual(motionDirs(projectDir), []);
+  assert.deepEqual(events, ['error: layer new прерван сигналом SIGHUP — недостроенная папка motion-v01 удалена', 'kill: SIGHUP', 'exit: 129']);
+  assert.equal(guardListeners(signals), 0);
+});
+
+test('the handlers stay armed until the cleanup is done: a second copy of the signal cannot cut the cleanup short', { skip: !hasFfmpeg }, async (t) => {
+  // Ctrl+C в терминале доходит до слоя дважды: от терминала и копией от внешнего automontage. Сними
+  // обработчик до уборки — вторая копия сработала бы со стандартным действием посреди rmSync.
+  const { projectDir, sfxDir } = makeLayerProject(t);
+  useSfxDir(t, sfxDir);
+  const { signals, killed, events, deps } = signalDeps();
+  let armed = null;
+  const runToolImpl = (command, args, options) => {
+    if (options.stage === 'layer placeholder stock') setImmediate(() => signals.emit('SIGINT'));
+    return runRealTool(command, args, options);
+  };
+  const error = (line) => {
+    armed = guardListeners(signals);
+    signals.emit('SIGINT');
+    events.push(`error: ${line}`);
+  };
+  await assert.rejects(newLayer.run({ 'project-dir': projectDir }, { ...deps, runToolImpl, error }), /layer new прерван сигналом SIGINT/);
+  assert.equal(armed, 3);
+  assert.deepEqual(killed, ['SIGINT']);
+  assert.equal(events.filter((line) => line.startsWith('error: ')).length, 1);
+  assert.equal(guardListeners(signals), 0);
+  assert.deepEqual(motionDirs(projectDir), []);
+});
+
+test('a half-built folder that cannot be removed is named with the same «недостроенная» wording', {
+  skip: !hasFfmpeg || process.platform === 'win32' || process.getuid?.() === 0 ? 'нужны POSIX-права без root' : false,
+}, async (t) => {
+  const { projectDir, sfxDir } = makeLayerProject(t);
+  useSfxDir(t, sfxDir);
+  const locked = path.join(projectDir, 'motion-v01', 'public');
+  const runToolImpl = () => {
+    fs.chmodSync(locked, 0o555);
+    throw new Error('ffmpeg упал');
+  };
+  try {
+    await assert.rejects(newLayer.run({ 'project-dir': projectDir }, { ...quiet().deps, runToolImpl }),
+      /ffmpeg упал \(не удалось убрать недостроенную папку motion-v01: /);
+  } finally {
+    // Права — обратно до уборки временной папки (её t.after зарегистрирован раньше и идёт первым).
+    if (fs.existsSync(locked)) fs.chmodSync(locked, 0o755);
+  }
+});
+
 test('signal handlers live only while the folder is being built', { skip: !hasFfmpeg }, async (t) => {
   const { projectDir, sfxDir } = makeLayerProject(t);
   useSfxDir(t, sfxDir);

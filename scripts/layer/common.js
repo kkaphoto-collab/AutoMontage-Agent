@@ -109,6 +109,10 @@ const SHA256 = /^[a-f0-9]{64}$/u;
 
 // Размер и mtime исходника те же, что записал layer new, — байты считаем теми же (как make и rsync) и
 // не хешируем исходник на сотни МБ при каждой команде. Старый layer.json без них — всегда sha256.
+// Цена компромисса: после touch (байты те же, mtime новый) sha256 считается при каждой команде —
+// layer.json мы здесь не переписываем; подмена байтов той же длины с тем же mtime (cp -p поверх)
+// не замечается. Штатная замена исходника в продукте меняет localPath или revision в project.json,
+// и её ловит сравнение пути и ревизии в assertLayerSource ниже — без всякого хеша.
 const sameStat = (recorded, stat) => Number.isFinite(recorded.size) && Number.isFinite(recorded.mtimeMs)
   && recorded.size === stat.size && recorded.mtimeMs === stat.mtimeMs;
 

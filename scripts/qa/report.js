@@ -91,9 +91,13 @@ function formatReport(report) {
     if (g.spans.length > 3) lines.push(`   …и ещё ${g.spans.length - 3} — полный список в JSON-отчёте рядом`);
     if (g.hint && g.status !== 'pass') lines.push(`   → ${g.hint}`);
   }
-  // Отчёт, прочитанный с диска, может быть старше поля unusedWaivers.
+  // Отчёт, прочитанный с диска, может быть старше поля unusedWaivers. ℹ️, а не ☑️: ☑️ — гейт, который
+  // исключение действительно сняло. Гейт с warn исключение не трогает — объясняем, почему оно лишнее.
   for (const w of report.unusedWaivers || []) {
-    lines.push(`${ICONS.waived} исключение ${w.gate} не понадобилось: ${w.reason} — уберите его из plan.js`);
+    lines.push(`ℹ️ исключение ${w.gate} не понадобилось: ${w.reason} — уберите его из plan.js`);
+    if (report.gates.some((g) => g.id === w.gate && g.status === 'warn')) {
+      lines.push(`   → ${w.gate} даёт только предупреждение — исключение снимает лишь стоп`);
+    }
   }
   return lines.join('\n');
 }

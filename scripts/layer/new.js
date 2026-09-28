@@ -1,4 +1,5 @@
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { probeMediaPath, probeVideo } = require('../media-probe');
 const { captureTool, runTool } = require('../process');
@@ -94,7 +95,7 @@ function releaseLayerDir({ layerDir, identity }) {
 
 function releaseNote({ name }, status) {
   if (status === 'swapped') return `папку ${name} подменили во время layer new — не удаляю её`;
-  if (status?.error) return `не удалось убрать недособранную папку ${name}: ${status.error.message}`;
+  if (status?.error) return `не удалось убрать недостроенную папку ${name}: ${status.error.message}`;
   return null;
 }
 
@@ -112,21 +113,29 @@ function withReleaseNote(error, claim, status) {
 // dev/ino) и повторяет сигнал уже со стандартным действием — процесс завершается как прерванный, а не
 // оставляет готовый с виду слой. Сборка синхронная, поэтому сигнал доходит до обработчика на первом
 // обороте цикла событий после неё; settle() даёт этот оборот, пока обработчики ещё стоят.
+// Обработчики снимаются только после уборки: Ctrl+C приходит дважды (от терминала и копией от внешнего
+// automontage), и снятый заранее обработчик отдал бы вторую копию стандартному действию посреди rmSync.
 // Строка в stderr — до повторного сигнала: он завершает процесс сразу, и throw в run() уже никто не
 // напечатает. report не должен помешать уборке и сигналу, поэтому его сбой глотаем.
-function interruptGuard({ signals, kill, report }) {
+function interruptGuard({ signals, kill, exit, report }) {
   const state = { claim: null, interrupted: null, released: null };
   const handlers = SIGNALS.map((signal) => [signal, () => {
     if (state.interrupted) return;
     state.interrupted = signal;
-    stop();
     if (state.claim) state.released = releaseLayerDir(state.claim);
     try {
       report(interruptNote(signal, state.claim, state.released));
     } catch {
       // stderr закрыт (например, вместе с терминалом) — сигнал всё равно повторяем
     }
-    kill(signal);
+    stop();
+    // На Windows повторить можно только SIGINT/SIGTERM/SIGKILL: SIGHUP (закрыли окно консоли) даёт
+    // ENOSYS. Уборка уже сделана — выходим с тем кодом, что дал бы сам сигнал: 128 + его номер.
+    try {
+      kill(signal);
+    } catch {
+      exit(128 + (os.constants.signals[signal] || 1));
+    }
   }]);
   function stop() {
     for (const [signal, handler] of handlers) signals.removeListener(signal, handler);
@@ -209,7 +218,12 @@ async function run(options, deps = {}) {
   transcriptPath(projectDir, manifest);
   const source = inspectSource(sourcePath, manifest, { probeVideoImpl: deps.probeVideo || probeVideo, probeMediaImpl: deps.probeMedia || probeMediaPath });
 
-  const guard = interruptGuard({ signals: deps.signals || process, kill: deps.kill || ((signal) => process.kill(process.pid, signal)), report: reportError });
+  const guard = interruptGuard({
+    signals: deps.signals || process,
+    kill: deps.kill || ((signal) => process.kill(process.pid, signal)),
+    exit: deps.exit || ((code) => process.exit(code)),
+    report: reportError,
+  });
   const notes = [];
   let claim;
   let sfx;

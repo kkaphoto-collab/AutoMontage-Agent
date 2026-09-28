@@ -299,7 +299,8 @@ function buildLayerManifest(layerDir) {
   try {
     return kitCore.buildManifest(kitCore.compilePlan(mod.buildPlan, mod.ctx));
   } catch (error) {
-    throw layerError(name, root, error.message, error, error.cause);
+    // Не только Error: геттер в объекте плана, который читает compileLayer, может бросить что угодно.
+    throw layerError(name, root, error?.message ?? String(error), error, error?.cause);
   }
 }
 

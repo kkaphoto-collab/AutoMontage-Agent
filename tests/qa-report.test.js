@@ -261,7 +261,9 @@ test('buildReport keeps unused waivers as {gate, reason} and formatReport asks t
   // Лишнее исключение — подсказка автору, а не предупреждение: вердикт и код не меняются.
   assert.deepEqual(report.summary, { status: 'pass', fail: 0, warn: 0 });
   assert.equal(exitCodeFor(report), 0);
-  assert.match(formatReport(report), /^☑️ исключение G1 не понадобилось: длинный план экрана — уберите его из plan\.js$/m);
+  // ℹ️, а не ☑️: ☑️ — значок гейта, который исключение действительно сняло.
+  assert.match(formatReport(report), /^ℹ️ исключение G1 не понадобилось: длинный план экрана — уберите его из plan\.js$/m);
+  assert.doesNotMatch(formatReport(report), /☑️|даёт только предупреждение/);
   const plain = buildReport({ kind: 'layer-check', profile: 'avatar', gates: [] });
   assert.deepEqual(plain.unusedWaivers, []);
   assert.doesNotMatch(formatReport(plain), /не понадобилось/);
@@ -269,4 +271,14 @@ test('buildReport keeps unused waivers as {gate, reason} and formatReport asks t
   const { unusedWaivers, ...old } = plain;
   assert.deepEqual(unusedWaivers, []);
   assert.doesNotMatch(formatReport(old), /не понадобилось/);
+});
+
+test('an unused waiver on a gate that only warns explains that a waiver lifts a stop, not a warning', () => {
+  const report = buildReport({ kind: 'layer-check', profile: 'avatar',
+    gates: [gate('G1', 'Ритм', { status: 'warn' }), gate('G4', 'Хук')],
+    unusedWaivers: [{ gate: 'G1', reason: 'длинные планы' }, { gate: 'G4', reason: 'уход в хуке' }] });
+  const text = formatReport(report);
+  assert.match(text, /^ℹ️ исключение G1 не понадобилось: длинные планы — уберите его из plan\.js\n {3}→ G1 даёт только предупреждение — исключение снимает лишь стоп$/m);
+  assert.match(text, /^ℹ️ исключение G4 не понадобилось: уход в хуке — уберите его из plan\.js$/m);
+  assert.equal(text.match(/даёт только предупреждение/g).length, 1);
 });

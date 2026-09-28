@@ -102,8 +102,9 @@ export function compilePlan(buildPlan, ctx) {
   try {
     plan = buildPlan(ctx);
   } catch (error) {
-    // cause хранит исходный стек: по нему Node-манифест называет строку в src/plan.js.
-    throw new Error(`src/plan.js упал при построении плана — ${error.message}`, { cause: error });
+    // cause хранит исходный стек: по нему Node-манифест называет строку в src/plan.js. План может
+    // бросить и не Error (throw 'строка', throw undefined) — тогда в тексте само значение.
+    throw new Error(`src/plan.js упал при построении плана — ${error?.message ?? String(error)}`, { cause: error });
   }
   if (typeof plan?.then === 'function') {
     // Отклонённый Promise без обработчика уронил бы процесс (unhandledRejection) уже после этой ошибки.

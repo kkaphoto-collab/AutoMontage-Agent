@@ -148,16 +148,6 @@ if (argv[0] === 'takes') {
   process.exit(0);
 }
 
-// motion-слой из деталей motion-kit и его проверки: отдельный скрипт, аргументы не попадают в build.js
-if (argv[0] === 'layer') {
-  try {
-    execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'layer', 'cli.js'), ...argv.slice(1)], {
-      stdio: 'inherit', cwd: process.cwd(), shell: false,
-    });
-  } catch (e) { process.exit(e.status || 1); }
-  process.exit(0);
-}
-
 // пульт роликов и входящие агента: отдельные скрипты, аргументы не попадают в build.js
 if (argv[0] === 'pult' || argv[0] === 'inbox') {
   const script = argv[0] === 'pult' ? 'cli.js' : 'inbox.js';
@@ -169,14 +159,23 @@ if (argv[0] === 'pult' || argv[0] === 'inbox') {
   process.exit(0);
 }
 
-// локальная проверка проекта: аргументы review никогда не попадают в build.js
-if (argv[0] === 'review') {
+// Команды с собственной уборкой по сигналу: сигнал внешнему automontage передаётся ребёнку, внешний
+// процесс ждёт его выхода и отдаёт его код (в том числе 2 у layer check/render). execFileSync так не
+// умеет: убитый внешний процесс оставлял ребёнка доделывать работу (layer new дособирал слой).
+// review — локальная проверка проекта; layer — motion-слой из деталей motion-kit и его проверки.
+// Аргументы обеих не попадают в build.js.
+const SIGNAL_FORWARDING = {
+  review: { script: ['review', 'cli.js'], signalExitCodes: { SIGINT: 130, SIGTERM: 143 } },
+  // SIGHUP — закрытое окно терминала: layer new и на него убирает недостроенную папку.
+  layer: { script: ['layer', 'cli.js'], signalExitCodes: { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 } },
+};
+
+function runForwardingSignals({ script, signalExitCodes }, args) {
   const child = spawn(
     process.execPath,
-    [path.join(ROOT, 'scripts', 'review', 'cli.js'), ...argv.slice(1)],
+    [path.join(ROOT, 'scripts', ...script), ...args],
     { stdio: 'inherit', cwd: process.cwd(), shell: false },
   );
-  const signalExitCodes = { SIGINT: 130, SIGTERM: 143 };
   let forwardedSignal = null;
   let settled = false;
   const handlers = {};
@@ -195,7 +194,12 @@ if (argv[0] === 'review') {
     handlers[signal] = () => {
       if (forwardedSignal) return;
       forwardedSignal = signal;
-      child.kill(signal);
+      try {
+        child.kill(signal);
+      } catch {
+        // Windows не умеет посылать SIGHUP (ENOSYS) — ребёнка всё равно останавливаем.
+        child.kill('SIGTERM');
+      }
     };
     process.on(signal, handlers[signal]);
   }
@@ -204,6 +208,10 @@ if (argv[0] === 'review') {
     if (Number.isInteger(code)) finish(code);
     else finish(forwardedSignal ? signalExitCodes[forwardedSignal] : 1);
   });
+}
+
+if (Object.hasOwn(SIGNAL_FORWARDING, argv[0])) {
+  runForwardingSignals(SIGNAL_FORWARDING[argv[0]], argv.slice(1));
 } else {
 
 const buildJs = path.join(ROOT, 'scripts', 'build.js');
