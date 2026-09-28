@@ -104,6 +104,9 @@ function writeJson(file, value) {
 
 const relative = (projectDir, file) => path.relative(projectDir, file).split(path.sep).join('/');
 
+// Число для сообщений по-русски: до сотых, с запятой (29,97 fps, 6,3 с).
+const formatNumber = (value) => String(Number(Number(value).toFixed(2))).replace('.', ',');
+
 module.exports = {
-  LAYER_NAME, nextLayerName, projectFrom, readJson, readLayerJson, relative, resolveLayer, sha256File, writeJson,
+  LAYER_NAME, formatNumber, nextLayerName, projectFrom, readJson, readLayerJson, relative, resolveLayer, sha256File, writeJson,
 };

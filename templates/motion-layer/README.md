@@ -12,6 +12,8 @@
   не правьте их.
 - `src/words.js`, `src/sfx-library.js`, `layer.json` — сгенерированы. После правки `spelling.json`
   (написание брендов в субтитрах) запустите `automontage layer words`.
+- `face` в `layer.json` — точка лица в пикселях кадра исходника, от неё камера строит планы. По умолчанию
+  0,5·ширины и 0,41·высоты; у аватара голова обычно выше — возьмите точку с кадра исходника.
 - `public/` — speaker.mp4, шрифты, звуки, сток (`stock/`), скриншоты (`shots/`); источники — `public/SOURCE.md`.
 - Заглушки `stock/placeholder.mp4` и `shots/placeholder.png` замените настоящими материалами: сток по
   смыслу фразы подбирает `automontage layer stock` и пишет его источник в `public/SOURCE.md`.

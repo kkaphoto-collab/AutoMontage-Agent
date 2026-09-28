@@ -505,3 +505,19 @@ test('a symlink planted in the target after the emptiness check is not followed:
   assert.equal(fs.readFileSync(outside, 'utf8'), 'файл вне слоя');
   assert.ok(fs.lstatSync(link).isSymbolicLink(), 'чужую ссылку уборка не удаляет');
 });
+
+// Копия, оборвавшаяся не на EEXIST (например ENOSPC на середине), оставила бы в public/sfx половину
+// звука: её убираем. Это всегда файл этого вызова — с COPYFILE_EXCL чужой файл дал бы EEXIST.
+test('a copy that fails half-way (ENOSPC) leaves no partial sound in the target', { skip: !toolAvailable('ffmpeg') }, (t) => {
+  const { lib, target } = tmpDirs(t);
+  fs.mkdirSync(lib, { recursive: true });
+  genPop(lib);
+  const original = fs.copyFileSync;
+  t.mock.method(fs, 'copyFileSync', (source, destination, mode) => {
+    if (path.dirname(path.resolve(String(destination))) !== path.resolve(target)) return original.call(fs, source, destination, mode);
+    fs.writeFileSync(destination, 'половина звука');
+    throw Object.assign(new Error('ENOSPC: no space left on device, copyfile'), { code: 'ENOSPC' });
+  });
+  assert.throws(() => copySfxLibrary(lib, target), /library\/sfx pop\.wav: ENOSPC/);
+  assert.deepEqual(fs.readdirSync(target), []);
+});

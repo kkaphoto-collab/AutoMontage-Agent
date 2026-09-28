@@ -201,6 +201,9 @@ function copySfxLibrary(libraryDir, targetDir) {
         fs.copyFileSync(source, destination, fs.constants.COPYFILE_EXCL);
       } catch (error) {
         if (error?.code === 'EEXIST') throw new Error('в папке звуков слоя уже появился файл с этим именем — не перезаписываю', { cause: error });
+        // Любой другой отказ (ENOSPC на середине) оставил бы половину звука. С COPYFILE_EXCL до вызова
+        // файла с этим именем не было, значит то, что лежит на его месте, создал этот вызов.
+        fs.rmSync(destination, { force: true });
         throw error;
       }
       try {
