@@ -1,0 +1,40 @@
+// Сборка слоя из деталей motion-kit. Режиссура — в plan.js, дизайн карточек и вставок — в scenes.jsx.
+import { useMemo } from 'react';
+import { AbsoluteFill } from 'remotion';
+import { FontLoader, FullscreenReveal, KitBox, SfxTrack, ShutterFlash, SpeakerLayer, StockInsert, Subtitles,
+  compilePlan } from '@automontage/motion-kit';
+import layer from '../layer.json';
+import buildPlan from './plan.js';
+import { InsertContent, SceneContent } from './scenes.jsx';
+import sfxLibrary from './sfx-library.js';
+import words from './words.js';
+
+// Модульная константа: FontLoader регистрирует шрифты один раз при монтировании.
+const FONTS = [{ family: 'KitOnest', file: 'fonts/Onest.ttf' }, { family: 'KitOswald', file: 'fonts/Oswald.ttf' }];
+
+// Сток — StockInsert; остальные полноэкранные (cover) вставки — FullscreenReveal с содержимым ролика,
+// иначе спикер уходит под вставку, а кадр остаётся чёрным. Вставку без cover (donor) ролик рисует сам.
+function Insert({ insert }) {
+  if (insert.kind === 'stock') return <StockInsert insert={insert} />;
+  if (insert.cover) return <FullscreenReveal insert={insert}><InsertContent insert={insert} /></FullscreenReveal>;
+  return <InsertContent insert={insert} />;
+}
+
+export function LayerComposition() {
+  // Та же точка сборки, что у Node-манифеста layer check: гейт проверяет ровно этот слой.
+  const compiled = useMemo(() => compilePlan(buildPlan, { ...layer, words, sfxLibrary }), []);
+  // FontLoader — гейт: ничего из слоя не попадает в кадр, пока шрифты не загрузились.
+  // Вспышка — на ударе каждого оставшегося звука затвора: звук и свет не расходятся.
+  return (
+    <AbsoluteFill style={{ backgroundColor: '#000000' }}>
+      <FontLoader faces={FONTS}>
+        <SpeakerLayer src={layer.speaker.src} track={compiled.camera} lastFrame={layer.speaker.lastFrame} />
+        {compiled.inserts.map((insert) => <Insert key={insert.id} insert={insert} />)}
+        {compiled.items.map((item) => <KitBox key={item.id} item={item}><SceneContent item={item} /></KitBox>)}
+        {compiled.cues.kept.filter((cue) => cue.role === 'shutter').map((cue) => <ShutterFlash key={cue.id} at={cue.hitFrame} />)}
+        {compiled.captions ? <Subtitles {...compiled.captions} fontFamily="KitOnest" /> : null}
+        <SfxTrack cues={compiled.cues.kept} masterDb={layer.sfxMasterDb} />
+      </FontLoader>
+    </AbsoluteFill>
+  );
+}
