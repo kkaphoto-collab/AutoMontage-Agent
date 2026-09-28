@@ -38,11 +38,15 @@ function applyWaivers(gates, waivers = [], waivable = WAIVABLE) {
   });
 }
 
-function buildReport({ kind, profile, gates, inputs = [], layer = null, now = new Date(), error = null }) {
+// unusedWaivers — исключения плана, которые ничего не сняли (их гейт прошёл или дал только warn):
+// автору видно, что их пора убрать. На вердикт и код выхода они не влияют.
+function buildReport({ kind, profile, gates, inputs = [], layer = null, now = new Date(), error = null, unusedWaivers = [] }) {
   const hasError = error !== null && error !== undefined;
   const summary = summarize(gates);
+  const unused = (Array.isArray(unusedWaivers) ? unusedWaivers : []).filter((w) => w && typeof w === 'object')
+    .map((w) => ({ gate: w.gate, reason: String(w.reason ?? '').trim() }));
   return {
-    version: 1, kind, layer, profile, createdAt: now.toISOString(), inputs, gates,
+    version: 1, kind, layer, profile, createdAt: now.toISOString(), inputs, gates, unusedWaivers: unused,
     // Ошибка сборки/чтения важнее гейтов: отчёт нельзя читать как «всё хорошо», даже если gates
     // пуст (сборка упала раньше, чем появился хоть один гейт) или в нём случайно только pass.
     summary: hasError ? { ...summary, status: 'error' } : summary,
@@ -86,6 +90,10 @@ function formatReport(report) {
     // вместо него, кроме выдуманного плейсхолдера. Указываем на файл рядом, не называя его.
     if (g.spans.length > 3) lines.push(`   …и ещё ${g.spans.length - 3} — полный список в JSON-отчёте рядом`);
     if (g.hint && g.status !== 'pass') lines.push(`   → ${g.hint}`);
+  }
+  // Отчёт, прочитанный с диска, может быть старше поля unusedWaivers.
+  for (const w of report.unusedWaivers || []) {
+    lines.push(`${ICONS.waived} исключение ${w.gate} не понадобилось: ${w.reason} — уберите его из plan.js`);
   }
   return lines.join('\n');
 }

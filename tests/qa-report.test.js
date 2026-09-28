@@ -253,3 +253,20 @@ test('waived and skipped gates count neither as fail nor warn, so the report sti
   // Только waived (без fail/warn) — «всё хорошо», но с явным числом исключений, а не молча.
   assert.match(formatReport(report), /всё хорошо \(исключений: 1\)/);
 });
+
+test('buildReport keeps unused waivers as {gate, reason} and formatReport asks to remove them from plan.js', () => {
+  const report = buildReport({ kind: 'layer-check', profile: 'avatar', gates: [gate('G1', 'Ритм')],
+    unusedWaivers: [{ gate: 'G1', reason: ' длинный план экрана ', extra: true }] });
+  assert.deepEqual(report.unusedWaivers, [{ gate: 'G1', reason: 'длинный план экрана' }]);
+  // Лишнее исключение — подсказка автору, а не предупреждение: вердикт и код не меняются.
+  assert.deepEqual(report.summary, { status: 'pass', fail: 0, warn: 0 });
+  assert.equal(exitCodeFor(report), 0);
+  assert.match(formatReport(report), /^☑️ исключение G1 не понадобилось: длинный план экрана — уберите его из plan\.js$/m);
+  const plain = buildReport({ kind: 'layer-check', profile: 'avatar', gates: [] });
+  assert.deepEqual(plain.unusedWaivers, []);
+  assert.doesNotMatch(formatReport(plain), /не понадобилось/);
+  // Отчёт, прочитанный с диска без поля, форматируется как раньше.
+  const { unusedWaivers, ...old } = plain;
+  assert.deepEqual(unusedWaivers, []);
+  assert.doesNotMatch(formatReport(old), /не понадобилось/);
+});
