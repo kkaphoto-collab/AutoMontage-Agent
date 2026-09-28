@@ -5,6 +5,10 @@ const { readJson, sha256File } = require('./common');
 
 const ENGINE_ROOT = path.join(__dirname, '..', '..');
 const SOUND_NAME = /^[a-z0-9][a-z0-9-]*\.wav$/u;
+// Расширения, «похожие на звук», для skipped (ревью round 2, п.4): файл с таким расширением, не
+// подошедший под SOUND_NAME, вероятно опечатка или чужой формат этого же звука. Обычные файлы
+// папки (Notes.txt, README.md, LICENSE) — не опечатка в имени звука, они не попадают сюда вовсе.
+const AUDIO_LIKE_EXT = /\.(wav|mp3|flac|aif|aiff|ogg|m4a)$/i;
 
 // Дефолтная папка вправе молча отсутствовать (обычный клон без приватного пакета звуков), но явная
 // AUTOMONTAGE_SFX_DIR на несуществующую папку — это опечатка в пути, а не «звуков нет»: остальной
@@ -126,19 +130,28 @@ function readLibraryMeta(metaPath) {
 // то, что реально попадёт в слой, а не исходник, который теоретически мог бы отличаться), и
 // возвращает библиотеку для src/sfx-library.js и строки таблицы public/SOURCE.md.
 //
-// targetDir приводится к актуальному состоянию: старые *.wav от предыдущего запуска (звук
-// переименован или убран из library.json, прошлый запуск прервался на середине) удаляются, а не
-// копятся в public/sfx слоя навсегда.
+// targetDir обязан быть пуст (или ещё не существовать) — copySfxLibrary пишет только в свежую
+// public/sfx нового слоя и НИКОГДА не чистит и не трогает то, что там уже лежит. КРИТИЧНО (ревью
+// round 2): более ранняя версия удаляла старые *.wav из targetDir перед копированием — на любом
+// пересечении путей library и target (одна и та же папка, симлинк на неё, вариант по регистру на
+// нечувствительной к регистру ФС, target — родитель или просто не та папка) это стирало саму
+// библиотеку или файлы пользователя, а библиотека не в Git — потеря невосстановима. Отказ на
+// непустой target закрывает все эти случаи разом: совпадающая с library папка непуста, если в
+// библиотеке вообще есть файлы; library ВНУТРИ target делает target непустым; target ВНУТРИ
+// library безопасен сам по себе, потому что подпапки при сканировании library пропускаются.
 //
-// Имена вне ^[a-z0-9][a-z0-9-]*\.wav$ (кроме самого library.json) не копируются молча: подозрительно
-// похожие на звук с опечаткой или чужим форматом попадают в `skipped`, чтобы вызывающий код мог
-// предупредить о них; дотфайлы (.DS_Store и т.п.) и обычные папки — обычный «мусор» ОС и служебные
-// подпапки, они игнорируются тихо и не засоряют `skipped`. Ключ library.json → sounds без
-// соответствующего файла (опечатка в имени) попадает в `unknownMeta`.
+// Имена вне ^[a-z0-9][a-z0-9-]*\.wav$ (кроме самого library.json) не копируются молча: похожие на
+// звук по расширению (.wav/.mp3/.flac/.aif/.aiff/.ogg/.m4a в любом регистре) — опечатка или чужой
+// формат — попадают в `skipped`, чтобы вызывающий код мог предупредить о них; обычные файлы папки
+// (README.md, LICENSE), дотфайлы (.DS_Store и т.п.) и обычные папки игнорируются тихо и не
+// засоряют `skipped`. Ключ library.json → sounds без соответствующего файла (опечатка в имени)
+// попадает в `unknownMeta`.
 //
 // Битый файл (папка с именем *.wav, битая символическая ссылка, беззвучный или пустой поток) —
-// явная ошибка, названная по имени файла (`library/sfx <имя>: …`), и после неё ничего не остаётся
-// в targetDir.
+// явная ошибка, названная по имени файла (`library/sfx <имя>: …`); при ней из target удаляется
+// только частичная копия ЭТОГО файла — более ранние успешно скопированные звуки в этом же вызове
+// остаются на месте (вызывающий код, `layer new`, в ответ на ошибку выбрасывает всю свежую папку
+// слоя целиком, а не пытается угадать, что в target уже безопасно).
 function copySfxLibrary(libraryDir, targetDir) {
   if (!fs.existsSync(libraryDir)) return { library: { sounds: {} }, sourceRows: [], skipped: [], unknownMeta: [] };
   const meta = readLibraryMeta(path.join(libraryDir, 'library.json'));
@@ -150,16 +163,19 @@ function copySfxLibrary(libraryDir, targetDir) {
     if (entryName === 'library.json') continue;
     if (SOUND_NAME.test(entryName)) { names.push(entryName); continue; }
     // Не подошло под имя звука: дотфайлы и обычные папки — молча игнорируем (не опечатка, а
-    // обычный «мусор» ОС или служебная подпапка); остальное подозрительно похоже на звук.
+    // обычный «мусор» ОС или служебная подпапка). Из оставшегося (плоских файлов) в skipped идут
+    // только похожие на звук по расширению — обычные файлы папки вроде README.md или LICENSE не
+    // опечатка в имени звука, а нормальное содержимое папки, и не должны туда попадать.
     if (entryName.startsWith('.') || dirent.isDirectory()) continue;
-    skipped.push(entryName);
+    if (AUDIO_LIKE_EXT.test(entryName)) skipped.push(entryName);
   }
   names.sort();
   skipped.sort();
 
   fs.mkdirSync(targetDir, { recursive: true });
-  for (const existing of fs.readdirSync(targetDir)) {
-    if (existing.toLowerCase().endsWith('.wav')) fs.rmSync(path.join(targetDir, existing), { force: true });
+  const leftovers = fs.readdirSync(targetDir);
+  if (leftovers.length) {
+    throw new Error(`папка звуков слоя ${targetDir} не пуста (${leftovers.slice(0, 3).join(', ')}) — copySfxLibrary пишет только в новую public/sfx`);
   }
 
   const sounds = {};

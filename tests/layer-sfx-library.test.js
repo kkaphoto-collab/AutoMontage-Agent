@@ -54,7 +54,10 @@ test('copying measures length and a windowed peak, keeps role/volume, hashes and
   const sound = result.library.sounds['whoosh-in'];
   assert.equal(sound.file, 'sfx/whoosh-in.wav');
   assert.ok(Math.abs(sound.lengthSec - 1) < 0.01);
-  assert.ok(Math.abs(sound.peakSec - 0.4) < 0.03, `peakSec=${sound.peakSec}`);
+  // ±0,01 с (не ±0,03) — узкий допуск нарочно: симметричная огибающая ловит мутанты, которые
+  // считают пик от НАЧАЛА окна вместо его ЦЕНТРА («no window centring» — такой сдвиг был бы виден
+  // сразу как половина ширины окна, 15 мс, а не тонет в широком допуске.
+  assert.ok(Math.abs(sound.peakSec - 0.4) < 0.01, `peakSec=${sound.peakSec}`);
   assert.equal(sound.volume, 0.8);
   // Тест на «пустую копию» (мутант ревью out-empty-copy): роль правда сохраняется, а не только
   // заявлена в названии теста.
@@ -80,9 +83,11 @@ test('a missing library yields an empty sound set instead of an error', () => {
 
 // Отклонение (п.1, ВАЖНО): argmax одного сэмпла на 8 кГц моно (старое измерение) теряет удары
 // выше ~4 кГц — антиалиасинг при передискретизации на 8 кГц режет именно то, что и есть сам «удар».
-// Ниже — три конкретных случая реального пакета (impact-ring, click-подобные, противофазный
-// стерео-свист), где старое измерение давало неверный peakSec, и новое (полная полоса 48 кГц,
-// сумма МОЩНОСТЕЙ каналов, скользящее окно 30 мс/шаг 5 мс) — верный.
+// Ниже — синтетические фикстуры (НЕ сам реальный пакет — тот только читается read-only отдельным
+// разовым замером для отчёта), воспроизводящие паттерны, из-за которых старое измерение давало
+// неверный peakSec на реальных impact-ring/click/стерео-свистах: тихий низкий предудар + громкое
+// ВЧ-тело, щелчок перед телом звука, противофазный стерео. Новое измерение (полная полоса 48 кГц,
+// сумма МОЩНОСТЕЙ каналов, скользящее окно 30 мс/шаг 5 мс) находит верный момент во всех трёх.
 test('an impact-like sound (a quiet low pre-thump, then a loud high-frequency body) measures its peak on the loud body, not the early thump', { skip: !toolAvailable('ffmpeg') }, (t) => {
   const { lib, target } = tmpDirs(t);
   fs.mkdirSync(lib, { recursive: true });
@@ -116,6 +121,20 @@ test('an anti-phase stereo whoosh is not cancelled by a naive downmix: the peak 
     file]);
   const { peakSec } = copySfxLibrary(lib, target).library.sounds['stereo-wide'];
   assert.ok(Math.abs(peakSec - 0.6) < 0.05, `ожидали ~0.6 с (свист по сумме мощностей), получили ${peakSec}`);
+});
+
+// Мутант «только левый канал»: если бы measure() суммировал мощность лишь channel 0, звук,
+// существующий ЦЕЛИКОМ в правом канале (левый — полная тишина), измерился бы как беззвучный или
+// нашёл бы пик по шуму квантования где угодно. Левый канал здесь буквально '0' (не тихий сигнал,
+// а константный ноль), поэтому мутант не может случайно найти правильный ответ через утечку.
+test('a whoosh present only in the right channel is still found (kills a "left channel only" measurement)', { skip: !toolAvailable('ffmpeg') }, (t) => {
+  const { lib, target } = tmpDirs(t);
+  fs.mkdirSync(lib, { recursive: true });
+  const file = path.join(lib, 'right-only.wav');
+  runTool('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i',
+    "aevalsrc='0|0.9*sin(2*PI*600*t)*exp(-40*abs(t-0.35))':c=stereo:s=48000:d=0.8", file]);
+  const { peakSec } = copySfxLibrary(lib, target).library.sounds['right-only'];
+  assert.ok(Math.abs(peakSec - 0.35) < 0.03, `ожидали ~0.35 с из правого канала, получили ${peakSec}`);
 });
 
 // Мутант ревью out-last-max: при точной ничьей окно должно взять ПЕРВОЕ (самое раннее) вхождение
@@ -160,20 +179,25 @@ test('an explicit peakSec at or past lengthSec is a clear, named error', { skip:
   assert.throws(() => copySfxLibrary(lib, target), /library\/sfx click\.wav.*sounds\.click\.peakSec.*lengthSec/s);
 });
 
-// Отклонение (п.3): опечатка вне ^[a-z0-9][a-z0-9-]*\.wav$ не копируется молча — она видна вызывающему
-// коду (layer new предупредит), а дотфайлы (.DS_Store) и обычные папки — обычный «мусор» ОС и
-// служебные подпапки, они не опечатка и не должны засорять skipped (п.4).
-test('files that do not match the sound name pattern come back in skipped; dotfiles and folders are ignored silently', (t) => {
+// Отклонение (ревью round 2, п.4): опечатка вне ^[a-z0-9][a-z0-9-]*\.wav$ не копируется молча — но
+// в skipped попадают только файлы, ПОХОЖИЕ на звук (расширения .wav/.mp3/.flac/.aif/.aiff/.ogg/.m4a
+// в любом регистре), которые не подошли под имя. Обычные файлы папки (Notes.txt, README.md,
+// LICENSE) — не опечатка в имени звука, а нормальное содержимое папки, и не должны попадать в
+// skipped вовсе; дотфайлы (.DS_Store) и обычные папки — обычный «мусор» ОС и служебные подпапки.
+test('skipped only lists audio-looking near-misses; ordinary files, dotfiles and folders are ignored silently', (t) => {
   const { lib, target } = tmpDirs(t);
   fs.mkdirSync(lib, { recursive: true });
   fs.writeFileSync(path.join(lib, 'Notes.txt'), 'не звук');
+  fs.writeFileSync(path.join(lib, 'README.md'), '# не звук');
+  fs.writeFileSync(path.join(lib, 'LICENSE'), 'MIT');
   fs.writeFileSync(path.join(lib, 'UPPER.WAV'), 'x');
   fs.writeFileSync(path.join(lib, '-leading-dash.wav'), 'x');
+  fs.writeFileSync(path.join(lib, 'take.MP3'), 'x');
   fs.writeFileSync(path.join(lib, '.DS_Store'), '');
   fs.mkdirSync(path.join(lib, 'originals'));
   fs.writeFileSync(path.join(lib, 'library.json'), JSON.stringify({ sounds: {} }));
   const result = copySfxLibrary(lib, target);
-  assert.deepEqual(result.skipped.sort(), ['-leading-dash.wav', 'Notes.txt', 'UPPER.WAV']);
+  assert.deepEqual(result.skipped.sort(), ['-leading-dash.wav', 'UPPER.WAV', 'take.MP3'].sort());
   assert.deepEqual(result.library.sounds, {});
   assert.deepEqual(fs.readdirSync(target), []);
 });
@@ -296,17 +320,110 @@ test('a zero-length wav is a clear, named error naming the file', { skip: !toolA
   assert.ok(!fs.existsSync(path.join(target, 'blank.wav')));
 });
 
-// Отклонение (п.6): цель обязана оставаться в согласии с текущим набором звуков — старый *.wav,
-// оставшийся от предыдущего запуска (сбой на середине, удалённый из library.json звук), должен
-// исчезнуть, а не копиться в public/sfx слоя навсегда.
-test('a stale *.wav already in the target from a previous run is cleared, not left behind', { skip: !toolAvailable('ffmpeg') }, (t) => {
+// ============================================================================================
+// КРИТИЧЕСКОЕ ревью round 2: прошлая версия «очищала» targetDir от старых *.wav перед копированием
+// (см. git history) — а на любом пересечении путей library и target это стирало ЧУЖИЕ файлы:
+// саму библиотеку (target === library, симлинк на неё, вариант по регистру на нечувствительной к
+// регистру ФС, AUTOMONTAGE_SFX_DIR старого слоя, ре-синхронизированного в самого себя) или файлы
+// пользователя (target — родитель библиотеки, или вовсе не та папка). Библиотека не в Git —
+// потеря невосстановима. Вместо очистки copySfxLibrary теперь ОТКАЗЫВАЕТ на непустой targetDir:
+// это закрывает все перечисленные пересечения разом (совпадающая папка непуста, если в библиотеке
+// вообще есть файлы; библиотека ВНУТРИ target делает target непустым; target ВНУТРИ library
+// безопасен, потому что папки при сканировании library пропускаются). Каждый тест ниже проверяет
+// и отказ, и то, что состав и байты всех файлов не изменились.
+function snapshotFiles(dir) {
+  const map = new Map();
+  for (const name of fs.readdirSync(dir)) {
+    const full = path.join(dir, name);
+    if (fs.statSync(full).isFile()) map.set(name, fs.readFileSync(full));
+  }
+  return map;
+}
+function assertFilesUnchanged(dir, before) {
+  const after = snapshotFiles(dir);
+  assert.deepEqual([...after.keys()].sort(), [...before.keys()].sort(), `состав файлов в ${dir} изменился`);
+  for (const [name, buf] of before) {
+    assert.ok(after.get(name)?.equals(buf), `${dir}/${name} изменился побайтово`);
+  }
+}
+function genPop(dir, name = 'pop.wav') {
+  runTool('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i',
+    "aevalsrc='0.5*sin(2*PI*440*t)':s=48000:d=0.2", path.join(dir, name)]);
+}
+function isCaseInsensitiveFs(dir) {
+  const lower = path.join(dir, 'case-probe-xyz');
+  fs.writeFileSync(lower, '');
+  const insensitive = fs.existsSync(path.join(dir, 'CASE-PROBE-XYZ'));
+  fs.rmSync(lower, { force: true });
+  return insensitive;
+}
+
+test('CRITICAL: refuses when the target equals the library — nothing in it is touched', { skip: !toolAvailable('ffmpeg') }, (t) => {
+  const { lib } = tmpDirs(t);
+  fs.mkdirSync(lib, { recursive: true });
+  genPop(lib);
+  const before = snapshotFiles(lib);
+  assert.throws(() => copySfxLibrary(lib, lib), /не пуста/);
+  assertFilesUnchanged(lib, before);
+});
+
+test('CRITICAL: refuses when the target is a symlink to the library — nothing in it is touched', { skip: !toolAvailable('ffmpeg') }, (t) => {
+  const { root, lib } = tmpDirs(t);
+  fs.mkdirSync(lib, { recursive: true });
+  genPop(lib);
+  const link = path.join(root, 'link-to-lib');
+  fs.symlinkSync(lib, link);
+  const before = snapshotFiles(lib);
+  assert.throws(() => copySfxLibrary(lib, link), /не пуста/);
+  assertFilesUnchanged(lib, before);
+});
+
+test('CRITICAL: refuses when the target differs from the library only by case, on a case-insensitive filesystem', { skip: !toolAvailable('ffmpeg') }, (t) => {
+  const { root, lib } = tmpDirs(t);
+  fs.mkdirSync(lib, { recursive: true });
+  if (!isCaseInsensitiveFs(root)) { t.skip('файловая система чувствительна к регистру — сценарий неприменим'); return; }
+  genPop(lib);
+  const caseVariantTarget = path.join(path.dirname(lib), path.basename(lib).toUpperCase());
+  const before = snapshotFiles(lib);
+  assert.throws(() => copySfxLibrary(lib, caseVariantTarget), /не пуста/);
+  assertFilesUnchanged(lib, before);
+});
+
+test('CRITICAL: refuses when the target is the library\'s own parent folder — the user\'s own file next to it survives', { skip: !toolAvailable('ffmpeg') }, (t) => {
+  const { root } = tmpDirs(t);
+  const parent = path.join(root, 'parent');
+  const lib = path.join(parent, 'sfx');
+  fs.mkdirSync(lib, { recursive: true });
+  genPop(lib);
+  fs.writeFileSync(path.join(parent, 'my-own-recording.wav'), 'не трогать');
+  const beforeParent = snapshotFiles(parent);
+  const beforeLib = snapshotFiles(lib);
+  assert.throws(() => copySfxLibrary(lib, parent), /не пуста/);
+  assertFilesUnchanged(parent, beforeParent);
+  assertFilesUnchanged(lib, beforeLib);
+});
+
+test('CRITICAL: refuses to copy into a non-empty user folder — podcast-master.WAV and voice take 3.wav are not touched', { skip: !toolAvailable('ffmpeg') }, (t) => {
+  const { root, lib } = tmpDirs(t);
+  fs.mkdirSync(lib, { recursive: true });
+  genPop(lib);
+  const music = path.join(root, 'Music');
+  fs.mkdirSync(music, { recursive: true });
+  fs.writeFileSync(path.join(music, 'podcast-master.WAV'), 'важная запись пользователя');
+  fs.writeFileSync(path.join(music, 'voice take 3.wav'), 'другая запись пользователя');
+  const before = snapshotFiles(music);
+  assert.throws(() => copySfxLibrary(lib, music), /не пуста/);
+  assertFilesUnchanged(music, before);
+});
+
+// Позитивный случай, чтобы отказ не был случайным «падает на всём»: НОВАЯ пустая (ещё
+// не существующая) папка public/sfx слоя копируется как обычно, без единого предупреждения.
+test('a fresh, not-yet-existing target still copies normally', { skip: !toolAvailable('ffmpeg') }, (t) => {
   const { lib, target } = tmpDirs(t);
   fs.mkdirSync(lib, { recursive: true });
-  fs.mkdirSync(target, { recursive: true });
-  fs.writeFileSync(path.join(target, 'stale.wav'), 'старый мусор');
-  runTool('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i',
-    "aevalsrc='0.5*sin(2*PI*440*t)':s=48000:d=0.2", path.join(lib, 'pop.wav')]);
+  genPop(lib);
+  assert.ok(!fs.existsSync(target));
   const result = copySfxLibrary(lib, target);
   assert.deepEqual(Object.keys(result.library.sounds), ['pop']);
-  assert.deepEqual(fs.readdirSync(target).sort(), ['pop.wav']);
+  assert.deepEqual(fs.readdirSync(target), ['pop.wav']);
 });

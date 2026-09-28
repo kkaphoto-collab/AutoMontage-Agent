@@ -9,9 +9,10 @@ import { CAPTION_FONT, FONTS, InsertContent, SceneContent } from './scenes.jsx';
 import sfxLibrary from './sfx-library.js';
 import words from './words.js';
 
-// Опечатка в CAPTION_FONT (имя семьи не из FONTS) не должна тихо уйти в Subtitles как
-// несуществующий шрифт: FontLoader никогда не догрузит его и никогда не снимет delayRender —
-// рендер слоя зависнет без единой явной причины. Проверяем один раз при загрузке модуля.
+// Опечатка в CAPTION_FONT (имя семьи не из FONTS) не должна тихо увести субтитры в запасной
+// шрифт: FontLoader регистрирует ТОЛЬКО имена из FONTS, а document.fonts.load(CAPTION_FONT) внутри
+// Subtitles на незарегистрированное имя резолвится немедленно — ждать нечего, это не зависание, а
+// тихая подмена шрифта, которую легко не заметить в preview. Проверяем один раз при загрузке модуля.
 if (!FONTS.some((face) => face.family === CAPTION_FONT)) {
   throw new Error(`Root.jsx: CAPTION_FONT «${CAPTION_FONT}» отсутствует среди FONTS слоя (scenes.jsx)`);
 }
