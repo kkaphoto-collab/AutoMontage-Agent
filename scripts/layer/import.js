@@ -1,20 +1,37 @@
 // automontage layer import — импорт отрендеренного слоя kit тем же путём, что и в Review (importReviewMedia:
 // перекодирование в assets/broll/video/<id>/media.mp4 с sha256), и запись в реестр проверенных слоёв
-// qa/layer-imports.json. Принимается только файл внутри проекта, чей sha256 стоит во входе «layer» самого
-// свежего отчёта layer render, и только если этот отчёт без ошибки и не «стоп».
+// qa/layer-imports.json. Принимается только сам рендер (файл внутри проекта по тому пути и с тем sha256,
+// что во входе «layer» самого свежего отчёта layer render), если этот отчёт целый, без ошибки и не «стоп» и
+// собран для текущего исходника проекта.
+const { createHash } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { configureMediaToolPath } = require('../env');
 const { openReadOnlyFlags } = require('../filesystem-capabilities');
 const { probeVideo } = require('../media-probe');
-const { resolveProjectPath } = require('../project/workspace');
-const { createImportController, importReviewMedia } = require('../review/media-import');
+const { inspectImportedAssetBundle } = require('../review/imported-assets');
+const { VIDEO_MAX_BYTES, createImportController, importReviewMedia } = require('../review/media-import');
 const { runMediaProcess } = require('../review/media-process');
 const { projectFrom, relative, sha256File } = require('./common');
-const { appendRegistry, findByRender, findRenderReport, renderPassed } = require('./registry');
+const { appendRegistry, findByRender, findRenderReport, renderReportProblem } = require('./registry');
 
 const FLAGS = { 'project-dir': 'value', file: 'value' };
 const HINT = 'motion-vNN/renders/layer-NN.mp4';
+const HASH_CHUNK_BYTES = 1024 * 1024;
+
+// Коды importReviewMedia остаются в сообщении, частые получают подсказку, что делать.
+const IMPORT_HINTS = {
+  MEDIA_IMPORT_BUSY: 'идёт другой импорт или правка этого проекта — повторите позже',
+  MEDIA_IMPORT_TOO_LARGE: `файл слоя больше ${VIDEO_MAX_BYTES / 1024 ** 3} ГБ — сократите слой или понизьте качество рендера`,
+  MEDIA_IMPORT_DISK_FULL: 'на диске не хватает места для импорта — освободите место и повторите',
+  MEDIA_IMPORT_DURATION_UNSUPPORTED: 'слой длиннее 30 минут — такой импорт не поддерживается, сократите слой',
+};
+
+function importFailure(error) {
+  const code = error?.code;
+  if (typeof code !== 'string' || !code.startsWith('MEDIA_IMPORT_')) return error;
+  return new Error(`импорт не удался${IMPORT_HINTS[code] ? `: ${IMPORT_HINTS[code]}` : ''} (${code})`, { cause: error });
+}
 
 const isInside = (root, candidate) => {
   const rel = path.relative(root, candidate);
@@ -23,86 +40,150 @@ const isInside = (root, candidate) => {
 
 // Файл слоя: внутри проекта по настоящим путям (папка-ссылка наружу не проходит, ссылки в предках самого
 // проекта не мешают), сам не ссылка и обычный файл.
-function resolveLayerFile(projectDir, option) {
+function resolveLayerFile(projectDir, option, fileSystem) {
   const absolute = path.resolve(option);
-  const stat = fs.lstatSync(absolute, { throwIfNoEntry: false });
+  const stat = fileSystem.lstatSync(absolute, { throwIfNoEntry: false });
   if (!stat) throw new Error(`--file ${option}: файл не найден`);
-  const projectReal = fs.realpathSync(projectDir);
-  const real = path.join(fs.realpathSync(path.dirname(absolute)), path.basename(absolute));
+  const projectReal = fileSystem.realpathSync(projectDir);
+  const real = path.join(fileSystem.realpathSync(path.dirname(absolute)), path.basename(absolute));
   if (!isInside(projectReal, real)) throw new Error(`--file ${option}: файл вне проекта — импортируется только слой из папки проекта (${HINT})`);
   if (stat.isSymbolicLink()) throw new Error(`--file ${option}: это ссылка — укажите сам файл слоя (${HINT})`);
   if (!stat.isFile()) throw new Error(`--file ${option}: это не обычный файл — укажите файл слоя (${HINT})`);
   return { file: real, stat, relativePath: relative(projectReal, real) };
 }
 
-// Ассет прошлого импорта на месте и с теми же байтами — повторный импорт того же рендера его переиспользует.
-function assetIntact(projectDir, entry) {
+// Файл слоя открывается один раз, без прохода по ссылке (O_NOFOLLOW, где он есть): хеш и поток импорта
+// читают этот дескриптор. same() сверяет, что это всё ещё тот файл, что видел lstat, и он не менялся.
+function openLayerFile(fileSystem, { file, stat }, option) {
+  const descriptor = fileSystem.openSync(file, openReadOnlyFlags(fileSystem));
+  const same = () => {
+    const now = fileSystem.fstatSync(descriptor);
+    if (!now.isFile() || now.dev !== stat.dev || now.ino !== stat.ino || now.size !== stat.size || now.mtimeMs !== stat.mtimeMs) {
+      throw new Error(`--file ${option}: файл изменился во время импорта — повторите команду`);
+    }
+  };
+  return { descriptor, same, size: stat.size };
+}
+
+// Кусками по 1 МиБ с явной позицией: renders весят сотни МБ, а поток потом читает тот же дескриптор с 0.
+function hashDescriptor(fileSystem, descriptor) {
+  const hash = createHash('sha256');
+  const buffer = Buffer.allocUnsafe(HASH_CHUNK_BYTES);
+  let position = 0;
+  let read = fileSystem.readSync(descriptor, buffer, 0, buffer.length, position);
+  while (read > 0) {
+    hash.update(buffer.subarray(0, read));
+    position += read;
+    read = fileSystem.readSync(descriptor, buffer, 0, buffer.length, position);
+  }
+  return hash.digest('hex');
+}
+
+// Отчёт layer render, которому можно доверить этот файл: проверял именно его (тот же путь и sha256 во входе
+// «layer»), целый и прошёл (renderReportProblem) и собран для текущего исходника проекта — старый рендер до
+// замены исходника или чужой рендер с отчётом из другого проекта не проходят.
+function checkedReport(projectDir, { renderSha256, relativePath, sourcePath, option }) {
+  const report = findRenderReport(projectDir, renderSha256, { path: relativePath });
+  if (!report) {
+    const original = findRenderReport(projectDir, renderSha256);
+    if (original) {
+      throw new Error(`--file ${option}: это копия слоя ${original.layerPath}, проверенного в qa/${original.fileName} — импортируйте сам ${original.layerPath}`);
+    }
+    throw new Error('этот файл не проходил layer render: импортируется только проверенный слой — '
+      + `его sha256 нет во входе «layer» ни одного отчёта qa/layer-<слой>-render-NN.json (${relativePath})`);
+  }
+  const problem = renderReportProblem(report, { layer: relativePath.split('/')[0] });
+  if (problem) throw new Error(problem);
+  const rerender = `пересоберите: automontage layer render --project-dir "${projectDir}" --layer ${report.layer}`;
+  const source = report.inputs.find((input) => input?.role === 'source');
+  if (typeof source?.sha256 !== 'string') throw new Error(`qa/${report.fileName}: в отчёте нет sha256 исходника — ${rerender}`);
+  if (source.sha256 !== sha256File(sourcePath)) throw new Error(`слой собран для другого исходника — ${rerender} (отчёт qa/${report.fileName})`);
+  return report;
+}
+
+// Ассет прошлого импорта цел целиком — так, как его проверяет preview (media.mp4, VP8-прокси и asset.json
+// с их sha256), — тогда повторный импорт того же рендера его переиспользует, иначе импортирует заново.
+function bundleIntact(projectDir, entry) {
+  if (typeof entry.reference !== 'string') return false;
   try {
-    const target = resolveProjectPath(projectDir, entry.reference, { label: 'reference', mustExist: true, type: 'file' });
-    return sha256File(target) === entry.canonicalSha256;
+    const record = inspectImportedAssetBundle({ projectDir, assetDirectory: path.join(projectDir, path.posix.dirname(entry.reference)) });
+    return Boolean(record) && record.reference === entry.reference && record.canonicalSha256 === entry.canonicalSha256;
   } catch {
     return false;
   }
 }
 
-// Поток читается из того же дескриптора, что проверен (O_NOFOLLOW, где он есть): подмена файла ссылкой
-// или другим файлом после проверки и хеша не пройдёт.
-async function importLayerFile({ projectDir, sourcePath, file, stat, option }) {
-  if (typeof configureMediaToolPath === 'function') configureMediaToolPath();
-  const outputFps = probeVideo(sourcePath).fps;
-  const descriptor = fs.openSync(file, openReadOnlyFlags());
-  let request = null;
+// Импорт из проверенного дескриптора с начала файла. Поток владеет дескриптором: destroy закрывает его и
+// дожидается незаконченного чтения. Пока дескриптор открыт, после импорта проверяем, что файл не менялся.
+async function importLayerFile({ projectDir, sourcePath, file, opened, fileSystem, importImpl }) {
+  let request;
   try {
-    const opened = fs.fstatSync(descriptor);
-    if (!opened.isFile() || opened.dev !== stat.dev || opened.ino !== stat.ino || opened.size !== stat.size || opened.mtimeMs !== stat.mtimeMs) {
-      throw new Error(`--file ${option}: файл изменился во время импорта — повторите команду`);
+    request = fileSystem.createReadStream(file, { fd: opened.descriptor, start: 0, autoClose: false });
+  } catch (error) {
+    fileSystem.closeSync(opened.descriptor);
+    throw error;
+  }
+  try {
+    configureMediaToolPath();
+    let asset;
+    try {
+      asset = await importImpl({
+        request,
+        signal: new AbortController().signal,
+        projectDir,
+        outputFps: probeVideo(sourcePath).fps,
+        headers: {
+          'content-length': String(opened.size),
+          'content-type': 'video/mp4',
+          'x-automontage-filename': encodeURIComponent(path.basename(file)),
+        },
+        controller: createImportController(),
+        runMediaProcessImpl: runMediaProcess,
+      });
+    } catch (error) {
+      throw importFailure(error);
     }
-    request = fs.createReadStream(file, { fd: descriptor, start: 0 });
-    return await importReviewMedia({
-      request,
-      signal: new AbortController().signal,
-      projectDir,
-      outputFps,
-      headers: {
-        'content-length': String(opened.size),
-        'content-type': 'video/mp4',
-        'x-automontage-filename': encodeURIComponent(path.basename(file)),
-      },
-      controller: createImportController(),
-      runMediaProcessImpl: runMediaProcess,
-    });
+    opened.same();
+    return asset;
   } finally {
-    // Поток закрывает дескриптор сам (autoClose) и дожидается незаконченного чтения.
-    if (request) request.destroy();
-    else fs.closeSync(descriptor);
+    if (!request.closed) await new Promise((resolve) => { request.once('close', resolve); request.destroy(); });
   }
 }
 
-// deps.log — вывод (тихий в тестах).
+// deps: log — вывод (тихий в тестах); fileSystem — доступ к файлу слоя; importImpl — importReviewMedia.
 async function run(options, deps = {}) {
   const log = deps.log || console.log;
+  const fileSystem = deps.fileSystem || fs;
+  const importImpl = deps.importImpl || importReviewMedia;
   const { projectDir, sourcePath } = projectFrom(options);
   if (!options.file) throw new Error(`нужен --file <${HINT}>`);
-  const { file, stat, relativePath } = resolveLayerFile(projectDir, options.file);
-  const renderSha256 = sha256File(file);
-  const report = findRenderReport(projectDir, renderSha256);
-  if (!report) {
-    throw new Error('этот файл не проходил layer render: импортируется только проверенный слой — '
-      + `его sha256 нет во входе «layer» ни одного отчёта qa/layer-<слой>-render-NN.json (${relativePath})`);
+  const layerFile = resolveLayerFile(projectDir, options.file, fileSystem);
+  const { relativePath } = layerFile;
+  const opened = openLayerFile(fileSystem, layerFile, options.file);
+  let ownsDescriptor = true; // до импорта дескриптор закрывает run, потом — поток импорта
+  try {
+    opened.same();
+    const renderSha256 = hashDescriptor(fileSystem, opened.descriptor);
+    opened.same();
+    // Всё, что может отказать, — до импорта: отчёт, исходник, qa/ и реестр; иначе остался бы ассет без записи.
+    const report = checkedReport(projectDir, { renderSha256, relativePath, sourcePath, option: options.file });
+    const existing = findByRender(projectDir, renderSha256);
+    let asset;
+    if (existing && bundleIntact(projectDir, existing)) {
+      asset = existing;
+      log(`Этот рендер уже импортирован: ${existing.reference} — новый ассет не создан`);
+    } else {
+      ownsDescriptor = false;
+      asset = await importLayerFile({ projectDir, sourcePath, file: layerFile.file, opened, fileSystem, importImpl });
+    }
+    return register({ projectDir, report, relativePath, renderSha256, asset, existing, log });
+  } finally {
+    if (ownsDescriptor) fileSystem.closeSync(opened.descriptor);
   }
-  if (!renderPassed(report)) {
-    const why = report.error ? `ошибка: ${report.error}` : `итог «${report.summary?.status ?? 'нет'}»`;
-    throw new Error(`слой не прошёл проверки: qa/${report.fileName} (${why}) — исправьте слой и повторите layer render`);
-  }
+}
 
-  const existing = findByRender(projectDir, renderSha256);
-  let asset;
-  if (existing && assetIntact(projectDir, existing)) {
-    asset = existing;
-    log(`Этот рендер уже импортирован: ${existing.reference} — новый ассет не создан`);
-  } else {
-    asset = await importLayerFile({ projectDir, sourcePath, file, stat, option: options.file });
-  }
+// renderFile — путь самого рендера, тот же, что во входе «layer» отчёта (копии в другом месте не принимаются).
+function register({ projectDir, report, relativePath, renderSha256, asset, existing, log }) {
   const entry = {
     layer: report.layer,
     render: report.renderNumber,
