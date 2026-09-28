@@ -401,6 +401,29 @@ test('a real audio-only m4a decodes sample-exact from the start and from a mid-f
   assert.ok(Math.abs(onsetSec(tail) - 0.27) < 0.002, `после fromSec 0,73 тон начинается на 0,27 с, а не ${onsetSec(tail)} с`);
 });
 
+// Звук, который в контейнере начинается позже видео (здесь через 0,48 с), обязан лечь на глобальный
+// таймкод: без выравнивания первый сэмпл PCM — это уже 0,48 с ролика, и всё звучание «переезжало»
+// раньше на 0,48 с, а -ss до начала звука не отрезал ничего.
+test('a real source whose audio starts 0.48 s after the video decodes on the global timecode', (t) => {
+  if (!toolAvailable('ffmpeg')) { t.skip('ffmpeg не найден в PATH'); return; }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-audio-late-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const mp4 = path.join(dir, 'late-audio.mp4');
+  runTool('ffmpeg', ['-y', '-v', 'error',
+    '-f', 'lavfi', '-i', 'color=c=black:s=64x64:r=25:d=3',
+    '-itsoffset', '0.48', '-f', 'lavfi', '-i', "aevalsrc='0.8*sin(2*PI*1000*t)*gte(t,1.02)':s=48000:d=2.52",
+    '-map', '0:v', '-map', '1:a', '-pix_fmt', 'yuv420p', '-c:a', 'aac', mp4], dir);
+  const onsetSec = (samples) => samples.findIndex((v) => Math.abs(v) > 8192) / 8000;
+  const raw = pcmFromFfmpeg(['-i', mp4, '-map', '0:a:0', '-vn']);
+  assert.ok(onsetSec(raw) < 1.1, `сценарий: сырой PCM начинается вместе со звуком, тон на ${onsetSec(raw)} с`);
+  const whole = decodeAudio(mp4);
+  assert.ok(Math.abs(onsetSec(whole) - 1.5) < 0.002, `тон звучит на 1,5 с ролика, а не на ${onsetSec(whole)} с`);
+  assert.ok(Math.abs(whole.length / 8000 - 3) < 0.03, `звук покрывает весь ролик от 0 с: ${whole.length / 8000} с`);
+  const part = decodeAudio(mp4, { fromSec: 0.2, durationSec: 2 });
+  assert.ok(Math.abs(onsetSec(part) - 1.3) < 0.002, `после fromSec 0,2 тон на 1,3 с, а не ${onsetSec(part)} с`);
+  assert.equal(part.length, 16000);
+});
+
 // Резкая атака щелчка ровно на границе блока (0,5 с): AAC даёт предэхо в предыдущем блоке
 // (около −47 дБФС, громче порога −60), и без запаса headSec этот блок засчитывался бы как звук вне
 // эффектов у совершенно чистого слоя.

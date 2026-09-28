@@ -6,6 +6,14 @@ const r2 = (value) => Math.round(value * 100) / 100;
 const fmt = (value) => String(r2(value)).replace('.', ',');
 const rate = (fps) => String(Number(fps.toFixed(3))).replace('.', ',');
 
+// Сдвиг словами. lag > 0 у bestLagPearson(слой, исходник): событие в слое на lag блоков позже.
+function lagWords(lagBlocks) {
+  const delayMs = Math.round(lagBlocks * BLOCK_SEC * 1000);
+  if (delayMs > 0) return `звук слоя позже голоса на ${delayMs} мс`;
+  if (delayMs < 0) return `звук слоя раньше голоса на ${-delayMs} мс`;
+  return 'без сдвига';
+}
+
 // Сдвиг звука слоя относительно исходника, который ещё ищет корреляция (±300 мс): задержка
 // муксера/буфера при рендере, как в windowedMax.
 const MAX_LAG_BLOCKS = 6;
@@ -54,7 +62,8 @@ const overlapSec = (stretches, from, to) => stretches
 // Три сигнала. A (главный) — слышимый звук слоя вне эффектов из манифеста: в звуке слоя kit по
 // контракту только эффекты. B — корреляция огибающих слоя и исходника по всей дорожке с поиском
 // сдвига: ловит полную утечку голоса, даже спрятанную под длинной подложкой. C — самое похожее на
-// голос окно, но только если в нём есть и звук вне эффектов.
+// голос окно, но только если в нём есть и звук вне эффектов. Исходник без звука (sourceEnv null) —
+// B и C не считаются, судит один A.
 function gateVoiceLeak({ layerEnv, sourceEnv, audioMode, cues, fps }, profile) {
   const title = 'Голос в звуке слоя';
   const leak = profile.leak;
@@ -84,17 +93,19 @@ function gateVoiceLeak({ layerEnv, sourceEnv, audioMode, cues, fps }, profile) {
   const status = wholeHigh || outside.seconds >= leak.outsideStopSec ? 'fail'
     : outside.seconds >= leak.outsideWarnSec || windowCounts ? 'warn' : 'pass';
 
+  // Каждый сигнал говорит своими числами: у окна — свои r, время и сдвиг, у всей дорожки — свой r.
   const hints = [];
-  if (wholeHigh || windowCounts) {
-    const lag = wholeHigh ? whole.lag : window.lag;
-    hints.push(`похоже на голос аватара (сдвиг ${Math.round(lag * BLOCK_SEC * 1000)} мс)`);
-  } else if (outside.seconds >= leak.outsideWarnSec) {
-    hints.push(`посторонний звук вне эффектов: ${fmt(outside.seconds)} с`);
+  if (wholeHigh) hints.push(`вся дорожка слоя похожа на голос аватара: r ${fmt(whole.r)}, ${lagWords(whole.lag)}`);
+  if (windowCounts) {
+    hints.push(`окно ${fmt(windowFrom)}–${fmt(windowTo)} с повторяет голос: r ${fmt(window.r)}, ${lagWords(window.lag)}`);
   }
+  if (outside.seconds >= leak.outsideWarnSec) hints.push(`посторонний звук вне эффектов: ${fmt(outside.seconds)} с`);
   if (status !== 'pass') {
     hints.push('у видео аватара и вставок в слое должен быть muted: голос идёт только из мастер-видео, в звуке слоя — только эффекты');
   }
-  hints.push(whole ? `похожесть на голос r = ${fmt(whole.r)} (порог ${fmt(leak.stop)})` : 'похожесть на голос не посчитана');
+  if (!hasSource) hints.push('похожесть на голос не посчитана: в исходнике нет звука');
+  else if (!whole) hints.push('похожесть на голос не посчитана');
+  else if (!wholeHigh) hints.push(`по всей дорожке r ${fmt(whole.r)} (стоп от ${fmt(leak.stop)})`);
 
   const gateSpans = outside.stretches.slice(0, 5)
     .map((s) => ({ fromSec: r2(s.fromSec), toSec: r2(s.toSec), note: 'звук вне эффектов' }));

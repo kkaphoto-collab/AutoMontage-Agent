@@ -62,7 +62,9 @@ function formatSeconds(value) {
 // части перемуксованных файлов сдвигал звук раньше на задержку кодека — до ~21 мс, то есть почти на
 // целый блок огибающей (повторное ревью задачи 25). Декодировать 8 кГц моно с начала дёшево; при
 // fromSec 0 -ss не нужен вовсе. -map 0:a:0 берёт первую звуковую дорожку явно (нет аудио вообще —
-// ffmpeg сам откажет понятной ошибкой, а не молчащим видео-выводом).
+// ffmpeg сам откажет понятной ошибкой, а не молчащим видео-выводом). aresample=async=1:first_pts=0
+// кладёт звук на глобальный таймкод: если дорожка в контейнере начинается позже 0 (start_time 0,48 с)
+// или в ней есть разрыв, недостающее заполняется тишиной, а не сдвигает всё звучание раньше.
 function decodeAudio(file, { fromSec = 0, durationSec = null, spawnImpl } = {}) {
   if (!(Number.isFinite(fromSec) && fromSec >= 0)) {
     throw new Error('decodeAudio: fromSec должен быть конечным числом ≥ 0');
@@ -75,7 +77,7 @@ function decodeAudio(file, { fromSec = 0, durationSec = null, spawnImpl } = {}) 
     '-i', file,
     ...(fromSec > 0 ? ['-ss', formatSeconds(fromSec)] : []),
     ...(durationSec ? ['-t', formatSeconds(durationSec)] : []),
-    '-map', '0:a:0', '-vn',
+    '-map', '0:a:0', '-vn', '-af', 'aresample=async=1:first_pts=0',
   ], { spawnImpl });
   // fromSec за концом файла (или отрезок целиком после последнего сэмпла) ffmpeg молча отдаёт
   // пустой поток — гейт иначе принял бы «нет данных» за «полная тишина» и разрешил бы то, что на
