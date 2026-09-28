@@ -1,9 +1,26 @@
-// Звук для гейтов: моно 8 кГц s16le из ffmpeg, огибающая по 50 мс в dBFS, корреляция Пирсона.
+// Звук для гейтов: моно 8 кГц s16le из ffmpeg, огибающая по 50 мс в dBFS, корреляция Пирсона,
+// поиск короткой/сдвинутой утечки голоса в звуке слоя (окно + лаг) и доля звука слоя вне известных
+// вставок (G7, Task 26).
 const { spawnSync } = require('node:child_process');
 
 const SAMPLE_RATE = 8000;
 const BLOCK = 400; // 50 мс при 8 кГц
+const BLOCK_SEC = BLOCK / SAMPLE_RATE;
 const FLOOR_DB = -90;
+
+// Причина сбоя ffmpeg по приоритету: свой stderr, иначе message самой ошибки spawn (ENOENT,
+// ETIMEDOUT — Node кладёт их в result.error, а result.stdout/stderr при этом остаются пустым
+// Buffer, а не null; пустой Buffer сам по себе truthy, поэтому `result.stderr || result.error?.
+// message` раньше ВСЕГДА выбирал пустой Buffer и терял настоящую причину), и только в последнюю
+// очередь голый сигнал/статус — если процесс убит до единой строки в stderr.
+function reasonFor(result) {
+  const stderr = String(result.stderr || '').trim();
+  if (stderr) return stderr.slice(0, 300);
+  const message = result.error && result.error.message;
+  if (message) return String(message).trim().slice(0, 300);
+  if (result.signal) return `процесс убит сигналом ${result.signal}`;
+  return `процесс завершился со статусом ${String(result.status)}`;
+}
 
 function pcmFromFfmpeg(inputArgs, { maxBuffer = 256 * 1024 * 1024, spawnImpl = spawnSync } = {}) {
   const result = spawnImpl('ffmpeg', [
@@ -11,10 +28,19 @@ function pcmFromFfmpeg(inputArgs, { maxBuffer = 256 * 1024 * 1024, spawnImpl = s
     '-ac', '1', '-ar', String(SAMPLE_RATE), '-f', 's16le', '-acodec', 'pcm_s16le', '-',
   ], { encoding: 'buffer', maxBuffer, shell: false });
   // Молчаливый провал здесь означал бы «звука нет» вместо «ffmpeg не смог его отдать» — гейт принял
-  // бы пустой PCM за тишину и дал бы ложный pass. Сообщение ffmpeg обрезаем: он иногда пишет длинный
-  // banner даже с -hide_banner, а отчёту гейта нужна короткая понятная причина.
+  // бы пустой PCM за тишину и дал бы ложный pass.
   if (result.error || result.status !== 0) {
-    const reason = String(result.stderr || result.error?.message || '').trim().slice(0, 300);
+    if (result.error && result.error.code === 'ENOENT') {
+      throw new Error('ffmpeg не найден; запусти npm run doctor');
+    }
+    const reason = reasonFor(result);
+    // «Stream map '...' matches no streams» — ffmpeg так отказывает -map 0:a:0 на файле без единой
+    // звуковой дорожки; отдельное явное сообщение полезнее, чем сырой текст ffmpeg с именем опции.
+    if (/matches no streams/.test(reason)) {
+      const at = inputArgs.indexOf('-i');
+      const file = at >= 0 ? inputArgs[at + 1] : 'входном файле';
+      throw new Error(`в ${file} нет звуковой дорожки`);
+    }
     throw new Error(`ffmpeg не смог отдать звук: ${reason}`);
   }
   const bytes = result.stdout;
@@ -23,12 +49,30 @@ function pcmFromFfmpeg(inputArgs, { maxBuffer = 256 * 1024 * 1024, spawnImpl = s
   return samples;
 }
 
+// ffmpeg понимает -ss/-t только как обычную десятичную запись: «1e-7» (так JS String() печатает
+// очень маленькие числа) он не разбирает как секунды, а длинный хвост плавающей точки (0.1+0.2 →
+// «0.30000000000000004») просто мусорит команду. Округление до микросекунд (6 знаков) для звука с
+// огромным запасом достаточно; обратный Number(...) убирает хвостовые нули без ручного regex.
+function formatSeconds(value) {
+  return String(Number(value.toFixed(6)));
+}
+
 // -ss перед -i — быстрый seek по контейнеру (до декодирования), -map 0:a:0 берёт первую звуковую
 // дорожку явно (нет аудио вообще — ffmpeg сам откажет понятной ошибкой, а не молчащим видео-выводом).
 function decodeAudio(file, { fromSec = 0, durationSec = null, spawnImpl } = {}) {
-  return pcmFromFfmpeg([
-    '-ss', String(fromSec), ...(durationSec ? ['-t', String(durationSec)] : []), '-i', file, '-map', '0:a:0', '-vn',
+  if (durationSec !== null && durationSec !== undefined
+    && !(Number.isFinite(durationSec) && durationSec > 0)) {
+    throw new Error('decodeAudio: durationSec должен быть конечным положительным числом');
+  }
+  const samples = pcmFromFfmpeg([
+    '-ss', formatSeconds(fromSec), ...(durationSec ? ['-t', formatSeconds(durationSec)] : []),
+    '-i', file, '-map', '0:a:0', '-vn',
   ], { spawnImpl });
+  // fromSec за концом файла (или отрезок целиком после последнего сэмпла) ffmpeg молча отдаёт
+  // пустой поток — гейт иначе принял бы «нет данных» за «полная тишина» и разрешил бы то, что на
+  // самом деле не проверил.
+  if (samples.length === 0) throw new Error('нет звука в заданном отрезке');
+  return samples;
 }
 
 function blockDb(samples, start, end) {
@@ -67,25 +111,95 @@ function pearson(a, b) {
   return num / Math.sqrt(va * vb);
 }
 
-// Самое похожее окно, где звук первого сигнала вообще есть (короткая утечка голоса). Отклонение от
-// плана (оркестраторская правка): по умолчанию окна скользят внахлёст на 50 % (hop = windowBlocks/2),
-// а не впритык друг к другу. Короткая утечка ровно в размер окна, которая физически легла на границу
-// двух соседних непересекающихся окон, иначе досталась бы каждому окну лишь наполовину — средняя
-// громкость обеих половинок падает ниже minDbA, и окно целиком пропускается мимо проверки, хотя
-// утечка на записи реально была. Внахлёст гарантирует окно, которое застаёт всю утечку целиком.
-function windowedMax(a, b, windowBlocks, { minDbA = -60, hop = Math.max(1, Math.floor(windowBlocks / 2)) } = {}) {
+// Меньше трёх точек Pearson не отвергает сам (n>=2), но ровно 2 точки ВСЕГДА идеально «коррелируют»
+// (любые две точки лежат на одной прямой) — это не сигнал, а артефакт слишком короткого перекрытия
+// после сдвига. На реальных окнах (windowBlocks порядка 40 блоков, maxLagBlocks по умолчанию 6) это
+// не задевает ни одного лага, но на маленьком windowBlocks (близком к maxLagBlocks) такой мусорный
+// r=1 иначе выигрывал бы у настоящей корреляции на lag=0.
+const MIN_LAG_OVERLAP = 3;
+
+// Лучшая корреляция при сдвиге b относительно a в пределах ±maxLagBlocks блоков. lag > 0 значит:
+// a отстаёт от b (событие в a происходит на lag блоков ПОЗЖЕ, чем в b) — обычная причина, задержка
+// хвоста, буферизация муксера или микрофона на записи. При каждом лаге обрезаем несовпадающий
+// край массива (Pearson требует равной длины) — при маленьком maxLagBlocks относительно длины
+// входа это теряет незначительную долю сэмплов.
+function bestLagPearson(a, b, maxLagBlocks) {
   let best = null;
-  const n = Math.min(a.length, b.length);
-  for (let start = 0; start + windowBlocks <= n; start += hop) {
-    const wa = a.subarray(start, start + windowBlocks);
-    const mean = wa.reduce((sum, v) => sum + v, 0) / windowBlocks;
-    if (mean < minDbA) continue;
-    const r = pearson(wa, b.subarray(start, start + windowBlocks));
-    if (r !== null && (best === null || r > best.r)) best = { r, startBlock: start };
+  for (let lag = -maxLagBlocks; lag <= maxLagBlocks; lag += 1) {
+    const aa = lag >= 0 ? a.subarray(lag) : a;
+    const bb = lag >= 0 ? b : b.subarray(-lag);
+    if (Math.min(aa.length, bb.length) < MIN_LAG_OVERLAP) continue;
+    const r = pearson(aa, bb);
+    if (r !== null && (best === null || r > best.r)) best = { r, lag };
   }
   return best;
 }
 
+// Самое похожее окно, где звук первого сигнала вообще слышен (короткая утечка голоса в звуке слоя).
+// Гейт по ДОЛЕ слышимых блоков окна (Task 25 review, п.1), а не по средней громкости окна: короткая
+// утечка размывает среднее ниже порога даже там, где сама утечка звучит в полную силу — например
+// 3-секундная утечка в 5-секундном окне с фоном −90 дБФС часто не набирала −60 дБФС в среднем, и
+// гейт целиком пропускал такое окно, хотя утечка внутри него реально слышна. Шаг по умолчанию —
+// windowBlocks/4 (не /2): более грубый шаг чаще ставил утечку короче окна на границу двух соседних
+// положений сетки. Это НЕ гарантирует, что окно целиком совпадёт с короткой утечкой (даже при
+// мелком шаге утечка ровно в размер окна может лечь так, что ни одно положение сетки не берёт её
+// целиком) — гарантия только в том, что окно теряет от неё не больше hop блоков с любого края, а
+// гейт по доле (не по среднему) терпим именно к такому частичному захвату. Последнее окно у самого
+// конца сигнала (start = n − windowBlocks) проверяется всегда, даже если сетка шагом туда не
+// попадает — иначе хвост короче одного шага от предыдущего окна остаётся непроверенным. Сдвиг слоя
+// относительно исходника (задержка микрофона/муксера, Task 25 review, п.2) ищется отдельно, лагом
+// bestLagPearson внутри каждого окна — корреляция без лага быстро проседает уже на 100–300 мс сдвига.
+function windowedMax(a, b, windowBlocks, {
+  minDbA = -60, minAudibleShare = 0.4, maxLagBlocks = 6,
+  hop = Math.max(1, Math.floor(windowBlocks / 4)),
+} = {}) {
+  const n = Math.min(a.length, b.length);
+  const lastStart = n - windowBlocks;
+  if (lastStart < 0) return null;
+  let best = null;
+  const consider = (start) => {
+    const wa = a.subarray(start, start + windowBlocks);
+    let audible = 0;
+    for (let i = 0; i < wa.length; i += 1) if (wa[i] > minDbA) audible += 1;
+    if (audible / windowBlocks < minAudibleShare) return;
+    const found = bestLagPearson(wa, b.subarray(start, start + windowBlocks), maxLagBlocks);
+    if (found !== null && (best === null || found.r > best.r)) {
+      best = { r: found.r, startBlock: start, lag: found.lag };
+    }
+  };
+  for (let start = 0; start <= lastStart; start += hop) consider(start);
+  if (lastStart % hop !== 0) consider(lastStart);
+  return best;
+}
+
+// Секунды слышимых блоков слоя (> minDb) вне известных окон звука (например cues.kept слоя,
+// пересчитанные вызывающим кодом в секунды по [startFrame, startFrame+durationFrames)/fps) —
+// сигнал G7 «в звуке слоя есть не только эффекты» (Task 26; сама проверка порога — там). Каждый
+// span расширяется вправо на tailSec: естественное затухание эффекта может звучать чуть дольше
+// заявленной длины, и это не должно засчитываться как утечка голоса.
+function audibleOutside(envelope, spans, { minDb = -60, blockSec = BLOCK_SEC, tailSec = 0.15 } = {}) {
+  const round6 = (value) => Math.round(value * 1e6) / 1e6;
+  const extended = (spans || []).map(([from, to]) => [round6(from), round6(to + tailSec)]);
+  let seconds = 0;
+  const stretches = [];
+  let openFrom = null;
+  for (let i = 0; i < envelope.length; i += 1) {
+    const t0 = round6(i * blockSec);
+    const t1 = round6(t0 + blockSec);
+    const inside = extended.some(([from, to]) => t1 > from && t0 < to);
+    if (envelope[i] > minDb && !inside) {
+      seconds += blockSec;
+      if (openFrom === null) openFrom = t0;
+    } else if (openFrom !== null) {
+      stretches.push({ fromSec: openFrom, toSec: t0 });
+      openFrom = null;
+    }
+  }
+  if (openFrom !== null) stretches.push({ fromSec: openFrom, toSec: round6(envelope.length * blockSec) });
+  return { seconds: Math.round(seconds * 100) / 100, stretches };
+}
+
 module.exports = {
-  BLOCK, FLOOR_DB, SAMPLE_RATE, blockDb, decodeAudio, envelopeDb, pcmFromFfmpeg, pearson, windowedMax,
+  BLOCK, BLOCK_SEC, FLOOR_DB, SAMPLE_RATE,
+  audibleOutside, bestLagPearson, blockDb, decodeAudio, envelopeDb, pcmFromFfmpeg, pearson, windowedMax,
 };

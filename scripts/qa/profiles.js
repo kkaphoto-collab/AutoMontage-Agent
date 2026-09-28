@@ -24,7 +24,11 @@ const BASE = deepFreeze({
   donor: { maxSec: 3, gapSec: 0.5 },
   stock: { min: 3, minShort: 2, shortSec: 45 },
   sfx: { minGapSec: 0.3, notableGapSec: 1.0, sceneFadeSec: 0.12 },
-  leak: { stop: 0.6, windowWarn: 0.8, windowSec: 5, silentDb: -60 },
+  // windowSec 2 (не 5, Task 25 review, п.1): более крупное окно разводило короткую (2–3 с) утечку
+  // голоса с фоном −90 дБФС ниже порога слышимости в среднем даже там, где сама утечка звучала в
+  // полную силу — scripts/qa/audio.js windowedMax теперь гейтит по доле слышимых блоков окна, а не
+  // по среднему, и более мелкое окно точнее локализует короткую утечку для отчёта.
+  leak: { stop: 0.6, windowWarn: 0.8, windowSec: 2, silentDb: -60 },
   duration: { toleranceFrames: 1 },
 });
 

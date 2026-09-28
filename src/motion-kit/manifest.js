@@ -54,7 +54,14 @@ export function buildManifest(compiled) {
     // src в предупреждении о коротком стоковом файле.
     inserts: compiled.inserts.map((insert) => ({ id: insert.id, kind: insert.kind, from: insert.from, to: insert.to, cover: insert.cover, src: insert.src })),
     cues: {
-      kept: compiled.cues.kept.map((cue) => ({ id: cue.id, name: cue.name, startFrame: cue.startFrame, hitFrame: cue.hitFrame, notable: cue.notable, bed: cue.bed })),
+      // durationFrames (Task 25 review): kit уже считает его в src/motion-kit/sfx.js, но манифест
+      // раньше его не отдавал — G7 (Task 26) без него не может построить окно [startFrame,
+      // startFrame+durationFrames) для audibleOutside и вынужден был бы гадать длину эффекта
+      // по одному hitFrame.
+      kept: compiled.cues.kept.map((cue) => ({
+        id: cue.id, name: cue.name, startFrame: cue.startFrame, hitFrame: cue.hitFrame,
+        durationFrames: cue.durationFrames, notable: cue.notable, bed: cue.bed,
+      })),
       // name/hitFrame/notable (Task 24 review): G9 (scripts/qa/timeline-gates.js) предупреждает,
       // когда kit реально убрал ЗАМЕТНЫЙ звук из-за тесноты — kept-пары после thinCues физически не
       // могут конфликтовать друг с другом, поэтому настоящий сигнал тесноты живёт именно здесь.

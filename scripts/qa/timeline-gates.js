@@ -497,6 +497,12 @@ function assertCues(manifest) {
     if (!Number.isFinite(cue.startFrame) || !Number.isFinite(cue.hitFrame)) {
       throw new Error(`манифест повреждён: cues.kept[${k}] (${cue.id}).startFrame/hitFrame должны быть конечными числами`);
     }
+    // durationFrames (Task 25 review, п.3 — контракт манифеста): G7 (Task 26) строит из него окно
+    // [startFrame, startFrame+durationFrames) для audibleOutside — ноль или NaN дали бы пустое или
+    // отрицательное окно и звук слоя вне него молча посчитался бы утечкой голоса.
+    if (!Number.isFinite(cue.durationFrames) || cue.durationFrames <= 0) {
+      throw new Error(`манифест повреждён: cues.kept[${k}] (${cue.id}).durationFrames должен быть конечным числом больше 0`);
+    }
   });
   cues.dropped.forEach((entry, k) => {
     if (!entry || typeof entry.id !== 'string' || !entry.id) {

@@ -1367,7 +1367,9 @@ test('gateSafeZone refuses a static text with a NaN `from` even when `until` loo
 // Синтетический cue тем же контрактом, что и cues.kept манифеста (Task 24 context.md): startFrame
 // здесь всегда равен hitFrame (нет lead) — этого достаточно для проверки самого гейта, отдельно от
 // sfx.js/thinCues, который эти поля уже вычисляет по-настоящему.
-const cue = (hitFrame, notable = false, name = 'pop') => ({ id: `${name}@${hitFrame}`, name, startFrame: hitFrame, hitFrame, notable, bed: false });
+// durationFrames (Task 25 review, п.3 — манифест теперь несёт его для каждого kept-звука) — здесь
+// фиксированная заглушка 5, сам гейт G9 её не читает, но assertCues отказал бы без неё.
+const cue = (hitFrame, notable = false, name = 'pop') => ({ id: `${name}@${hitFrame}`, name, startFrame: hitFrame, hitFrame, durationFrames: 5, notable, bed: false });
 
 test('sound density warns on crowded or scene-start sounds', () => {
   assert.equal(gateSfxDensity(manifestFixture({ cues: { kept: [cue(10), cue(40), cue(90, true, 'whoosh'), cue(140, true, 'whoosh')], dropped: [] } }), avatar).status, 'pass');
@@ -1440,7 +1442,7 @@ test('the scene-start boundary matches the engine fade exactly, pinned at 25 and
 // силу. Обратный случай — старт ПОЗДНО, но удар РАНО — обязан предупредить, раз бьёт именно в
 // момент затухания.
 test('the scene-edge rules judge by hitFrame, not startFrame, at 25 and 60 fps', () => {
-  const lead = (startFrame, hitFrame) => ({ id: `whoosh-in@${hitFrame}`, name: 'whoosh-in', startFrame, hitFrame, notable: true, bed: false });
+  const lead = (startFrame, hitFrame) => ({ id: `whoosh-in@${hitFrame}`, name: 'whoosh-in', startFrame, hitFrame, durationFrames: 5, notable: true, bed: false });
   assert.equal(gateSfxDensity(manifestFixture({ fps: 25, cues: { kept: [lead(0, 20)], dropped: [] } }), avatar).status, 'pass',
     'startFrame=0 внутри старого порога, но hitFrame=20 давно после затухания — играть будет в полную силу');
   assert.equal(gateSfxDensity(manifestFixture({ fps: 25, cues: { kept: [lead(10, 1)], dropped: [] } }), avatar).status, 'warn',
@@ -1466,11 +1468,11 @@ test('the end-of-layer fade rule warns on a hit near the very end, pinned at 25 
 // Каждое из двух правил края слоя даёт своё, действенное сообщение (что делать), а не одну и ту же
 // описательную фразу — и называет конкретный звук, если их несколько.
 test('scene-edge spans carry their own actionable note, naming the sound', () => {
-  const startC = { id: 'w@1', name: 'whoosh-in', startFrame: 1, hitFrame: 1, notable: true, bed: false };
+  const startC = { id: 'w@1', name: 'whoosh-in', startFrame: 1, hitFrame: 1, durationFrames: 5, notable: true, bed: false };
   const gStart = gateSfxDensity(manifestFixture({ cues: { kept: [startC], dropped: [] } }), avatar);
   assert.match(gStart.spans[0].note, /whoosh-in: перенесите не раньше 0,12 с — движок плавно вводит звук слоя/);
 
-  const endC = { id: 'w@248', name: 'whoosh-in', startFrame: 248, hitFrame: 248, notable: true, bed: false };
+  const endC = { id: 'w@248', name: 'whoosh-in', startFrame: 248, hitFrame: 248, durationFrames: 5, notable: true, bed: false };
   const gEnd = gateSfxDensity(manifestFixture({ cues: { kept: [endC], dropped: [] } }), avatar);
   assert.match(gEnd.spans[0].note, /whoosh-in: перенесите раньше — движок приглушает последние 0,12 с слоя/);
 });
@@ -1496,7 +1498,7 @@ test('sanity-check: the pair thresholds are pinned exactly at 25 and 60 fps', ()
 // окна старта) — оба игнорируются целиком (kept фильтрует bed до всех проверок), и value считает
 // только не-bed звуки.
 test('a bed cue next to a close sound, and a bed cue at frame 0, are both ignored; value excludes beds', () => {
-  const bed = (hitFrame) => ({ id: `bed@${hitFrame}`, name: 'typing', startFrame: hitFrame, hitFrame, notable: false, bed: true });
+  const bed = (hitFrame) => ({ id: `bed@${hitFrame}`, name: 'typing', startFrame: hitFrame, hitFrame, durationFrames: 5, notable: false, bed: true });
   const g = gateSfxDensity(manifestFixture({ cues: { kept: [bed(0), cue(100), bed(101)], dropped: [] } }), avatar);
   assert.equal(g.status, 'pass');
   assert.equal(g.value, 1, 'value считает только не-bed звуки');
@@ -1556,7 +1558,7 @@ test('REAL KIT: the reviewer\'s typical drop (whoosh at 5.5 s dropped for an imp
 // (`impact-low@153#0`), сам по себе он ничего не говорит автору без расшифровки формата kit.
 // Ищем этот id среди cues.kept и показываем понятное имя и время удара вместо сырой строки.
 test('a dropped notable cue names the conflicting sound by its own name and hit time, not the raw id', () => {
-  const kept = [{ id: 'impact-low@153#0', name: 'impact-low', startFrame: 153, hitFrame: 153, notable: true, bed: false }];
+  const kept = [{ id: 'impact-low@153#0', name: 'impact-low', startFrame: 153, hitFrame: 153, durationFrames: 5, notable: true, bed: false }];
   const dropped = [{ id: 'whoosh-in@148#0', name: 'whoosh-in', hitFrame: 148, notable: true, conflictWith: 'impact-low@153#0', reason: 'notable-gap' }];
   const g = gateSfxDensity(manifestFixture({ cues: { kept, dropped } }), avatar);
   const s = g.spans.find((sp) => sp.note.includes('whoosh-in'));
@@ -1665,7 +1667,24 @@ test('assertCues refuses a kept cue without a string id or with non-finite frame
     /манифест повреждён: cues\.kept\[0\] \(x\)\.startFrame\/hitFrame должны быть конечными числами/);
   assert.throws(() => assertCues({ ...m, cues: { kept: [{ id: 'x', startFrame: 0, hitFrame: undefined }], dropped: [] } }),
     /манифест повреждён: cues\.kept\[0\] \(x\)\.startFrame\/hitFrame должны быть конечными числами/);
-  assert.doesNotThrow(() => assertCues({ ...m, cues: { kept: [{ id: 'x', startFrame: 0, hitFrame: 1 }], dropped: [] } }));
+  assert.doesNotThrow(() => assertCues({ ...m, cues: { kept: [{ id: 'x', startFrame: 0, hitFrame: 1, durationFrames: 5 }], dropped: [] } }));
+});
+
+// Шаг 0 следующего ревью (Task 25 review, п.3 — контракт манифеста): durationFrames — новое поле
+// cues.kept, kept-звук без него, с NaN или с нулевой/отрицательной длиной обязан провалиться так же
+// громко, как startFrame/hitFrame; G7 (Task 26) строит из него окно эффекта для audibleOutside.
+test('assertCues refuses a kept cue with a missing, non-finite or non-positive durationFrames', () => {
+  const m = manifestFixture({});
+  const base = { id: 'x', startFrame: 0, hitFrame: 1 };
+  assert.throws(() => assertCues({ ...m, cues: { kept: [{ ...base }], dropped: [] } }),
+    /манифест повреждён: cues\.kept\[0\] \(x\)\.durationFrames должен быть конечным числом больше 0/);
+  assert.throws(() => assertCues({ ...m, cues: { kept: [{ ...base, durationFrames: NaN }], dropped: [] } }),
+    /манифест повреждён: cues\.kept\[0\] \(x\)\.durationFrames должен быть конечным числом больше 0/);
+  assert.throws(() => assertCues({ ...m, cues: { kept: [{ ...base, durationFrames: 0 }], dropped: [] } }),
+    /манифест повреждён: cues\.kept\[0\] \(x\)\.durationFrames должен быть конечным числом больше 0/);
+  assert.throws(() => assertCues({ ...m, cues: { kept: [{ ...base, durationFrames: -3 }], dropped: [] } }),
+    /манифест повреждён: cues\.kept\[0\] \(x\)\.durationFrames должен быть конечным числом больше 0/);
+  assert.doesNotThrow(() => assertCues({ ...m, cues: { kept: [{ ...base, durationFrames: 1 }], dropped: [] } }));
 });
 
 test('assertCues refuses a dropped entry without a string id', () => {

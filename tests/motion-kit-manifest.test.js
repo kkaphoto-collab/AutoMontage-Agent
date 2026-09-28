@@ -99,3 +99,20 @@ test('cues.dropped carries hitFrame, notable and name for the gates', () => {
     conflictWith: 'impact-low@60#1', reason: 'notable-gap',
   });
 });
+
+// Ревью задачи 25 (п.3, контракт манифеста): durationFrames — kit уже считает его в
+// src/motion-kit/sfx.js (натуральная длина звука, обрезанная концом ролика), но манифест раньше
+// его не отдавал; G7 (Task 26) без него не может построить окно [startFrame, startFrame+
+// durationFrames) для audibleOutside.
+test('cues.kept carries durationFrames for the gates', () => {
+  const sfxLibrary = { sounds: {
+    'whoosh-in': { file: 'a', lengthSec: 1.2, peakSec: 0.3, role: 'whoosh' },
+    'impact-low': { file: 'a', lengthSec: 1.0, peakSec: 0.02, role: 'impact' },
+  } };
+  const crowded = { ...plan, items: [], sfx: [{ at: 2, name: 'whoosh' }, { at: 2.4, name: 'impact' }] };
+  const m = kit.buildManifest(kit.compileLayer(crowded, { ...cfg, sfxLibrary }));
+  assert.equal(m.cues.kept.length, 1);
+  // impact-low: lengthSec 1,0 с при 25 fps → natural 25 кадров, старт 59 → 100-59=41 кадр до конца
+  // ролика (durationInFrames 100) — natural меньше, значит длина остаётся естественной, 25 кадров.
+  assert.equal(m.cues.kept[0].durationFrames, 25);
+});
