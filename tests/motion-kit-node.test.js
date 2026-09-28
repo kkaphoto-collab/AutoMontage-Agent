@@ -437,39 +437,73 @@ test('build errors that mention kit files show @automontage/motion-kit/…, not 
 
 // Имя entry в metafile не должно совпадать с настоящим файлом слоя: при совпадении esbuild
 // оставляет под общим ключом только импорты entry, и импорты файла выпадают из проверки. Заодно
-// это первый настоящий (не мокнутый) пример «нарушение не в самом plan.js»: файл называется по
-// имени, а в скобках — как esbuild вообще до него добрался (через plan.js).
+// это первый настоящий (не мокнутый) пример «нарушение не в самом plan.js»: сообщение показывает
+// всю цепочку от plan.js до нарушившего файла, а не просто его имя.
 test('a real layer-manifest.js in the layer is checked like any other layer file', (t) => {
   const dir = cleanTmp(t);
   writeLayer(dir, "import { n } from '../layer-manifest.js';\n"
     + "export default function buildPlan({face}){ return { hook: n ? 'speaker' : 'enumeration', camera: { face, shots: [{at:0,preset:'W'}] }, items: [] }; }\n");
   fs.writeFileSync(path.join(dir, 'layer-manifest.js'), "import fs from 'node:fs';\nexport const n = fs.readdirSync('.').length;\n");
-  assert.throws(() => buildLayerManifest(dir), /layer-manifest\.js \(подключён из src\/plan\.js\) импортирует «node:fs» — встроенный модуль Node/);
+  assert.throws(() => buildLayerManifest(dir), /src\/plan\.js → layer-manifest\.js импортирует «node:fs» — встроенный модуль Node/);
 });
 
-// Orchestrator follow-up (Task 19 review): когда нарушивший файл — не сам src/plan.js, а его
-// собственный helper (например, файл со сценами, который сам тянет remotion), автору негде искать
-// причину, если назван только helper. Сообщение должно показать первый файл слоя, через который
-// esbuild вообще увидел нарушивший файл — обычно это src/plan.js.
-test('a forbidden import reached through a layer helper names the helper and how plan.js reached it', (t) => {
+// Ревью Task 19/20: когда нарушивший файл — не сам src/plan.js, а его собственный helper (файл со
+// сценами, который сам тянет remotion), автору негде искать причину, если назван только helper.
+// Сообщение показывает всю цепочку от plan.js и говорит прямо, что убрать из плана.
+test('a forbidden import reached through a layer helper shows the chain from plan.js and names the fix', (t) => {
   const dir = cleanTmp(t);
   writeLayer(dir, "import { TITLE } from './scenes.jsx';\n"
     + "export default function buildPlan({face}){ return { camera: { face, shots: [{at:0,preset:'W'}] }, items: [] }; }\n");
   fs.writeFileSync(path.join(dir, 'src/scenes.jsx'), "import { useCurrentFrame } from 'remotion';\nexport const TITLE = String(useCurrentFrame);\n");
   assert.throws(() => buildLayerManifest(dir),
-    /src\/scenes\.jsx \(подключён из src\/plan\.js\) импортирует «remotion» — .*чистыми данными/);
+    /src\/plan\.js → src\/scenes\.jsx импортирует «remotion» — .*чистыми данными.*Уберите импорт src\/scenes\.jsx из плана/s);
 });
 
 // Тот же случай, но нарушивший файл лежит глубже: plan.js подключает helper.js, а тот — scenes.jsx
-// с remotion. Подсказка называет первый файл слоя на пути от plan.js, а не сам helper.js.
-test('a forbidden import reached through two hops still points at the first file plan.js imports', (t) => {
+// с remotion. Цепочка называет оба файла по порядку; подсказка чинить — helper.js (первый файл
+// после plan.js), а не сам scenes.jsx, потому что именно его импорт стоит убрать из плана.
+test('a forbidden import reached through two hops shows the full chain and names the first file after plan.js as the fix', (t) => {
   const dir = cleanTmp(t);
   writeLayer(dir, "import { TITLE } from './helper.js';\n"
     + "export default function buildPlan({face}){ return { camera: { face, shots: [{at:0,preset:'W'}] }, items: [] }; }\n");
   fs.writeFileSync(path.join(dir, 'src/helper.js'), "export { TITLE } from './scenes.jsx';\n");
   fs.writeFileSync(path.join(dir, 'src/scenes.jsx'), "import { useCurrentFrame } from 'remotion';\nexport const TITLE = String(useCurrentFrame);\n");
   assert.throws(() => buildLayerManifest(dir),
-    /src\/scenes\.jsx \(подключён из src\/helper\.js\) импортирует «remotion»/);
+    /src\/plan\.js → src\/helper\.js → src\/scenes\.jsx импортирует «remotion».*Уберите импорт src\/helper\.js из плана/s);
+});
+
+// esbuild перечисляет metafile.inputs в пост-порядке (зависимости раньше того, кто их подключил),
+// поэтому линейный проход в поисках «первого» импортёра нашёл бы src/sfx-library.js (сам файл слоя,
+// уже стоящий в четырёх обязательных импортах entry) по helper-у, который его импортировал бы
+// глубже — и напрасно приписал бы файлу цепочку. sfx-library.js импортирован entry напрямую, и
+// приписки быть не должно, даже если plan.js его тоже импортирует.
+test('an entry file that plan.js also imports directly gets no chain suffix', (t) => {
+  const dir = cleanTmp(t);
+  writeLayer(dir, "import lib from './sfx-library.js';\n"
+    + "export default function buildPlan({face}){ return { camera: { face, shots: [{at:0,preset:'W'}] }, items: [] }; }\n",
+  { sfxLibrary: "import fs from 'node:fs';\nexport default { sounds: {}, n: fs.existsSync('.') };\n" });
+  assert.throws(() => buildLayerManifest(dir), (error) => {
+    assert.match(error.message, /слой .+: src\/sfx-library\.js импортирует «node:fs»/);
+    assert.ok(!error.message.includes('→'), error.message);
+    return true;
+  });
+});
+
+// Когда и plan.js, и его helper импортируют один и тот же нарушивший файл напрямую, кратчайший
+// путь от plan.js — короче и понятнее: BFS должен вернуть именно его, независимо от того, в каком
+// порядке plan.js написал свои собственные импорты (helper мог оказаться в metafile раньше или
+// позже — это не должно менять найденную цепочку).
+test('when both plan.js and a helper import the same offending file, the chain picks the shorter path via plan.js', (t) => {
+  for (const order of ['scenes-first', 'helper-first']) {
+    const dir = cleanTmp(t);
+    const imports = order === 'scenes-first'
+      ? "import { T } from './scenes.jsx';\nimport { H } from './helper.js';\n"
+      : "import { H } from './helper.js';\nimport { T } from './scenes.jsx';\n";
+    writeLayer(dir, `${imports}export default function buildPlan({face}){ return { camera: { face, shots: [{at:0,preset:'W'}] }, items: [] }; }\n`);
+    fs.writeFileSync(path.join(dir, 'src/helper.js'), "export { T as H } from './scenes.jsx';\n");
+    fs.writeFileSync(path.join(dir, 'src/scenes.jsx'), "import { useCurrentFrame } from 'remotion';\nexport const T = String(useCurrentFrame);\n");
+    assert.throws(() => buildLayerManifest(dir), /слой .+: src\/plan\.js → src\/scenes\.jsx импортирует «remotion»/, order);
+  }
 });
 
 test('a layer file literally named <stdin> cannot hide its imports behind the entry', (t) => {

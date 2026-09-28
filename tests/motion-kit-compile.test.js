@@ -149,6 +149,28 @@ test('compilePlan keeps the original buildPlan error as cause', () => {
   });
 });
 
+// Ревью Task 20: waivers в plan.js — решение автора ролика, не гейта. Если он опечатался (не тот
+// gate, пустая причина, забыл обернуть в массив), это должно упасть уже на layer check понятной
+// русской строкой, а не тихо остаться неприменённым (и тем более не уронить applyWaivers
+// TypeError'ом где-то дальше в отчёте — там форма входа доверия не заслуживает и просто игнорится).
+test('compileLayer rejects a malformed waivers entry with the gate list and its index', () => {
+  const bad = (waivers) => () => kit.compileLayer({ ...plan, waivers }, cfg);
+  assert.throws(bad({ G1: 'x' }), /waivers должен быть массивом/);
+  assert.throws(bad([null]), /waivers\[0\]: исключение возможно только для G1, G4, G11 и только с причиной/);
+  assert.throws(bad([{ gate: 'G1', reason: 123 }]), /waivers\[0\]/);
+  assert.throws(bad([{ gate: 'G5', reason: 'причина' }]), /waivers\[0\]/);
+  // Регистр важен: G1 — да, g1 — нет, это не тот же гейт.
+  assert.throws(bad([{ gate: 'g1', reason: 'причина' }]), /waivers\[0\]/);
+  assert.throws(bad([{ gate: 'G1', reason: '   ' }]), /waivers\[0\]/);
+  // Второй, невалидный элемент называется по своему индексу, а не по первому.
+  assert.throws(bad([{ gate: 'G1', reason: 'ok' }, { gate: 'G5', reason: 'x' }]), /waivers\[1\]/);
+});
+
+test('compileLayer keeps the same waivable gate list as scripts/qa/profiles.js WAIVABLE', () => {
+  const { WAIVABLE } = require('../scripts/qa/profiles');
+  assert.deepEqual(kit.WAIVABLE_GATES, [...WAIVABLE]);
+});
+
 test('compilePlan rejects an async buildPlan without leaving an unhandled rejection', async () => {
   const unhandled = [];
   const onUnhandled = (reason) => unhandled.push(reason);

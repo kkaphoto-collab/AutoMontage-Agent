@@ -1,10 +1,10 @@
 // Пороги гейтов. avatar — голос HeyGen/ElevenLabs и слой kit; live — живая запись с микрофона.
 // Коридор avatar.voiceMusic калибруется по утверждённому эталонному preview (см. DECISIONS).
+// live.voiceMusic — стартовые значения без калибровки по реальному ролику: живой эталон появится
+// в задаче 43, см. DECISIONS.
 
-// Глубокая заморозка: гейт получает профиль по ссылке, и без неё один гейт мог бы поменять порог
-// (например, rhythm.stopSec) для следующего гейта той же проверки — Object.freeze без deep
-// замораживает только верхний уровень, вложенные объекты (rhythm, camera, voiceMusic, ...)
-// остались бы изменяемыми.
+// Гейт получает профиль по ссылке: без глубокой заморозки один гейт мог бы тихо поменять порог
+// (например rhythm.stopSec) для следующего гейта той же проверки.
 function deepFreeze(value) {
   for (const child of Object.values(value)) {
     if (child && typeof child === 'object' && !Object.isFrozen(child)) deepFreeze(child);

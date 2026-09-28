@@ -1,13 +1,23 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const { randomUUID } = require('node:crypto');
 const { WAIVABLE } = require('./profiles');
 
 const ICONS = { pass: '✅', warn: '⚠️', fail: '❌', waived: '☑️', skipped: '⏭️' };
+const STATUSES = Object.keys(ICONS);
 const KIND_TITLES = { 'layer-check': 'план слоя', 'layer-render': 'рендер слоя', preview: 'preview' };
 const REPORT_NAME = /^[a-z0-9][a-z0-9._-]{0,80}$/u;
+const NO_ERROR_TEXT = 'неизвестная ошибка';
 
 function gate(id, title, fields = {}) {
-  return { id, title, status: 'pass', value: null, threshold: null, unit: '', spans: [], hint: '', ...fields };
+  const g = { id, title, status: 'pass', value: null, threshold: null, unit: '', spans: [], hint: '', ...fields };
+  if (!STATUSES.includes(g.status)) {
+    throw new Error(`gate ${id}: status должен быть одним из ${STATUSES.join('|')}, получено «${g.status}»`);
+  }
+  // Явный gate(..., { spans: undefined }) перекрыл бы дефолт через spread и уронил бы formatReport
+  // на .slice() ниже — подстраховываемся уже здесь, а не в каждом месте, что читает spans.
+  if (!Array.isArray(g.spans)) g.spans = [];
+  return g;
 }
 
 function summarize(gates) {
@@ -17,61 +27,80 @@ function summarize(gates) {
 }
 
 function applyWaivers(gates, waivers = [], waivable = WAIVABLE) {
+  // waivers сюда может прийти не только из уже провалидированного compileLayer (src/motion-kit/
+  // compile.js), а прямо из manifest.json на диске или из ручного вызова — форма входа доверия не
+  // заслуживает, но падать на ней applyWaivers не должен: просто не находим исключение.
+  const list = Array.isArray(waivers) ? waivers : [];
   return gates.map((g) => {
-    const waiver = waivers.find((w) => w.gate === g.id && String(w.reason || '').trim());
+    const waiver = list.find((w) => w && w.gate === g.id && typeof w.reason === 'string' && w.reason.trim());
     if (g.status !== 'fail' || !waivable.includes(g.id) || !waiver) return g;
     return { ...g, status: 'waived', hint: `исключение: ${waiver.reason.trim()}` };
   });
 }
 
 function buildReport({ kind, profile, gates, inputs = [], layer = null, now = new Date(), error = null }) {
-  return { version: 1, kind, layer, profile, createdAt: now.toISOString(), inputs, gates, summary: summarize(gates), error };
+  const hasError = error !== null && error !== undefined;
+  const summary = summarize(gates);
+  return {
+    version: 1, kind, layer, profile, createdAt: now.toISOString(), inputs, gates,
+    // Ошибка сборки/чтения важнее гейтов: отчёт нельзя читать как «всё хорошо», даже если gates
+    // пуст (сборка упала раньше, чем появился хоть один гейт) или в нём случайно только pass.
+    summary: hasError ? { ...summary, status: 'error' } : summary,
+    error: hasError ? (String(error).trim() || NO_ERROR_TEXT) : null,
+  };
 }
 
 function exitCodeFor(report) {
-  if (report.error) return 2;
+  if (report.error !== null && report.error !== undefined) return 2;
   return report.summary.status === 'fail' ? 1 : 0;
 }
 
 const number = (value) => (typeof value === 'number' ? String(Number(value.toFixed(2))).replace('.', ',') : String(value));
 
-// Сначала округляем секунды до сантисекунд, только потом делим на минуты. Обратный порядок
-// (сперва отделить минуты, потом .toFixed(2) остатка) даёт для 59.999 с минуты = 0, остаток
-// 59.999.toFixed(2) = "60.00" — печатался бы обман «0:60,00» вместо «1:00,00».
+// Сначала округляем секунды до сантисекунд, только потом делим на минуты (иначе 59.999 печаталось
+// бы как «0:60,00» — отдельная минутная часть уже отрезана до .toFixed(2) остатка). Отрицательные
+// секунды (округление на границе нуля, опечатка в плане) зажимаем в 0 — «-1:55,00» ничего не
+// говорит человеку, который не думает во внутренних кадрах.
 const clock = (sec) => {
-  const cs = Math.round(sec * 100);
+  const cs = Math.max(0, Math.round(sec * 100));
   const minutes = Math.floor(cs / 6000);
   const rest = (cs - minutes * 6000) / 100;
   return `${minutes}:${rest.toFixed(2).padStart(5, '0').replace('.', ',')}`;
 };
 
 function formatReport(report) {
-  const verdict = report.summary.status === 'fail' ? 'СТОП' : report.summary.status === 'warn' ? 'есть предупреждения' : 'всё хорошо';
+  const waivedCount = report.gates.filter((g) => g.status === 'waived').length;
+  const verdict = report.summary.status === 'error' ? 'оценить нельзя'
+    : report.summary.status === 'fail' ? 'СТОП'
+      : report.summary.status === 'warn' ? 'есть предупреждения'
+        : waivedCount ? `всё хорошо (исключений: ${waivedCount})`
+          : 'всё хорошо';
   const lines = [`Проверки (${KIND_TITLES[report.kind] || report.kind}): ${verdict}`];
   if (report.error) lines.push(`❌ Оценить нельзя: ${report.error}`);
   for (const g of report.gates) {
     const value = g.value === null || g.value === undefined ? '' : `: ${number(g.value)}${g.unit ? ` ${g.unit}` : ''}`;
-    const threshold = g.threshold ? ` (порог ${g.threshold})` : '';
+    const threshold = g.threshold == null ? '' : ` (порог ${typeof g.threshold === 'number' ? number(g.threshold) : g.threshold})`;
     lines.push(`${ICONS[g.status]} ${g.id} ${g.title}${value}${threshold}`);
     for (const span of g.spans.slice(0, 3)) lines.push(`   ${clock(span.fromSec)}–${clock(span.toSec)} ${span.note || ''}`.trimEnd());
+    if (g.spans.length > 3) lines.push(`   …и ещё ${g.spans.length - 3} — полный список в qa/<имя>.json`);
     if (g.hint && g.status !== 'pass') lines.push(`   → ${g.hint}`);
   }
   return lines.join('\n');
 }
 
+// Запись и rename в одном try — тот же приём, что writeJsonAtomic в scripts/pult/files.js:
+// randomUUID вместо PID (PID переиспользуют разные процессы и контейнеры), 'wx' не даёт молча
+// затереть чужой недописанный временный файл, force-rm подчищает temp при любом сбое записи или
+// переименования. Не переиспользуем саму writeJsonAtomic: она пишет только JSON и не принимает
+// fileSystem, а здесь нужен и текстовый .txt-отчёт, и инъекционный fs для детерминированного
+// теста сбоя rename.
 function writeAtomic(file, text, fileSystem) {
-  const temporary = `${file}.${process.pid}.tmp`;
-  fileSystem.writeFileSync(temporary, text);
+  const temporary = `${file}.tmp-${randomUUID()}`;
   try {
+    fileSystem.writeFileSync(temporary, text, { flag: 'wx' });
     fileSystem.renameSync(temporary, file);
   } catch (error) {
-    // Переименование не удалось (диск, права, антивирус держит файл) — не оставляем .tmp в qa/,
-    // иначе следующий запуск копит мусор рядом с настоящими отчётами.
-    try {
-      fileSystem.unlinkSync(temporary);
-    } catch {
-      // временный файл уже не убрать — сообщаем исходную причину сбоя, а не эту
-    }
+    fileSystem.rmSync(temporary, { force: true });
     throw error;
   }
 }

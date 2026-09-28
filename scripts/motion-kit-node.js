@@ -140,10 +140,7 @@ function findPlanViolation(metafile, { root, kitRoot, kitFiles = [], layerFiles 
   }
 
   const violations = [];
-  // ENV_DEFINE — синтетический модуль без собственных импортов, проверять его наравне с прочими
-  // ключами не нужно оборачивать отдельным исключением: цикл по input.imports просто ничего не
-  // сделает (0 итераций), а resolve()/isKit() на нём безопасны, потому что несуществующий путь
-  // canonicalPath отдаёт как есть, не бросая.
+  // ENV_DEFINE — синтетический модуль без импортов, отдельное исключение для него не нужно.
   for (const [key, input] of Object.entries(metafile?.inputs || {})) {
     const entry = key === STDIN;
     const file = entry ? null : resolve(key);
@@ -162,21 +159,43 @@ function findPlanViolation(metafile, { root, kitRoot, kitFiles = [], layerFiles 
   // Файл, где буквально стоит запрещённый импорт, не обязан быть src/plan.js: например, план
   // подключает свой helper со сценами, а тот сам тянет remotion. Тогда одного имени файла мало —
   // автору негде искать причину, если он открывает plan.js и не видит там ничего подозрительного.
-  // Называем первый файл слоя, который по metafile прямо импортирует нарушивший файл (обычно это
-  // и есть src/plan.js); когда нарушивший файл подключён самим entry (это и есть первые четыре
-  // файла слоя), добавлять нечего.
-  const via = first.key && first.key !== STDIN ? directImporter(metafile, first.key) : null;
-  const file = via && via !== STDIN ? `${first.file} (подключён из ${slash(via)})` : first.file;
-  return { file, spec: first.spec, reason: first.reason };
+  // Кратчайший путь от entry (BFS, не первое совпадение по metafile.inputs — esbuild перечисляет
+  // входы в пост-порядке: сначала зависимости, потом того, кто их подключил, поэтому «первое
+  // совпадение» было бы самым глубоким импортёром, а не самой понятной и короткой цепочкой от
+  // plan.js) показывает, как именно esbuild дошёл до нарушившего файла. Когда файл подключён самим
+  // entry напрямую (это и есть четыре файла слоя, включая сам src/plan.js), цепочка не нужна —
+  // имя файла уже всё объясняет.
+  const chain = first.key && first.key !== STDIN ? shortestImportChain(metafile, first.key) : null;
+  const named = chain && chain.length > 2 ? chain.slice(1).map((key) => slash(key)) : null;
+  const file = named ? named.join(' → ') : first.file;
+  // React/remotion в чужом файле — обычно автор хотел использовать готовый JSX-компонент сцены
+  // прямо из плана. Называем, что убрать из плана: React-файлы слоя подключает Root.jsx, а план
+  // должен ссылаться на них по id, а не импортировать напрямую.
+  const isJsxLeak = named && (first.reason === REASONS.react || first.reason === REASONS.remotion);
+  const fixHint = isJsxLeak
+    ? ` Уберите импорт ${slash(chain[2])} из плана: React-файлы слоя подключает Root.jsx, план ссылается на них по id.`
+    : '';
+  return { file, spec: first.spec, reason: first.reason, fixHint };
 }
 
-// Первый файл в metafile, чей список imports содержит ключ target — то есть первый, через кого
-// esbuild вообще увидел этот файл. Линейный проход по input'ам достаточен: граф импортов слоя
-// небольшой, а нам нужен только один (любой) прямой импортёр, не полная цепочка до entry.
-function directImporter(metafile, target) {
-  for (const [key, input] of Object.entries(metafile?.inputs || {})) {
-    if (key === target) continue;
-    if ((input.imports || []).some((record) => record.path === target)) return key;
+// Кратчайший путь по metafile от entry ('<stdin>') до targetKey — BFS по прямым рёбрам импорта.
+// esbuild перечисляет metafile.inputs в пост-порядке обхода (зависимости раньше того, кто их
+// подключил; entry — последним), поэтому линейный проход в поисках «первого» импортёра называл бы
+// самый глубокий из них, а не кратчайший и самый понятный путь от plan.js.
+function shortestImportChain(metafile, targetKey) {
+  const queue = [[STDIN]];
+  const seen = new Set([STDIN]);
+  while (queue.length) {
+    const chain = queue.shift();
+    const last = chain[chain.length - 1];
+    if (last === targetKey) return chain;
+    for (const record of metafile.inputs[last]?.imports || []) {
+      const next = record.path;
+      if (!seen.has(next) && metafile.inputs[next]) {
+        seen.add(next);
+        queue.push([...chain, next]);
+      }
+    }
   }
   return null;
 }
@@ -266,7 +285,7 @@ function buildLayerManifest(layerDir) {
     layerFiles: LAYER_FILES.map(([file]) => canonicalPath(path.join(root, file))),
   });
   if (violation) {
-    throw new Error(hideKitPaths(`слой ${name}: ${violation.file} импортирует «${violation.spec}» — ${violation.reason}`, root));
+    throw new Error(hideKitPaths(`слой ${name}: ${violation.file} импортирует «${violation.spec}» — ${violation.reason}${violation.fixHint}`, root));
   }
   let mod;
   try {

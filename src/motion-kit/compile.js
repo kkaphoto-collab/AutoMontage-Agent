@@ -6,6 +6,27 @@ import { secToFrame } from './time.js';
 
 export const KIT_VERSION = 1;
 const ITEM_KINDS = ['text', 'card', 'media'];
+// Тот же список, что WAIVABLE в scripts/qa/report.js/profiles.js — совпадение проверяет
+// tests/motion-kit-compile.test.js. Не импортируем profiles.js напрямую: kit — ESM-слой, который
+// грузят и Remotion, и Node-манифест без CLI-инструментов гейтов, а profiles.js — CommonJS-часть
+// именно гейтовой обвязки, заводить между ними прямую зависимость незачем.
+export const WAIVABLE_GATES = ['G1', 'G4', 'G11'];
+
+// Автор плана — не гейт, а человек: битый waiver (не тот gate, пустая причина, объект вместо
+// массива) должен упасть сразу на layer check понятной русской строкой, а не тихо остаться
+// неприменённым или уронить applyWaivers TypeError'ом на форме входа.
+function compileWaivers(waivers) {
+  if (waivers === undefined) return [];
+  if (!Array.isArray(waivers)) throw new Error('waivers должен быть массивом {gate, reason}');
+  return waivers.map((w, i) => {
+    const okGate = WAIVABLE_GATES.includes(w?.gate);
+    const okReason = typeof w?.reason === 'string' && w.reason.trim();
+    if (!okGate || !okReason) {
+      throw new Error(`waivers[${i}]: исключение возможно только для ${WAIVABLE_GATES.join(', ')} и только с причиной`);
+    }
+    return { gate: w.gate, reason: w.reason };
+  });
+}
 
 export function compileItems(items = [], { fps, durationInFrames }) {
   const ids = new Set();
@@ -57,7 +78,7 @@ export function compileLayer(plan, { fps, width, height, durationInFrames, words
     kitVersion: KIT_VERSION, fps, width, height, durationInFrames,
     camera, items, inserts, cues, captions,
     hook: plan.hook || 'speaker',
-    waivers: plan.waivers || [],
+    waivers: compileWaivers(plan.waivers),
   };
 }
 
