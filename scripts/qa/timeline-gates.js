@@ -9,7 +9,7 @@ const factor = (a, b) => (a > b ? a / b : b / a);
 // Проверка целостности манифеста: оба гейта читают camera.* по индексу кадра — обрезанный или
 // битый массив (чужой профиль рендера, ручная правка manifest.json) должен дать понятную ошибку
 // сразу здесь, а не NaN/undefined где-то в середине detectCameraEvents. Экспортируется отдельно:
-// раннер Task 24 переиспользует ровно эту проверку перед вызовом любого гейта по манифесту.
+// раннер задачи 24 переиспользует ровно эту проверку перед вызовом любого гейта по манифесту.
 function assertCameraArrays(manifest) {
   const camera = manifest && manifest.camera;
   const n = manifest && manifest.durationInFrames;
@@ -23,8 +23,7 @@ function assertCameraArrays(manifest) {
 
 // scale — короткая сторона кадра / 1080: пороги в px заданы для кадра 1080×1920 и масштабируются.
 // fps — окно панч-ина 6 кадров задано для 25 fps (пружина kit живёт в секундах). Оба обязательны:
-// молчаливый дефолт 1/25 на нестандартном кадре или fps посчитал бы событие не тем порогом
-// (ревью Task 21, п. 10).
+// молчаливый дефолт 1/25 на нестандартном кадре или fps посчитал бы событие не тем порогом.
 function detectCameraEvents(camera, t, scale, fps) {
   if (!(scale > 0)) throw new Error('detectCameraEvents: нужен scale > 0 (короткая сторона кадра / 1080)');
   if (!(fps > 0)) throw new Error('detectCameraEvents: нужен fps > 0');
@@ -41,29 +40,47 @@ function detectCameraEvents(camera, t, scale, fps) {
   // с каждой стороны) — жёсткий рез между двумя shots kit (одна камера ещё доигрывает старый
   // дрейф, другая уже стоит на новом плане), а не растущий несколько кадров панч-ин. Ступеньку
   // нужно судить только порогами реза/слабого реза, а не порогом панча — иначе, например, 12%-й
-  // рез между W и M засчитывается как «панч» и вообще не попадает в G2 (ревью Task 21, п. 1).
+  // рез между W и M засчитывается как «панч» и вообще не попадает в G2.
   const flat = (g) => g < 1 || g >= n || factor(camera.s[g], camera.s[g - 1]) < 1.01;
   const step = (g) => g >= 1 && factor(camera.s[g], camera.s[g - 1]) >= 1 + t.weakScale && flat(g - 1) && flat(g + 1);
   const stepIn = (a, b) => { for (let g = Math.max(1, a + 1); g <= b; g += 1) if (step(g)) return true; return false; };
   // Настоящий рез/смена фокуса внутри окна панча — тоже не панч: без этой проверки рез, случившийся
   // прямо во время нарастания соседнего панча, мог бы дать вторую, ложную вспышку «панча» сразу
-  // после самого реза (ревью Task 21, п. 3).
+  // после самого реза.
   const hardIn = (a, b) => events.some((e) => (e.kind === 'cut' || e.kind === 'focus') && e.frame > a && e.frame <= b);
-  // Первый кадр настоящего роста внутри окна панча: отматываем назад, пока значение строго растёт.
-  // Это момент, когда камера ФАКТИЧЕСКИ начала двигаться — обычно на 2–3 кадра раньше того кадра,
-  // на котором прирост впервые перевалил punchScale и панч был замечен (ревью Task 21, п. 4).
-  const riseStart = (to, from) => { let g = to; while (g > from && camera.s[g - 1] < camera.s[g]) g -= 1; return g; };
-  // «Съеденный» (упёршийся в maxScale) панч: requested в этом кадре заметно выше видимого s —
-  // клэмп камеры, а не собственное решение автора приблизиться. Это отдельная проблема (G3 задачи
-  // 22), не слабый джамп-кат — не показываем в G2 (ревью Task 21, п. 7).
-  const eaten = (f) => camera.requested[f] / camera.s[f] >= t.eatenPunch;
+  // Первый кадр настоящего роста внутри окна панча. Наивная версия («отматываем, пока строго
+  // растёт») ломалась на дрейфующих shots (drift: 'in'): камера там растёт почти на каждом кадре
+  // сама по себе, независимо от панча, и такая ходьба назад проваливалась на десятки кадров раньше
+  // настоящего начала панча (до 0,18 с на 74 из 144 дрейфующих случаев). Правильный критерий —
+  // не «растёт ли кадр вообще», а «растёт ли он заметно относительно САМОГО панча»: сначала находим
+  // top — наибольший однокадровый прирост во всём окне (это и есть пик пружины панча), затем
+  // отматываем назад, пока однокадровый прирост остаётся ≥ 10 % от top. Дрейф даёт прирост в разы
+  // меньше пика панча и обрывает отмотку сразу за настоящим стартом.
+  const riseStart = (to, from) => {
+    let top = 0;
+    for (let g = from + 1; g <= to; g += 1) top = Math.max(top, camera.s[g] / camera.s[g - 1] - 1);
+    let g = to;
+    while (g > from && camera.s[g] / camera.s[g - 1] - 1 >= 0.1 * top && camera.s[g - 1] < camera.s[g]) g -= 1;
+    return g;
+  };
+  // «Съеденный» (упёршийся в maxScale) панч: requested в одном из ближайших кадров заметно выше
+  // видимого s — клэмп камеры, а не собственное решение автора приблизиться. Клэмп обычно
+  // проявляется не в САМОМ кадре f, а на кадр-два позже (пружина ещё не успела упереться в потолок
+  // именно на f) — поэтому смотрим вперёд на всё окно панча, а не только на сам кадр. Это отдельная
+  // проблема (гейт G3 задачи 22), не слабый джамп-кат — не показываем в G2.
+  const eaten = (f) => {
+    for (let g = f; g <= Math.min(n - 1, f + punchWindow); g += 1) {
+      if (camera.requested[g] / camera.s[g] >= t.eatenPunch) return true;
+    }
+    return false;
+  };
 
   for (let f = 1; f < n; f += 1) {
     const b2 = Math.max(0, f - 2);
     const b6 = Math.max(0, f - punchWindow);
     const jump = factor(camera.s[f], camera.s[b2]);
     // Евклидово расстояние сдвига лица: диагональный сдвиг 70×70 px реален (≈99 px), а не 70 —
-    // Chebyshev-максимум по одной оси недооценивал диагональ (ревью Task 21, п. 5).
+    // Chebyshev-максимум по одной оси недооценивал диагональ.
     const shift = Math.hypot(camera.dx[f] - camera.dx[b2], camera.dy[f] - camera.dy[b2]);
     if (sharp(f) !== sharp(f - 1)) events.push({ frame: f, kind: 'focus' });
     else if (jump >= 1 + t.jumpScale || shift >= shiftPx) events.push({ frame: f, kind: 'cut' });
@@ -75,8 +92,7 @@ function detectCameraEvents(camera, t, scale, fps) {
       events.push({ frame: f, kind: 'punch' });
     } else {
       // Слабую смену показываем в G2, только если её видно: если в f или в опорном кадре b2 спикер
-      // уже не резкий (away/blur/вставка), эту вибрацию масштаба или лица зритель не видит
-      // (ревью Task 21, п. 6).
+      // уже не резкий (away/blur/вставка), эту вибрацию масштаба или лица зритель не видит.
       const visible = sharp(f) && sharp(b2);
       const scaleWeak = visible && jump >= 1 + t.weakScale && !eaten(f);
       const shiftWeak = visible && shift >= weakShiftPx;
@@ -87,11 +103,11 @@ function detectCameraEvents(camera, t, scale, fps) {
   }
   // Схлопываем только повторы ОДНОГО вида в пределах 2 кадров: иначе рез сразу после панча (или
   // наоборот) в пределах этих же 2 кадров съедался бы соседней записью другого вида, и «резы» после
-  // панча пропадали бы из событий совсем (ревью Task 21, п. 3).
+  // панча пропадали бы из событий совсем.
   const collapse = (list) => list.filter((e, i) => i === 0 || e.frame - list[i - 1].frame > 2 || e.kind !== list[i - 1].kind);
   // Отодвигаем начало панча к настоящему старту роста только у выжившего (первого в пачке) кадра —
   // после схлопывания у каждой пачки панча остаётся ровно один представитель, и riseStart честно
-  // считает его собственное окно [f−punchWindow, f] заново (ревью Task 21, п. 4).
+  // считает его собственное окно [f−punchWindow, f] заново.
   const kept = collapse(events).map((e) => (e.kind === 'punch'
     ? { ...e, frame: riseStart(e.frame, Math.max(0, e.frame - punchWindow)) }
     : e));
@@ -101,7 +117,7 @@ function detectCameraEvents(camera, t, scale, fps) {
 
 // Хронологический порядок: гейт сам решает, что ему нужно (самый длинный план, топ-5 самых
 // длинных для spans) — сортировка внутри speakerPlans скрывала бы от будущего вызывающего кода
-// исходный порядок (ревью Task 21, п. 10).
+// исходный порядок.
 function speakerPlans(camera, detected, fps) {
   const cuts = new Set(detected.events.map((e) => e.frame));
   const plans = [];
@@ -126,7 +142,7 @@ function gateRhythm(manifest, profile) {
   const plans = speakerPlans(manifest.camera, detectCameraEvents(manifest.camera, profile.camera, scale, manifest.fps), fps);
   const { stopSec, warnSec } = profile.rhythm;
   // Спикер ни разу не был резким и видимым за весь ролик — ритм оценивать не по чему: это не
-  // «идеальные 0 секунд», а сигнал «гейт не увидел спикера вообще» (ревью Task 21, п. 8).
+  // «идеальные 0 секунд», а сигнал «гейт не увидел спикера вообще».
   if (!plans.length) {
     return gate('G1', 'Ритм спикера', {
       status: 'skipped', threshold: `≤ ${fmt(stopSec)} с`,

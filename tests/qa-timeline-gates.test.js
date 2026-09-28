@@ -192,6 +192,54 @@ test('a punch event is backdated to the real start of its rise, matching punch.a
   }
 });
 
+// Регресс (ревью пакета 3): на дрейфующем shot ('in') камера растёт почти каждый кадр сама по
+// себе, независимо от панча. Наивная «отматываем, пока строго растёт» цеплялась за этот дрейф и
+// датировала панч на десятки кадров раньше punch.at (до 0,18 с в 74 из 144 проверенных случаев).
+// riseStart должен опираться на прирост САМОГО панча (top в его окне), а не на любой рост вообще.
+test('a punch on a drifting ("in") shot is still dated exactly at punch.at, not earlier', () => {
+  for (const fps of [25, 30, 50, 60]) {
+    for (const shotLen of [1.2, 2.5, 4]) {
+      const at = shotLen / 2;
+      const cfg = { fps, width: 1080, height: 1920, durationInFrames: Math.round((shotLen + 1) * fps), words: [], sfxLibrary: { sounds: {} } };
+      const m = kit.buildManifest(kit.compileLayer({ captions: false, items: [],
+        camera: { face, shots: [{ at: 0, preset: 'W', drift: 'in' }, { at: shotLen, preset: 'M', drift: 'out' }],
+          punches: [{ at, until: at + 0.3 }] } }, cfg));
+      const d = detectCameraEvents(m.camera, avatar.camera, 1, fps);
+      const punch = d.events.find((e) => e.kind === 'punch');
+      assert.ok(punch, `fps=${fps} shotLen=${shotLen}: no punch detected`);
+      assert.equal(punch.frame, Math.round(at * fps), `fps=${fps} shotLen=${shotLen}`);
+    }
+  }
+});
+
+// Граничный случай владельца: план держится статичным (дрейф W(in), без единого реза) до самого
+// панча на 2,56 с — план длиной РОВНО 2,56 с обязан провалить G1 (fail), а не только предупредить.
+// На старом riseStart панч датировался на кадры раньше 2,5 с, и план измерялся короче порога.
+test('a static drift-in plan up to a punch at 2.56 s fails G1, not just warns', () => {
+  const cfg = { fps: 25, width: 1080, height: 1920, durationInFrames: 125, words: [], sfxLibrary: { sounds: {} } };
+  const m = kit.buildManifest(kit.compileLayer({ captions: false, items: [],
+    camera: { face, shots: [{ at: 0, preset: 'W', drift: 'in' }], punches: [{ at: 2.56, until: 2.86 }] } }, cfg));
+  const g = gateRhythm(m, avatar);
+  assert.equal(g.status, 'fail');
+  assert.equal(g.value, 2.56);
+});
+
+// Регресс на «riseStart без границы окна»: рост держится на 1 %/кадр (это ≥ 10 % от собственного
+// пика панча в 3 %/кадр, поэтому условие «растёт заметно» никогда естественно не обрывается) 60
+// кадров подряд, потом переходит в панч на 3 %/кадр. Без нижней границы `from` отмотка ушла бы к
+// самому кадру 0, а не остановилась на границе окна панча (b6 = кадр срабатывания − 6).
+test('riseStart never walks back past its own punch window, even on a sustained climb', () => {
+  const slowRate = 1.01;
+  const fastStart = 60;
+  const fastRate = 1.03;
+  const m = manifestFixture({ seconds: 4, camera: (f) => (f < fastStart
+    ? { s: slowRate ** f }
+    : { s: (slowRate ** fastStart) * (fastRate ** (f - fastStart)) }) });
+  const d = detectCameraEvents(m.camera, avatar.camera, 1, 25);
+  assert.deepEqual(d.events.map((e) => e.kind), ['punch']);
+  assert.equal(d.events[0].frame, 56, 'riseStart должен остановиться на границе окна панча, а не на кадре 0');
+});
+
 // П.5: сдвиг лица считается по евклидовому расстоянию — диагональный сдвиг 70×70 px даёт ≈99 px и
 // уже режет план, хотя по каждой оси отдельно 70 px ниже порога 85. Плюс отдельная слабая полоса
 // сдвига (weakShiftPx=40): 60 px не режет план, но виден зрителю и должен попасть в G2.
@@ -422,4 +470,153 @@ test('weak-change visibility checks both endpoints (f and b2), not just f', () =
   } });
   const d = detectCameraEvents(m.camera, avatar.camera, 1, 25);
   assert.deepEqual(d.weak, []);
+});
+
+// --- Дожим мутационных выживших (пакет 3) ---
+
+// «Плоские соседи» ступеньки требуются НЕЗАВИСИМО с каждой стороны: 1,1 %-й предшественник перед
+// самой ступенькой (g−1) уже не плоский (порог — ровно 1 %), и ступенька не должна засчитаться,
+// даже если сосед С ДРУГОЙ стороны идеально плоский. Тот же кадр 53 при этом действительно ≥ 6 %
+// (иначе сам критерий ступеньки никогда не проверится).
+test('a step needs flat(g-1) independently: a 1.1 % precursor before it blocks the step', () => {
+  const m = manifestFixture({ seconds: 3, camera: (f) => {
+    if (f < 52) return { s: 1.0 };
+    if (f === 52) return { s: 1.011 }; // 1,1 % — уже не плоско по порогу 1 %
+    if (f === 53) return { s: 1.011 * 1.07 }; // сам скачок ступеньки — 7 %
+    if (f === 54) return { s: 1.011 * 1.07 * 1.005 }; // сосед после — плоский (0,5 %)
+    if (f <= 56) return { s: 1.011 * 1.07 * 1.005 * (1.03 ** (f - 54)) };
+    return { s: 1.011 * 1.07 * 1.005 * 1.03 * 1.03 };
+  } });
+  const d = detectCameraEvents(m.camera, avatar.camera, 1, 25);
+  // Без ложной «ступеньки» окно панча свободно — растущая часть после кадра 53 засчитывается панчем.
+  assert.deepEqual(d.events.map((e) => e.kind), ['punch']);
+});
+
+// Симметричный случай: сосед ПОСЛЕ ступеньки (g+1) не плоский, сосед ДО — плоский.
+test('a step needs flat(g+1) independently: a 1.1 % successor after it blocks the step', () => {
+  const m = manifestFixture({ seconds: 3, camera: (f) => {
+    if (f < 53) return { s: 1.0 };
+    if (f === 53) return { s: 1.07 }; // сам скачок — 7 %, сосед до (52) плоский
+    if (f === 54) return { s: 1.07 * 1.011 }; // сосед после — уже не плоский (1,1 %)
+    if (f <= 56) return { s: 1.07 * 1.011 * (1.03 ** (f - 54)) };
+    return { s: 1.07 * 1.011 * 1.03 * 1.03 };
+  } });
+  const d = detectCameraEvents(m.camera, avatar.camera, 1, 25);
+  assert.deepEqual(d.events.map((e) => e.kind), ['punch']);
+});
+
+// speakerPlans хронологичен даже когда длины планов РАЗНЫЕ: сортировка по длине (топ-5 самых
+// длинных) — забота гейта, а не speakerPlans; при разных длинах сортировка по убыванию дала бы
+// другой порядок [20, 90, 0], а не по времени [0, 20, 90].
+test('speakerPlans stays chronological even with unequal plan lengths (not sorted by length)', () => {
+  const m = manifestFixture({ seconds: 6, camera: (f) => {
+    if (f < 20) return { s: 1 };
+    if (f < 90) return { s: 1.18 };
+    return { s: 1 };
+  } });
+  const d = detectCameraEvents(m.camera, avatar.camera, 1, 25);
+  const plans = speakerPlans(m.camera, d, 25);
+  assert.deepEqual(plans.map((p) => p.from), [0, 20, 90]);
+});
+
+// G1 действительно использует manifest.fps внутри своего вызова detectCameraEvents, а не
+// зашитые 25: медленный рост 1 %/кадр 11 кадров подряд перегоняет punchScale только в окне,
+// отмасштабированном под настоящие 50 fps (~12 кадров) — с окном под 25 fps (6 кадров) панч не
+// находится вовсе, и план ошибочно меряется на всю композицию (4 с, provided fail).
+test('G1 really uses manifest.fps for its own detectCameraEvents call, not a fixed 25', () => {
+  const m = manifestFixture({ seconds: 4, fps: 50, camera: (f) => {
+    if (f < 100) return { s: 1 };
+    const n = Math.min(f - 100, 11);
+    return { s: 1 + 0.01 * n };
+  } });
+  const g = gateRhythm(m, avatar);
+  assert.equal(g.status, 'pass');
+  assert.equal(g.value, 2);
+});
+
+// G1 обязан провалиться на битом манифесте точно так же, как G2 — assertCameraArrays должна быть
+// подключена в обоих гейтах, а не только в одном.
+test('gateRhythm throws the same clear error as gateWeakCuts on a malformed manifest', () => {
+  const bad = { fps: 25, width: 1080, height: 1920, durationInFrames: 3,
+    camera: { s: [1, 1], requested: [1, 1], dx: [0, 0], dy: [0, 0], blur: [0, 0], opacity: [1, 1] } };
+  assert.throws(() => gateRhythm(bad, avatar), /манифест повреждён: camera\.s должен быть массивом из 3 конечных чисел/);
+});
+
+// Порог «съеденного» панча — ровно профильный eatenPunch (1,05), а не более строгий 1,10:
+// requested/s = 1,07 (между 1,05 и 1,10) уже обязан считаться съеденным и не попадать в G2.
+test('the eaten-punch threshold is exact at the profile value (1.05), not a stricter 1.10', () => {
+  const m = manifestFixture({ seconds: 3, camera: (f) => (f < 54
+    ? { s: 1, requested: 1 }
+    : { s: 1.08, requested: 1.08 * 1.07 }) });
+  const d = detectCameraEvents(m.camera, avatar.camera, 1, 25);
+  assert.deepEqual(d.weak, [], 'requested/s = 1,07 ≥ eatenPunch(1,05) должно быть съедено');
+});
+
+// Клэмп панча проявляется не в самом кадре f, а на кадр-другой позже (пружина ещё не успела
+// упереться в потолок) — «съеденность» нужно смотреть по всему окну панча вперёд от f, иначе
+// реальный клэмпнутый панч на пресете s=1,16 всё ещё всплывает в G2 как «скачок 7 %».
+test('an eaten punch is caught by looking ahead over the punch window, not only the flagged frame', () => {
+  const kit = require('../scripts/motion-kit-node').loadKitCore();
+  const cfg = { fps: 25, width: 1080, height: 1920, durationInFrames: 125, words: [], sfxLibrary: { sounds: {} } };
+  const m = kit.buildManifest(kit.compileLayer({ captions: false, items: [],
+    camera: { face, presets: { X: { s: 1.16 } }, shots: [{ at: 0, preset: 'X', drift: 'none' }],
+      punches: [{ at: 2, until: 3 }] } }, cfg));
+  assert.equal(gateWeakCuts(m, avatar).status, 'pass', JSON.stringify(gateWeakCuts(m, avatar)));
+});
+
+// riseStart считает top ТОЛЬКО внутри окна панча [from+1, to], не по всему массиву: посторонний
+// огромный рез задолго до панча (здесь — 300 % на кадре 5) не должен задирать порог «заметного
+// роста» для настоящего панча далеко после него.
+test('riseStart computes top only within its own punch window, not over the whole clip', () => {
+  const m = manifestFixture({ seconds: 5, camera: (f) => {
+    if (f < 5) return { s: 1.0 };
+    if (f < 90) return { s: 4.0 };
+    const base = 4.0 * (1.0005 ** Math.min(f - 90, 4));
+    if (f < 94) return { s: base };
+    return { s: base * (1.03 ** (f - 94)) };
+  } });
+  const d = detectCameraEvents(m.camera, avatar.camera, 1, 25);
+  const punch = d.events.find((e) => e.kind === 'punch');
+  assert.ok(punch);
+  assert.equal(punch.frame, 94, 'посторонний рез на кадре 5 не должен сдвигать датировку панча');
+});
+
+// Окно «съеденности» смотрит от f включительно, а не с f+1: клэмп может проявиться уже В САМОМ
+// отмеченном кадре, а не только на следующих.
+test('the eaten-punch lookahead window includes the flagged frame itself, not only later ones', () => {
+  const m = manifestFixture({ seconds: 3, camera: (f) => {
+    if (f < 54) return { s: 1, requested: 1 };
+    if (f === 54) return { s: 1.08, requested: 1.08 * 1.06 }; // съедено ровно в кадре 54
+    return { s: 1.08, requested: 1.08 }; // дальше клэмпа уже нет
+  } });
+  const d = detectCameraEvents(m.camera, avatar.camera, 1, 25);
+  assert.deepEqual(d.weak.map((w) => w.frame), [55], 'кадр 54 съеден, а 55 — уже нет и должен остаться слабым');
+});
+
+// hardIn не должен считать рез РОВНО на границе окна (b6) «резом внутри окна»: значение s[b6] уже
+// само отражает состояние ПОСЛЕ реза, поэтому сравнивать с ним панч можно как обычно.
+test('a cut exactly at the punch window boundary does not suppress the punch (exclusive bound)', () => {
+  const m = manifestFixture({ seconds: 4, camera: (f) => {
+    if (f < 50) return { s: 1.0 };
+    if (f === 50) return { s: 1.5 };
+    const n = Math.min(f - 50, 6);
+    return { s: 1.5 * (1.02 ** n) };
+  } });
+  const d = detectCameraEvents(m.camera, avatar.camera, 1, 25);
+  assert.deepEqual(d.events.map((e) => e.kind), ['cut', 'punch']);
+});
+
+// gateWeakCuts обязан провалиться на битом манифесте точно так же, как gateRhythm.
+test('gateWeakCuts throws the same clear error as gateRhythm on a malformed manifest', () => {
+  const bad = { fps: 25, width: 1080, height: 1920, durationInFrames: 3,
+    camera: { s: [1, 1], requested: [1, 1], dx: [0, 0], dy: [0, 0], blur: [0, 0], opacity: [1, 1] } };
+  assert.throws(() => gateWeakCuts(bad, avatar), /манифест повреждён: camera\.s должен быть массивом из 3 конечных чисел/);
+});
+
+// Спаны G2 ограничены пятью худшими слабыми сменами, даже если их больше.
+test('G2 spans are capped at 5, even with more weak changes', () => {
+  const m = manifestFixture({ seconds: 10, camera: (f) => ({ s: Math.floor(f / 20) % 2 ? 1.07 : 1.0 }) });
+  const g2 = gateWeakCuts(m, avatar);
+  assert.equal(g2.value, 12);
+  assert.equal(g2.spans.length, 5);
 });

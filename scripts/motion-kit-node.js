@@ -172,7 +172,7 @@ function findPlanViolation(metafile, { root, kitRoot, kitFiles = [], layerFiles 
   // прямо из плана. Называем, что убрать и откуда: chain[1] — тот файл слоя (необязательно
   // plan.js — им может быть и sfx-library.js), что первым в цепочке подключил chain[2], а через
   // него дошёл до нарушения. Формулировка общая («данные слоя», не «план»): chain[1] не обязан
-  // быть именно plan.js (ревью Task 21, п. 11).
+  // быть именно plan.js.
   const isJsxLeak = named && (first.reason === REASONS.react || first.reason === REASONS.remotion);
   const fixHint = isJsxLeak
     ? `. Уберите импорт ${slash(chain[2])} из ${slash(chain[1])}: React-файлы слоя подключает Root.jsx, данные слоя ссылаются на них по id.`
