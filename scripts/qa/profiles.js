@@ -14,7 +14,7 @@ function deepFreeze(value) {
 
 const BASE = deepFreeze({
   rhythm: { stopSec: 2.5, warnSec: 2.2 },
-  camera: { jumpScale: 0.15, shiftPx: 85, punchScale: 0.1, weakScale: 0.06, sharpBlurPx: 6, eatenPunch: 1.05 },
+  camera: { jumpScale: 0.15, shiftPx: 85, weakShiftPx: 40, punchScale: 0.1, weakScale: 0.06, sharpBlurPx: 6, eatenPunch: 1.05 },
   scale: { max: 1.25 },
   hook: { sec: 3 },
   donor: { maxSec: 3 },

@@ -171,10 +171,11 @@ function findPlanViolation(metafile, { root, kitRoot, kitFiles = [], layerFiles 
   // React/remotion в чужом файле — обычно автор хотел использовать готовый JSX-компонент сцены
   // прямо из плана. Называем, что убрать и откуда: chain[1] — тот файл слоя (необязательно
   // plan.js — им может быть и sfx-library.js), что первым в цепочке подключил chain[2], а через
-  // него дошёл до нарушения. React-файлы слоя подключает Root.jsx, план ссылается на них по id.
+  // него дошёл до нарушения. Формулировка общая («данные слоя», не «план»): chain[1] не обязан
+  // быть именно plan.js (ревью Task 21, п. 11).
   const isJsxLeak = named && (first.reason === REASONS.react || first.reason === REASONS.remotion);
   const fixHint = isJsxLeak
-    ? `. Уберите импорт ${slash(chain[2])} из ${slash(chain[1])}: React-файлы слоя подключает Root.jsx, план ссылается на них по id.`
+    ? `. Уберите импорт ${slash(chain[2])} из ${slash(chain[1])}: React-файлы слоя подключает Root.jsx, данные слоя ссылаются на них по id.`
     : '';
   return { file, spec: first.spec, reason: first.reason, fixHint };
 }

@@ -1,6 +1,8 @@
-// Синтетический манифест слоя: camera(f) → {s, dx, dy, blur, opacity, requested}.
-function manifestFixture({ seconds = 10, fps = 25, camera = () => ({ s: 1 }), texts = [], inserts = [],
-  cues = { kept: [], dropped: [] }, hook = 'speaker', waivers = [] } = {}) {
+// Синтетический манифест слоя: camera(f) → {s, dx, dy, blur, opacity, requested}. width/height по
+// умолчанию 1080×1920 (scale=1) — ревью Task 21 добавило их параметрами, чтобы гейты можно было
+// проверить на масштабировании порогов (например 2160×3840, scale=2).
+function manifestFixture({ seconds = 10, fps = 25, width = 1080, height = 1920, camera = () => ({ s: 1 }),
+  texts = [], inserts = [], cues = { kept: [], dropped: [] }, hook = 'speaker', waivers = [] } = {}) {
   const n = Math.round(seconds * fps);
   const cam = { s: [], requested: [], dx: [], dy: [], blur: [], opacity: [] };
   for (let f = 0; f < n; f += 1) {
@@ -8,7 +10,7 @@ function manifestFixture({ seconds = 10, fps = 25, camera = () => ({ s: 1 }), te
     cam.s.push(c.s); cam.requested.push(c.requested ?? c.s); cam.dx.push(c.dx); cam.dy.push(c.dy);
     cam.blur.push(c.blur); cam.opacity.push(c.opacity);
   }
-  return { version: 1, kitVersion: 1, fps, width: 1080, height: 1920, durationInFrames: n, maxScale: 1.25,
+  return { version: 1, kitVersion: 1, fps, width, height, durationInFrames: n, maxScale: 1.25,
     camera: cam, texts, inserts, cues, hook, waivers };
 }
 
