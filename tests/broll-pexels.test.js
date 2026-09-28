@@ -325,7 +325,7 @@ test('videoHosts restricted to Pexels keeps the direct rendition even when a sma
   assert.equal(candidate.rendition.id, '61');
   assert.equal(candidate.downloadUrl, 'https://videos.pexels.com/video-files/6/61.mp4');
 });
-test('videoHosts restricted to Pexels keeps the default (byte-identical) behaviour when omitted', async () => {
+test('videoHosts falls back to default hosts when videoHosts is omitted (byte-identical behaviour)', async () => {
   // Без videoHosts поведение как раньше: preferSize видит оба файла, меньший (зеркало) выигрывает.
   const [candidate] = (await mixedHostProvider({ preferSize: { width: 540, height: 960 } }).search(portraitSearch)).candidates;
   assert.equal(candidate.rendition.id, '62');
