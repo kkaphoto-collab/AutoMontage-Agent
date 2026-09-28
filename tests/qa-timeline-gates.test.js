@@ -267,9 +267,15 @@ test('a weak change is not reported while the speaker is not sharp (opacity 0 or
 });
 
 // П.7: «съеденный» (упёршийся в maxScale) панч не должен всплывать в G2 как слабый джамп-кат — это
-// проблема клэмпа камеры (гейт G3 задачи 22), а не незаметная зрителю мелкая смена.
+// проблема клэмпа камеры (гейт G3 задачи 22), а не незаметная зрителю мелкая смена. Кадр 53 —
+// крохотный (1,5 %) разгон ПЕРЕД самим клэмпом: он ломает «плоского соседа» у кадра 54, чтобы это
+// была настоящая спираль панча, а не ступенька (Step 0 задачи 22 — ступеньки в G2 не подавляются).
 test('an eaten (clamped) punch is not reported as a weak cut in G2', () => {
-  const eaten = manifestFixture({ seconds: 3, camera: (f) => (f < 54 ? { s: 1, requested: 1 } : { s: 1.08, requested: 1.25 }) });
+  const eaten = manifestFixture({ seconds: 3, camera: (f) => {
+    if (f < 53) return { s: 1, requested: 1 };
+    if (f === 53) return { s: 1.015, requested: 1.015 };
+    return { s: 1.08, requested: 1.25 };
+  } });
   const d = detectCameraEvents(eaten.camera, avatar.camera, 1, 25);
   assert.deepEqual(d.weak, [], JSON.stringify(d.weak));
   assert.equal(gateWeakCuts(eaten, avatar).status, 'pass');
@@ -544,10 +550,14 @@ test('gateRhythm throws the same clear error as gateWeakCuts on a malformed mani
 
 // Порог «съеденного» панча — ровно профильный eatenPunch (1,05), а не более строгий 1,10:
 // requested/s = 1,07 (между 1,05 и 1,10) уже обязан считаться съеденным и не попадать в G2.
+// Кадр 53 — крохотный разгон перед клэмпом, чтобы кадр 54 был спиралью панча, а не ступенькой
+// (Step 0 задачи 22).
 test('the eaten-punch threshold is exact at the profile value (1.05), not a stricter 1.10', () => {
-  const m = manifestFixture({ seconds: 3, camera: (f) => (f < 54
-    ? { s: 1, requested: 1 }
-    : { s: 1.08, requested: 1.08 * 1.07 }) });
+  const m = manifestFixture({ seconds: 3, camera: (f) => {
+    if (f < 53) return { s: 1, requested: 1 };
+    if (f === 53) return { s: 1.015, requested: 1.015 };
+    return { s: 1.08, requested: 1.08 * 1.07 };
+  } });
   const d = detectCameraEvents(m.camera, avatar.camera, 1, 25);
   assert.deepEqual(d.weak, [], 'requested/s = 1,07 ≥ eatenPunch(1,05) должно быть съедено');
 });
@@ -582,10 +592,13 @@ test('riseStart computes top only within its own punch window, not over the whol
 });
 
 // Окно «съеденности» смотрит от f включительно, а не с f+1: клэмп может проявиться уже В САМОМ
-// отмеченном кадре, а не только на следующих.
+// отмеченном кадре, а не только на следующих. Кадр 53 — крохотный разгон перед клэмпом, чтобы
+// кадр 54 был спиралью панча, а не ступенькой (Step 0 задачи 22 — иначе кадр 54 сам оказался бы
+// «видимой ступенькой» и обязан был бы остаться в G2 независимо от съеденности).
 test('the eaten-punch lookahead window includes the flagged frame itself, not only later ones', () => {
   const m = manifestFixture({ seconds: 3, camera: (f) => {
-    if (f < 54) return { s: 1, requested: 1 };
+    if (f < 53) return { s: 1, requested: 1 };
+    if (f === 53) return { s: 1.015, requested: 1.015 };
     if (f === 54) return { s: 1.08, requested: 1.08 * 1.06 }; // съедено ровно в кадре 54
     return { s: 1.08, requested: 1.08 }; // дальше клэмпа уже нет
   } });
@@ -619,4 +632,60 @@ test('G2 spans are capped at 5, even with more weak changes', () => {
   const g2 = gateWeakCuts(m, avatar);
   assert.equal(g2.value, 12);
   assert.equal(g2.spans.length, 5);
+});
+
+// --- Step 0 (перед задачей 22): ступенька никогда не «съедена» ---
+
+// Ступенька (жёсткий рез между двумя shots, не спираль панча) в пресет выше предела масштаба
+// (1,12 → 1,35, клэмпнуто до 1,25, +11,6 %) — зритель видит этот скачок независимо от того, что
+// requested у него тоже перевалил eatenPunch. Раньше eaten(f) подавлял такую ступеньку и G2 молчал.
+test('a hard step into a preset above the scale limit is still reported by G2, not swallowed as an eaten punch', () => {
+  const m = manifestFixture({ seconds: 3, camera: (f) => (f < 50
+    ? { s: 1.12, requested: 1.12 }
+    : { s: 1.25, requested: 1.35 }) });
+  const d = detectCameraEvents(m.camera, avatar.camera, 1, 25);
+  assert.deepEqual(d.weak.map((w) => w.frame), [50]);
+  assert.equal(gateWeakCuts(m, avatar).status, 'warn');
+});
+
+// Пин длины окна «съеденности»: клэмп на f+4 (внутри честного окна f+punchWindow=6) обязан
+// подавить слабый скачок; клэмп на f+8 (уже за пределами f+punchWindow) — не обязан. Мутант
+// f+2 упустил бы первый случай, мутант f+2·punchWindow (12) ошибочно подавил бы второй.
+test('the eaten lookahead window is exactly [f, f+punchWindow], not f+2 or f+2·punchWindow', () => {
+  const near = manifestFixture({ seconds: 4, camera: (f) => {
+    if (f <= 58) return { s: 1.0 };
+    if (f === 59) return { s: 1.04 };
+    if (f >= 60 && f < 64) return { s: 1.08 };
+    return { s: 1.08, requested: 1.08 * 1.06 };
+  } });
+  assert.deepEqual(detectCameraEvents(near.camera, avatar.camera, 1, 25).weak, [],
+    'клэмп на f+4 (внутри окна панча f+6) обязан считаться съеденным — окно короче f+punchWindow это упустит');
+
+  const far = manifestFixture({ seconds: 4, camera: (f) => {
+    if (f <= 58) return { s: 1.0 };
+    if (f === 59) return { s: 1.04 };
+    if (f >= 60 && f < 68) return { s: 1.08 };
+    return { s: 1.08, requested: 1.08 * 1.06 };
+  } });
+  const d = detectCameraEvents(far.camera, avatar.camera, 1, 25);
+  assert.ok(d.weak.some((w) => w.frame === 60),
+    'клэмп на f+8 (за пределами окна панча f+6) не должен считаться съеденным — окно длиннее f+punchWindow подавило бы настоящий слабый скачок');
+});
+
+// Пин top в riseStart: настоящий пик роста (+8 % на кадре 59) стоит в СЕРЕДИНЕ окна панча, а не на
+// самом флагнутом кадре (61, где рост уже погас до +1 %). Если бы top считался только по кадру
+// «to», порог отмотки оказался бы в разы меньше и riseStart ушёл бы на кадр раньше настоящего
+// начала роста (57 вместо 58 — уже захватив кадр 58 с крохотным 0,5 % разгоном).
+test('riseStart computes top over the whole punch window, not only at the flagged frame', () => {
+  const m = manifestFixture({ seconds: 4, camera: (f) => {
+    if (f <= 57) return { s: 1 };
+    if (f === 58) return { s: 1.005 };
+    if (f === 59) return { s: 1.005 * 1.08 };
+    if (f === 60) return { s: 1.005 * 1.08 * 1.01 };
+    return { s: 1.005 * 1.08 * 1.01 * 1.01 };
+  } });
+  const d = detectCameraEvents(m.camera, avatar.camera, 1, 25);
+  assert.deepEqual(d.events.map((e) => e.kind), ['punch']);
+  assert.equal(d.events[0].frame, 58,
+    'top должен считаться по максимуму окна (кадр 59, +8 %), а не только на флагнутом кадре (61, +1 %)');
 });

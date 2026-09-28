@@ -94,7 +94,11 @@ function detectCameraEvents(camera, t, scale, fps) {
       // Слабую смену показываем в G2, только если её видно: если в f или в опорном кадре b2 спикер
       // уже не резкий (away/blur/вставка), эту вибрацию масштаба или лица зритель не видит.
       const visible = sharp(f) && sharp(b2);
-      const scaleWeak = visible && jump >= 1 + t.weakScale && !eaten(f);
+      // «Съеденный» панч (клэмп у потолка спирали) не показываем в G2 — это проблема G3. Но
+      // ступеньку (жёсткий рез между двумя shots, не спираль) зритель видит независимо от клэмпа:
+      // если она ведёт в пресет выше maxScale, это всё ещё заметный скачок и обязан остаться в G2
+      // (Step 0 задачи 22), даже если requested/s у неё тоже перевалил eatenPunch.
+      const scaleWeak = visible && jump >= 1 + t.weakScale && (step(f) || !eaten(f));
       const shiftWeak = visible && shift >= weakShiftPx;
       if (scaleWeak || shiftWeak) {
         weak.push({ frame: f, ratio: camera.s[f] / camera.s[b2], shift, reason: scaleWeak ? 'scale' : 'shift' });
