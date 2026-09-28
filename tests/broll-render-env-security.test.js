@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { resolveRemotionCommand } = require('../scripts/env');
-const { remotionRenderCommand } = require('../scripts/build-commands');
+const { remotionLayerRenderCommand, remotionRenderCommand } = require('../scripts/build-commands');
 const { remotionChunkCommand } = require('../scripts/render-chunks');
 const { docPreviewCommand } = require('../scripts/generate-doc-preview');
 
@@ -64,6 +64,19 @@ const builders = {
     composition: 'LessonSeq', output: '/tmp/chunk.mp4', props: '/tmp/props.json', from: 0, to: 1,
   }),
   still: (resolved) => docPreviewCommand(resolved, '/tmp/still.png'),
+  layer: (resolved) => remotionLayerRenderCommand(resolved, {
+    entry: 'projects/p/motion-v01/src/index.jsx', composition: 'Layer', output: 'out.mp4', publicDir: 'projects/p/motion-v01/public',
+  }),
+};
+
+// entry/composition реальны только для final/preview/chunk (src/index.js + LessonSeq, still впереди
+// добавляет своё имя подкоманды) и для layer (свой слой, своя композиция) — у каждого builder свои.
+const POSITIONALS_BY_BUILDER = {
+  final: ['render', 'src/index.js', 'LessonSeq'],
+  preview: ['render', 'src/index.js', 'LessonSeq'],
+  chunk: ['render', 'src/index.js', 'LessonSeq'],
+  still: ['still', 'src/index.js', 'LessonSeq'],
+  layer: ['render', 'projects/p/motion-v01/src/index.jsx', 'Layer'],
 };
 
 test('installed Remotion loader reproduces root dotenv browser exposure without protection', (t) => {
@@ -84,7 +97,7 @@ for (const [name, build] of Object.entries(builders)) {
       assert.equal(result.leakedPrivate, false);
       assert.equal(result.publicProcess, 'public-process-value');
       if (filename === '.env') assert.equal(result.publicDotenv, 'public-dotenv-value');
-      assert.deepEqual(result.positionals.slice(0, 3), [name === 'still' ? 'still' : 'render', 'src/index.js', 'LessonSeq']);
+      assert.deepEqual(result.positionals.slice(0, 3), POSITIONALS_BY_BUILDER[name]);
       assert.ok(path.isAbsolute(result.envFile));
       assert.ok(fs.readFileSync(result.envFile, 'utf8').split('\n').every((line) => !line.trim() || line.trim().startsWith('#')));
     });

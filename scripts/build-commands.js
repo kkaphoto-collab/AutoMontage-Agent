@@ -107,11 +107,23 @@ function remotionRenderCommand(resolved, {
   };
 }
 
+// Рендер проектного motion-слоя: props не нужны (слой читает свой layer.json), звук эффектов сохраняется.
+function remotionLayerRenderCommand(resolved, { entry, composition, output, publicDir, concurrency = '50%' }) {
+  return {
+    command: resolved.command,
+    args: [
+      ...resolved.argsPrefix, 'render', entry, composition, hostPath(output),
+      '--public-dir', hostPath(publicDir), '--codec=h264', '--log=error', `--concurrency=${concurrency}`, '--overwrite',
+    ],
+  };
+}
+
 module.exports = {
   audioExtractionCommand,
   frameAnalysisCommand,
   paletteCommand,
   reframeCommand,
+  remotionLayerRenderCommand,
   remotionRenderCommand,
   videoProbeCommand,
 };
