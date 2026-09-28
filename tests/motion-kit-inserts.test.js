@@ -24,12 +24,10 @@ test('invalid inserts are rejected', () => {
 // полноэкранные, поэтому манифест обязан говорить cover: true; оверлеем бывает только donor.
 test('stock, screen and scene always cover the speaker: cover: false is rejected, a donor accepts both', () => {
   for (const kind of ['stock', 'screen', 'scene']) {
-    for (const cover of [false, 0]) {
-      assert.throws(() => kit.compileInserts([{ id: `${kind}-x`, kind, from: 1, to: 3, cover }], { fps: 25 }), (error) => {
-        assert.equal(error.message, `inserts[0] (${kind}-x): вставка ${kind} всегда закрывает спикера: cover: false допустим только для donor`);
-        return true;
-      });
-    }
+    assert.throws(() => kit.compileInserts([{ id: `${kind}-x`, kind, from: 1, to: 3, cover: false }], { fps: 25 }), (error) => {
+      assert.equal(error.message, `inserts[0] (${kind}-x): вставка ${kind} всегда закрывает спикера: cover: false допустим только для donor`);
+      return true;
+    });
     assert.equal(kit.compileInserts([{ kind, from: 1, to: 3, cover: true }], { fps: 25 })[0].cover, true);
     assert.equal(kit.compileInserts([{ kind, from: 1, to: 3 }], { fps: 25 })[0].cover, true);
   }
@@ -39,6 +37,20 @@ test('stock, screen and scene always cover the speaker: cover: false is rejected
     { kind: 'donor', from: 6, to: 7 },
   ], { fps: 25 });
   assert.deepEqual(donors.map((i) => i.cover), [true, false, false]);
+});
+
+// BAD CASE (ревью задачи 29, п.3): 'false' — непустая строка, значит truthy — раньше молча
+// проходила бы как cover: true (нестрогий ?? видит только null/undefined). cover обязан быть
+// настоящим boolean, когда он вообще задан; и donor, и всегда-cover вставки проверяются одинаково.
+test('compileInserts rejects a non-boolean cover (a string or a number) with one clear Russian error', () => {
+  for (const cover of ['no', 'false', 0, 1, '']) {
+    assert.throws(() => kit.compileInserts([{ id: 'x', kind: 'donor', from: 1, to: 3, cover }], { fps: 25 }), (error) => {
+      assert.equal(error.message, `inserts[0] (x): cover должен быть true или false — получено ${JSON.stringify(cover)}`);
+      return true;
+    });
+  }
+  assert.throws(() => kit.compileInserts([{ id: 'stock-x', kind: 'stock', from: 1, to: 3, cover: 'false' }], { fps: 25 }),
+    /inserts\[0\] \(stock-x\): cover должен быть true или false — получено "false"/);
 });
 
 test('covering inserts send the speaker away and bring it back before the insert closes', () => {

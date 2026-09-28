@@ -5,12 +5,9 @@ import { FontLoader, FullscreenReveal, KitBox, SfxTrack, ShutterFlash, SpeakerLa
   compilePlan } from '@automontage/motion-kit';
 import layer from '../layer.json';
 import buildPlan from './plan.js';
-import { InsertContent, SceneContent } from './scenes.jsx';
+import { CAPTION_FONT, FONTS, InsertContent, SceneContent } from './scenes.jsx';
 import sfxLibrary from './sfx-library.js';
 import words from './words.js';
-
-// Модульная константа: FontLoader регистрирует шрифты один раз при монтировании.
-const FONTS = [{ family: 'KitOnest', file: 'fonts/Onest.ttf' }, { family: 'KitOswald', file: 'fonts/Oswald.ttf' }];
 
 // Сток — StockInsert; остальные полноэкранные (cover) вставки — FullscreenReveal с содержимым ролика,
 // иначе спикер уходит под вставку, а кадр остаётся чёрным. Вставку без cover (donor) ролик рисует сам.
@@ -36,7 +33,7 @@ export function LayerComposition() {
         {compiled.inserts.map((insert) => <Insert key={insert.id} insert={insert} />)}
         {compiled.items.map((item) => <KitBox key={item.id} item={item}><SceneContent item={item} /></KitBox>)}
         {compiled.cues.kept.filter((cue) => cue.role === 'shutter').map((cue) => <ShutterFlash key={cue.id} at={cue.hitFrame} />)}
-        {compiled.captions ? <Subtitles {...compiled.captions} fontFamily="KitOnest" /> : null}
+        {compiled.captions ? <Subtitles {...compiled.captions} fontFamily={CAPTION_FONT} /> : null}
         <SfxTrack cues={compiled.cues.kept} masterDb={layer.sfxMasterDb} />
       </FontLoader>
     </AbsoluteFill>

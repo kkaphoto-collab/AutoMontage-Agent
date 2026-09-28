@@ -96,6 +96,14 @@ function patchPlan(layerDir, search, replacement) {
   fs.writeFileSync(file, text.replace(search, replacement));
 }
 
+// Тот же приём для scenes.jsx (например SCREEN_URLS вставки screen).
+function patchScenes(layerDir, search, replacement) {
+  const file = path.join(layerDir, 'src', 'scenes.jsx');
+  const text = fs.readFileSync(file, 'utf8');
+  assert.ok(text.includes(search), `в scenes.jsx нет «${search}»`);
+  fs.writeFileSync(file, text.replace(search, replacement));
+}
+
 function renderRoot(layerDir, layer, frame) {
   const { fps, width, height, durationInFrames } = layer;
   const { LayerComposition } = loadLayerFile(layerDir, 'src/Root.jsx', remotionStub({ frame, fps, width, height, durationInFrames }));
@@ -296,6 +304,7 @@ test('a screen insert an agent adds to plan.js hides captions and is drawn throu
   const { layerDir, layer } = makeLayer(t);
   patchPlan(layerDir, 'const inserts = [];',
     "const inserts = [{ id: 'screen-1', kind: 'screen', from: 1, to: 2, src: 'shots/screen.png' }];");
+  patchScenes(layerDir, 'const SCREEN_URLS = {};', "const SCREEN_URLS = { 'screen-1': 'github.com/example' };");
   const manifest = buildLayerManifest(layerDir);
   const screen = manifest.inserts.find((i) => i.id === 'screen-1');
   assert.deepEqual([screen.from, screen.to, screen.cover], [25, 50, true]);
@@ -310,7 +319,23 @@ test('a screen insert an agent adds to plan.js hides captions and is drawn throu
   const inside = renderRoot(layerDir, layer, screen.from + 15);
   assert.match(inside, /data-kit-bleed="screen-1"/);
   assert.match(inside, /<img src="\/static\/shots\/screen\.png"/);
+  // Адрес окна браузера берётся из SCREEN_URLS этого ролика (scenes.jsx), а не остаётся пустым.
+  assert.match(inside, /github\.com\/example/);
   assert.doesNotMatch(inside, /data-kit-text="captions"/);
+});
+
+// Решение D6/README: голос донора продолжается, поэтому субтитры остаются поверх cover-донора —
+// в отличие от screen/scene/stock (пункт выше), где спикер и его речь физически закрыты вставкой.
+test('a cover donor an agent adds to plan.js keeps captions visible over it — the voice keeps going', (t) => {
+  const { layerDir, layer } = makeLayer(t);
+  patchPlan(layerDir, 'const inserts = [];',
+    "const inserts = [{ id: 'donor-1', kind: 'donor', cover: true, from: 1, to: 2, src: 'donor/clip.mp4' }];");
+  const manifest = buildLayerManifest(layerDir);
+  const donor = manifest.inserts.find((i) => i.id === 'donor-1');
+  assert.deepEqual([donor.from, donor.to, donor.cover], [25, 50, true]);
+  const inside = renderRoot(layerDir, layer, donor.from + 10);
+  assert.match(inside, /data-kit-bleed="donor-1"/);
+  assert.match(inside, /data-kit-text="captions"/, 'голос донора продолжается — субтитры обязаны остаться поверх него');
 });
 
 test('BAD CASE: a stock insert with cover: false cannot slip past G4 — the layer does not compile', (t) => {

@@ -40,6 +40,12 @@ export function compileInserts(inserts = [], { fps, durationInFrames } = {}) {
     const to = hasDuration ? Math.min(rawTo, durationInFrames) : rawTo;
     const clampedByEnd = hasDuration && rawTo > durationInFrames;
     if (!(to > from)) throw new Error(`inserts[${i}] (${label}): to должен быть больше from`);
+    // Непустая строка вроде 'false' или 'no' — truthy в JS и молча стала бы cover: true в
+    // манифесте вместо предупреждения автору plan.js об опечатке (булево значение он явно имел
+    // в виду). undefined/null — «не задано», ими по-прежнему управляет дефолт ниже.
+    if (insert.cover !== undefined && insert.cover !== null && typeof insert.cover !== 'boolean') {
+      throw new Error(`inserts[${i}] (${label}): cover должен быть true или false — получено ${JSON.stringify(insert.cover)}`);
+    }
     const cover = insert.cover ?? insert.kind !== 'donor';
     // stock/screen/scene рисуются на весь кадр всегда: cover: false сказал бы манифесту (G4), что
     // спикер виден, пока его закрывает вставка. Оверлеем поверх спикера бывает только donor.
