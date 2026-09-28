@@ -72,6 +72,11 @@ export function cameraAt(track, frame) {
   const p = DRIFT(Math.min(1, Math.max(0, (frame - shot.from) / span)));
   const grow = shot.drift === 'in' ? p : shot.drift === 'out' ? 1 - p : 0;
   let s = preset.s * (1 + cfg.drift.amp * grow);
+  // base — масштаб пресета с дрейфом, ДО панчей и ДО ограничения maxScale: гейт G3 (scripts/qa/
+  // timeline-gates.js) читает его, чтобы отличить «пресет сам крупнее предела» от «панч упёрся в
+  // потолок» — причину клэмпа нельзя достоверно угадать по форме кривой (ступенька/спираль), а
+  // база всегда знает, что было задумано ДО панча.
+  const base = s;
 
   for (const punch of track.punches) {
     // После релиза (until + releaseFrames) множитель панча уже точно равен 1 — не вызываем
@@ -116,7 +121,7 @@ export function cameraAt(track, frame) {
   }
   const dim = 1 - (cfg.blur.dim * Math.min(blur, cfg.blur.dimAt)) / cfg.blur.dimAt;
   const opacity = 1 - gone;
-  return { s, requested, dx, dy, blur, dim, opacity, visible: opacity > 0.01, shot: shot.index, fill: Boolean(preset.fill) };
+  return { s, requested, base, dx, dy, blur, dim, opacity, visible: opacity > 0.01, shot: shot.index, fill: Boolean(preset.fill) };
 }
 
 const PUNCT = /[.,!?…:;]$/u;

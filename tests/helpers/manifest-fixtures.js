@@ -4,11 +4,12 @@
 function manifestFixture({ seconds = 10, fps = 25, width = 1080, height = 1920, camera = () => ({ s: 1 }),
   texts = [], inserts = [], cues = { kept: [], dropped: [] }, hook = 'speaker', waivers = [] } = {}) {
   const n = Math.round(seconds * fps);
-  const cam = { s: [], requested: [], dx: [], dy: [], blur: [], opacity: [] };
+  const cam = { s: [], requested: [], base: [], dx: [], dy: [], blur: [], opacity: [] };
   for (let f = 0; f < n; f += 1) {
     const c = { dx: 0, dy: 0, blur: 0, opacity: 1, ...camera(f) };
-    cam.s.push(c.s); cam.requested.push(c.requested ?? c.s); cam.dx.push(c.dx); cam.dy.push(c.dy);
-    cam.blur.push(c.blur); cam.opacity.push(c.opacity);
+    // base по умолчанию равен s (нет клэмпа для теста, которому он не важен) — как и requested.
+    cam.s.push(c.s); cam.requested.push(c.requested ?? c.s); cam.base.push(c.base ?? c.s);
+    cam.dx.push(c.dx); cam.dy.push(c.dy); cam.blur.push(c.blur); cam.opacity.push(c.opacity);
   }
   return { version: 1, kitVersion: 1, fps, width, height, durationInFrames: n, maxScale: 1.25,
     camera: cam, texts, inserts, cues, hook, waivers };

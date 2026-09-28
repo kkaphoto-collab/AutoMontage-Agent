@@ -6,6 +6,35 @@ const fmt = (value) => String(r2(value)).replace('.', ',');
 const span = (fromFrame, toFrame, fps, note) => ({ fromSec: r2(fromFrame / fps), toSec: r2(toFrame / fps), note });
 const factor = (a, b) => (a > b ? a / b : b / a);
 
+// Общая проверка «съеденности» кадра: requested перевалил через видимый s заметно больше
+// eatenPunch — клэмп камеры, а не собственное решение автора приблизиться. Один порог (`>=`) для
+// G2 (окно вперёд внутри detectCameraEvents) и G3 (по каждому кадру) — раньше они незаметно
+// разошлись на `>=`/`>`.
+const isEatenFrame = (requested, s, f, eatenPunch) => requested[f] / s[f] >= eatenPunch;
+
+// Общая проверка ступеньки: жёсткий однокадровый рез с плоскими (<1 %) соседями с обеих сторон —
+// рез между двумя shots kit, а не растущий несколько кадров панч-ин. Используется только внутри
+// detectCameraEvents (G1/G2) — G3 больше не решает причину клэмпа по форме кривой, а читает
+// cameraAt.base (ревью пакета 2 задачи 22).
+function isScaleStep(s, g, weakScale) {
+  const n = s.length;
+  const flat = (i) => i < 1 || i >= n || factor(s[i], s[i - 1]) < 1.01;
+  return g >= 1 && g < n && factor(s[g], s[g - 1]) >= 1 + weakScale && flat(g - 1) && flat(g + 1);
+}
+
+// Группирует подряд идущие кадры, для которых predicate(f) истинен, в диапазоны [from, to) — G3
+// (кадры выше предела масштаба) и G4 (кадры со скрытым спикером) читают одну и ту же группировку.
+function frameRuns(n, predicate) {
+  const runs = [];
+  let open = null;
+  for (let f = 0; f < n; f += 1) {
+    if (predicate(f)) { if (open) open.to = f + 1; else open = { from: f, to: f + 1 }; }
+    else if (open) { runs.push(open); open = null; }
+  }
+  if (open) runs.push(open);
+  return runs;
+}
+
 // Проверка целостности манифеста: оба гейта читают camera.* по индексу кадра — обрезанный или
 // битый массив (чужой профиль рендера, ручная правка manifest.json) должен дать понятную ошибку
 // сразу здесь, а не NaN/undefined где-то в середине detectCameraEvents. Экспортируется отдельно:
@@ -13,7 +42,7 @@ const factor = (a, b) => (a > b ? a / b : b / a);
 function assertCameraArrays(manifest) {
   const camera = manifest && manifest.camera;
   const n = manifest && manifest.durationInFrames;
-  for (const key of ['s', 'requested', 'dx', 'dy', 'blur', 'opacity']) {
+  for (const key of ['s', 'requested', 'base', 'dx', 'dy', 'blur', 'opacity']) {
     const arr = camera && camera[key];
     if (!Array.isArray(arr) || arr.length !== n || !arr.every((v) => Number.isFinite(v))) {
       throw new Error(`манифест повреждён: camera.${key} должен быть массивом из ${n} конечных чисел`);
@@ -41,8 +70,7 @@ function detectCameraEvents(camera, t, scale, fps) {
   // дрейф, другая уже стоит на новом плане), а не растущий несколько кадров панч-ин. Ступеньку
   // нужно судить только порогами реза/слабого реза, а не порогом панча — иначе, например, 12%-й
   // рез между W и M засчитывается как «панч» и вообще не попадает в G2.
-  const flat = (g) => g < 1 || g >= n || factor(camera.s[g], camera.s[g - 1]) < 1.01;
-  const step = (g) => g >= 1 && factor(camera.s[g], camera.s[g - 1]) >= 1 + t.weakScale && flat(g - 1) && flat(g + 1);
+  const step = (g) => isScaleStep(camera.s, g, t.weakScale);
   const stepIn = (a, b) => { for (let g = Math.max(1, a + 1); g <= b; g += 1) if (step(g)) return true; return false; };
   // Настоящий рез/смена фокуса внутри окна панча — тоже не панч: без этой проверки рез, случившийся
   // прямо во время нарастания соседнего панча, мог бы дать вторую, ложную вспышку «панча» сразу
@@ -70,7 +98,7 @@ function detectCameraEvents(camera, t, scale, fps) {
   // проблема (гейт G3 задачи 22), не слабый джамп-кат — не показываем в G2.
   const eaten = (f) => {
     for (let g = f; g <= Math.min(n - 1, f + punchWindow); g += 1) {
-      if (camera.requested[g] / camera.s[g] >= t.eatenPunch) return true;
+      if (isEatenFrame(camera.requested, camera.s, g, t.eatenPunch)) return true;
     }
     return false;
   };
@@ -179,66 +207,83 @@ function gateWeakCuts(manifest, profile) {
   });
 }
 
-// G3: масштаб аватара не крупнее profile.scale.max (1,25). «Съеденные» (клэмпнутые лимитом) кадры
-// группируются в зоны подряд идущих кадров и судятся по ПЕРВОМУ кадру зоны: жёсткий рез (Step 0 —
-// та же ступенька, что не подавляется в G2) в пресет выше предела — проблема самого пресета, а не
-// зависшего панча, даже если дальше камера просто стоит на клэмпнутом уровне.
+// G3: масштаб аватара не крупнее profile.scale.max. Причину клэмпа решает cameraAt.base (масштаб
+// пресета × дрейф, ДО панчей и ДО ограничения maxScale) — не эвристика по форме кривой (ревью
+// пакета 2 задачи 22: жёсткий рез между shots и застывший клэмп неотличимы по одной лишь форме —
+// панч, удержанный через рез W→M, у которого base никогда не превышал предел, обязан остаться
+// «панч упёрся в предел»; пресет выше предела с кадра 0 или растущий только за счёт дрейфа без
+// единого панча обязан читаться как «пресет крупнее предела», даже пока камера просто стоит на
+// клэмпнутом уровне несколько кадров подряд).
 function gateScale(manifest, profile) {
   assertCameraArrays(manifest);
-  const { s, requested } = manifest.camera;
-  const { eatenPunch, weakScale } = profile.camera;
-  const n = s.length;
-  const flat = (g) => g < 1 || g >= n || factor(s[g], s[g - 1]) < 1.01;
-  const isStep = (g) => g >= 1 && factor(s[g], s[g - 1]) >= 1 + weakScale && flat(g - 1) && flat(g + 1);
+  const { s, requested, base } = manifest.camera;
+  const { fps } = manifest;
+  const limit = profile.scale.max;
   const max = s.reduce((m, v) => Math.max(m, v), 0);
+  const overLimit = max > limit + 1e-3;
+  // Сам масштаб (после клэмпа кита) выше предела профиля — такое может дать только собственный
+  // camera.maxScale плана выше limit (кит никогда сам не превышает свой maxScale). Спаны — кадры,
+  // где видимый s реально выше предела, а не «съеденные» — их может не быть вовсе (requested==s).
+  if (overLimit) {
+    const overRuns = frameRuns(s.length, (f) => s[f] > limit + 1e-3);
+    return gate('G3', 'Масштаб аватара', {
+      status: 'fail', value: Math.round(max * 1000) / 1000, threshold: `≤ ${fmt(limit)}`,
+      spans: overRuns.slice(0, 5).map((r) => span(r.from, r.to, fps, `масштаб выше предела ${fmt(limit)}`)),
+      hint: `выше ${fmt(limit)} масштаб может дать только camera.maxScale > ${fmt(limit)} в ките — проверьте план слоя`,
+    });
+  }
   const zones = [];
   let open = null;
-  for (let f = 0; f < n; f += 1) {
-    const eaten = requested[f] / s[f] > eatenPunch;
-    if (eaten && open) open.to = f + 1;
-    else if (eaten) open = { from: f, to: f + 1, step: isStep(f) };
-    else if (open) { zones.push(open); open = null; }
+  for (let f = 0; f < s.length; f += 1) {
+    const eaten = isEatenFrame(requested, s, f, profile.camera.eatenPunch);
+    const cause = eaten ? (base[f] > limit + 1e-3 ? 'preset' : 'punch') : null;
+    if (cause && open && open.cause === cause) open.to = f + 1;
+    else { if (open) zones.push(open); open = cause ? { from: f, to: f + 1, cause } : null; }
   }
   if (open) zones.push(open);
-  const stepZones = zones.filter((z) => z.step);
-  const punchZones = zones.filter((z) => !z.step);
-  const overLimit = max > profile.scale.max + 1e-3;
-  const status = overLimit ? 'fail' : zones.length ? 'warn' : 'pass';
-  const spans = [];
-  if (punchZones.length) {
-    spans.push(span(punchZones[0].from, punchZones[punchZones.length - 1].to, manifest.fps, 'панч-ин упёрся в предел'));
-  }
-  if (stepZones.length) {
-    spans.push(span(stepZones[0].from, stepZones[stepZones.length - 1].to, manifest.fps, 'жёсткий рез в пресет выше предела масштаба'));
-  }
-  const hint = overLimit
-    ? 'исходник аватара растянут из 720p: крупнее 1,25 будет мыло'
-    : stepZones.length
-      ? 'пресет камеры крупнее предела масштаба — уменьшите сам пресет, а не панч'
-      : 'ставьте панч-ин на общем плане W';
+  const NOTE = { punch: 'панч-ин упёрся в предел', preset: 'пресет крупнее предела — уменьшите s пресета' };
+  const hasPreset = zones.some((z) => z.cause === 'preset');
   return gate('G3', 'Масштаб аватара', {
-    status, value: Math.round(max * 1000) / 1000, threshold: `≤ ${fmt(profile.scale.max)}`,
-    spans, hint,
+    status: zones.length ? 'warn' : 'pass', value: Math.round(max * 1000) / 1000, threshold: `≤ ${fmt(limit)}`,
+    spans: zones.slice(0, 5).map((z) => span(z.from, z.to, fps, NOTE[z.cause])),
+    hint: hasPreset
+      ? 'пресет камеры крупнее предела масштаба — уменьшите сам пресет, а не панч'
+      : zones.length
+        ? 'ставьте панч-ин на общем плане W или заканчивайте его до склейки'
+        : 'ставьте панч-ин на общем плане W',
   });
 }
 
-// G4: спикер обязан быть виден (резко или размыто — важна только непрозрачность) хотя бы часть
-// первых profile.hook.sec секунд, если хук не объявлен как «перечисление». Кадр внутри cover-
-// вставки — лицо закрыто карточкой независимо от camera.opacity, даже пока уход камеры ещё гаснет
-// (уточнение после ревью пакета 1: CAMERA_DEFAULTS.away.enterFrames не даёт opacity погаснуть
-// мгновенно).
+// G4: правило автора (docs/BATCH-REELS-WORKFLOW.md, docs/editing-rules.md) — «в первом кадре и
+// первые 2–3 секунды виден спикер»: блюр/текст поверх допустимы, полное исчезновение — нет. Кадр
+// внутри cover-вставки — лицо закрыто карточкой независимо от camera.opacity, даже пока уход
+// камеры ещё гаснет (CAMERA_DEFAULTS.away.enterFrames не даёт opacity погаснуть мгновенно). СТОП,
+// если спикер скрыт хоть на одном кадре в [0, mustSec); ПРЕДУПРЕЖДЕНИЕ — если скрыт только в
+// [mustSec, sec). Хук-перечисление освобождает от обоих требований.
 function gateHook(manifest, profile) {
   assertCameraArrays(manifest);
-  const frames = Math.min(manifest.durationInFrames, Math.round(profile.hook.sec * manifest.fps));
-  const threshold = `спикер виден до ${fmt(profile.hook.sec)} с`;
-  const covered = (f) => manifest.inserts.some((i) => i.cover && f >= i.from && f < i.to);
-  if (manifest.camera.opacity.slice(0, frames).some((o, f) => o > 0.01 && !covered(f))) return gate('G4', 'Спикер в первые 3 с', { threshold });
+  const { fps } = manifest;
+  const { sec, mustSec } = profile.hook;
+  const mustFrames = Math.min(manifest.durationInFrames, Math.round(mustSec * fps));
+  const totalFrames = Math.min(manifest.durationInFrames, Math.round(sec * fps));
+  const threshold = `виден на каждом кадре первых ${fmt(mustSec)} с, лучше — весь диапазон ${fmt(sec)} с`;
   if (manifest.hook === 'enumeration') {
     return gate('G4', 'Спикер в первые 3 с', { threshold, hint: 'хук-перечисление: спикер появляется после объектов' });
   }
+  const covered = (f) => manifest.inserts.some((i) => i.cover && f >= i.from && f < i.to);
+  const hidden = (f) => manifest.camera.opacity[f] <= 0.01 || covered(f);
+  const hiddenRuns = frameRuns(totalFrames, hidden);
+  if (!hiddenRuns.length) return gate('G4', 'Спикер в первые 3 с', { threshold });
+  const spans = hiddenRuns.slice(0, 5).map((r) => span(r.from, r.to, fps, 'спикера не видно'));
+  if (hiddenRuns.some((r) => r.from < mustFrames)) {
+    return gate('G4', 'Спикер в первые 3 с', {
+      status: 'fail', threshold, spans,
+      hint: `покажите спикера на каждом кадре первых ${fmt(mustSec)} с (можно размытым) или объявите hook: "enumeration"`,
+    });
+  }
   return gate('G4', 'Спикер в первые 3 с', {
-    status: 'fail', threshold, spans: [span(0, frames, manifest.fps, 'спикера нет в кадре')],
-    hint: 'покажите спикера хотя бы частью первых 3 с (можно размытым) или объявите hook: "enumeration"',
+    status: 'warn', threshold, spans,
+    hint: `спикер пропадает между ${fmt(mustSec)} и ${fmt(sec)} с — верните его в кадр`,
   });
 }
 
@@ -253,15 +298,17 @@ function gateStock(manifest, profile) {
   });
 }
 
-// Сливает подряд идущие (касающиеся или пересекающиеся, зазор ≤ 1 кадра) вставки одного прогона в
-// один диапазон перед измерением «подряд» для G11 — два соседних донора по 2 с обязаны читаться
-// как 4 с одного эпизода, а не как два отдельных прохождения лимита.
-function mergeRuns(inserts) {
+// Сливает подряд идущие (касающиеся или пересекающиеся, зазор ≤ gapFrames) вставки одного прогона
+// в один диапазон перед измерением «подряд» для G11 — два соседних донора, разделённые короткой
+// паузой, обязаны читаться как один эпизод, а не как два отдельных прохождения лимита. Сортировка
+// по from — входной порядок вставок не гарантирован; вложенная вставка (целиком внутри другой)
+// поглощается через Math.max(last.to, insert.to), а не расширяет диапазон её собственным to.
+function mergeRuns(inserts, gapFrames) {
   const sorted = [...inserts].sort((a, b) => a.from - b.from);
   const runs = [];
   for (const insert of sorted) {
     const last = runs[runs.length - 1];
-    if (last && insert.from - last.to <= 1) {
+    if (last && insert.from - last.to <= gapFrames) {
       last.to = Math.max(last.to, insert.to);
       last.ids.push(insert.id);
     } else {
@@ -271,20 +318,24 @@ function mergeRuns(inserts) {
   return runs;
 }
 
-// G11: чужое видео — не дольше profile.donor.maxSec подряд. Донорская вставка без cover — оверлей
-// поверх спикера (лицо остаётся в кадре); полноэкранный донор ставит cover: true сам автор плана.
+// G11: чужое видео — не дольше profile.donor.maxSec подряд. «Подряд» — прогон донорских вставок,
+// слитых при паузе ≤ profile.donor.gapSec. cover решает только видимость спикера под вставкой
+// (оверлей vs полноэкранный донор) и никак не влияет на этот вердикт. value — самый длинный прогон
+// донора всегда, даже когда гейт проходит: это метрика профиля, а не только повод для fail.
 function gateDonor(manifest, profile) {
   const { fps } = manifest;
+  const gapFrames = Math.round(profile.donor.gapSec * fps);
   const donors = manifest.inserts.filter((i) => i.kind === 'donor');
-  const runs = mergeRuns(donors);
+  const runs = mergeRuns(donors, gapFrames);
   const long = runs.filter((r) => (r.to - r.from) / fps > profile.donor.maxSec + 1e-9);
   return gate('G11', 'Чужое видео', {
     status: long.length ? 'fail' : 'pass',
-    value: long.length ? r2(Math.max(...long.map((r) => (r.to - r.from) / fps))) : 0, unit: 'с',
+    value: runs.length ? r2(Math.max(...runs.map((r) => (r.to - r.from) / fps))) : 0, unit: 'с',
     threshold: `≤ ${fmt(profile.donor.maxSec)} с подряд`,
     spans: long.map((r) => span(r.from, r.to, fps, r.ids.join('+'))),
     hint: 'чужой ролик — только 2–3 с для контекста, дальше собственные анимации по смыслу; '
-      + 'донорская вставка без cover — оверлей поверх спикера, полноэкранный донор ставьте с cover: true',
+      + 'донор без cover — оверлей поверх спикера, полноэкранный донор ставьте с cover: true; '
+      + 'cover решает только видимость спикера и на этот вердикт (длину прогона) не влияет',
   });
 }
 

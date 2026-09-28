@@ -17,6 +17,9 @@ test('manifest carries per-frame camera, per-frame text extents and static capti
   const m = kit.buildManifest(kit.compileLayer(plan, cfg));
   assert.equal(m.version, 1);
   assert.equal(m.camera.s.length, 100);
+  // base — ревью пакета 2 задачи 22: масштаб пресета с дрейфом ДО панча и ДО клэмпа maxScale,
+  // читает G3, чтобы отличить пресет крупнее предела от панча, упёршегося в потолок.
+  assert.equal(m.camera.base.length, 100);
   assert.equal(m.maxScale, 1.25);
   const title = m.texts.find((t) => t.id === 'title');
   assert.equal(title.from, 5);
@@ -67,4 +70,13 @@ test('manifest inserts carry cover and src for the gates', () => {
     { id: 'stock-1', kind: 'stock', from: 25, to: 50, cover: true, src: 'stock/a.mp4' },
     { id: 'donor-2', kind: 'donor', from: 63, to: 75, cover: false, src: 'donor.mp4' },
   ]);
+});
+
+// Ревью пакета 2: вставка без src (например screen/scene без файла) отдаёт src: null, а не
+// undefined — иначе JSON.stringify молча теряет ключ и сравнение манифеста с сохранённым не
+// заметит пропажи поля.
+test('an insert without src comes out as src: null, not undefined', () => {
+  const m = kit.buildManifest(kit.compileLayer({ ...plan, inserts: [{ kind: 'scene', from: 1, to: 2 }] }, cfg));
+  assert.equal(m.inserts[0].src, null);
+  assert.ok('src' in JSON.parse(JSON.stringify(m)).inserts[0], 'src обязан остаться в JSON как null, а не пропасть');
 });

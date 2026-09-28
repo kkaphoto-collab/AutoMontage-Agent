@@ -7,11 +7,15 @@ const r3 = (value) => Math.round(value * 1000) / 1000;
 // Сериализуемый снимок слоя: камера и габариты текста по кадрам, вставки, звуки, хук, исключения.
 export function buildManifest(compiled) {
   const { fps, width, height, durationInFrames } = compiled;
-  const camera = { s: [], requested: [], dx: [], dy: [], blur: [], opacity: [] };
+  // base — с ревью пакета 2 задачи 22: масштаб пресета с дрейфом ДО панчей и ДО клэмпа maxScale,
+  // читает G3 (scripts/qa/timeline-gates.js), чтобы отличить пресет крупнее предела от панча,
+  // упёршегося в потолок.
+  const camera = { s: [], requested: [], base: [], dx: [], dy: [], blur: [], opacity: [] };
   for (let frame = 0; frame < durationInFrames; frame += 1) {
     const c = cameraAt(compiled.camera, frame);
     camera.s.push(r3(c.s));
     camera.requested.push(r3(c.requested));
+    camera.base.push(r3(c.base));
     camera.dx.push(r3(c.dx));
     camera.dy.push(r3(c.dy));
     camera.blur.push(r3(c.blur));

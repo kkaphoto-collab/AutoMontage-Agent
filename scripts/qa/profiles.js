@@ -16,8 +16,12 @@ const BASE = deepFreeze({
   rhythm: { stopSec: 2.5, warnSec: 2.2 },
   camera: { jumpScale: 0.15, shiftPx: 85, weakShiftPx: 40, punchScale: 0.1, weakScale: 0.06, sharpBlurPx: 6, eatenPunch: 1.05 },
   scale: { max: 1.25 },
-  hook: { sec: 3 },
-  donor: { maxSec: 3 },
+  // sec/mustSec — owner's documented rule (docs/BATCH-REELS-WORKFLOW.md, docs/editing-rules.md):
+  // «в первом кадре и первые 2–3 секунды виден спикер». mustSec — жёсткая граница (СТОП), sec —
+  // весь диапазон правила (ПРЕДУПРЕЖДЕНИЕ между mustSec и sec).
+  hook: { sec: 3, mustSec: 2 },
+  // gapSec — стартовое значение оркестратора, калибруется позже по утверждённым роликам.
+  donor: { maxSec: 3, gapSec: 0.5 },
   stock: { min: 3, minShort: 2, shortSec: 45 },
   sfx: { minGapSec: 0.3, notableGapSec: 1.0, sceneFadeSec: 0.12 },
   leak: { stop: 0.6, windowWarn: 0.8, windowSec: 5, silentDb: -60 },
