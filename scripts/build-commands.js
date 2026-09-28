@@ -109,6 +109,13 @@ function remotionRenderCommand(resolved, {
 
 // Рендер проектного motion-слоя: props не нужны (слой читает свой layer.json), звук эффектов сохраняется.
 function remotionLayerRenderCommand(resolved, { entry, composition, output, publicDir, concurrency = '50%' }) {
+  if (!(
+    (Number.isSafeInteger(concurrency) && concurrency > 0 && concurrency <= 256)
+    || (typeof concurrency === 'string'
+      && /^(?:[1-9]|[1-9]\d|100)%$/.test(concurrency))
+  )) {
+    throw new Error('Remotion concurrency is invalid');
+  }
   return {
     command: resolved.command,
     args: [

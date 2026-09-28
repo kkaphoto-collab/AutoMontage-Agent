@@ -154,6 +154,11 @@ test('a real plan.js that throws undefined or a string gives a readable error re
   writePlan("export default function buildPlan() {\n  return { get camera() { throw null; }, items: [] };\n}\n");
   assert.equal(await runCheck(), 2);
   assert.equal(report().error, 'слой motion-v01: src/plan.js бросил null при компиляции плана');
+  // Брошенный не-Error объект со своим строковым message (не instanceof Error) — используем этот
+  // текст напрямую, а не невнятное «бросил [object Object] при компиляции плана».
+  writePlan("export default function buildPlan() {\n  return { get camera() { throw { message: 'кастомная причина' }; }, items: [] };\n}\n");
+  assert.equal(await runCheck(), 2);
+  assert.equal(report().error, 'слой motion-v01: кастомная причина');
 });
 
 test('the profile comes from --profile, then layer.json, then avatar; an unknown one is an error report', { skip: !hasFfmpeg }, async (t) => {

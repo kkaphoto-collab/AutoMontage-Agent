@@ -302,8 +302,10 @@ function buildLayerManifest(layerDir) {
     // compilePlan уже оборачивает провал самого buildPlan в понятный Error («src/plan.js упал при
     // построении плана — …»). А геттер в возвращённом объекте плана, который читает дальнейшая
     // компиляция (compileLayer), может бросить что угодно, не только Error, — это уже не «упал при
-    // построении», а бросок уже после: отдельная человеческая фраза вместо голого текста значения.
-    const text = error instanceof Error ? error.message : `src/plan.js бросил ${String(error)} при компиляции плана`;
+    // построении», а бросок уже после. Проверяем не instanceof Error, а наличие строкового message:
+    // такой текст (у настоящего Error или у брошенного объекта со своим message) понятнее голого
+    // значения — иначе отдельная человеческая фраза вместо невнятного «бросил [object Object] …».
+    const text = typeof error?.message === 'string' ? error.message : `src/plan.js бросил ${String(error)} при компиляции плана`;
     throw layerError(name, root, text, error, error?.cause);
   }
 }

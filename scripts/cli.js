@@ -132,7 +132,8 @@ function runForwardingSignals({ script, signalExitCodes }, args, {
       try {
         child.kill(signal);
       } catch {
-        // Windows не умеет посылать SIGHUP (ENOSYS) — ребёнка всё равно останавливаем.
+        // Сюда попадаем только на POSIX (forwardToChild уже false и выход выше — на Windows). Сам сигнал
+        // по какой-то причине не ушёл (например, ребёнок уже завершается) — гасим его понятным SIGTERM.
         child.kill('SIGTERM');
       }
     };

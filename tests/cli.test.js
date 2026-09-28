@@ -35,26 +35,49 @@ test('public CLI advertises multi-take commands and routes takes to its own scri
 // недостроенную папку по SIGINT). Консольное событие и так доходит до ребёнка напрямую через общую
 // консольную группу, поэтому на win32 внешний процесс не должен слать сигнал сам — только дождаться
 // и передать дальше настоящий код выхода ребёнка.
-test('runForwardingSignals never force-kills the child on win32; on other platforms it forwards the signal and, either way, passes the child exit code through unchanged', () => {
+test('runForwardingSignals never force-kills the child on win32; on other platforms it forwards the signal; either way the child\'s real exit code passes through, and a bare kill-by-signal exit falls back to the table', () => {
   for (const platform of ['darwin', 'linux', 'win32']) {
-    const killed = [];
-    const child = new EventEmitter();
-    child.kill = (signal) => killed.push(signal);
-    const processLike = new EventEmitter();
-    let exitCode = null;
-    processLike.exit = (code) => { exitCode = code; };
+    for (const signal of Object.keys(SIGNAL_FORWARDING.layer.signalExitCodes)) {
+      // 1) Код возврата ребёнка — целое число вне таблицы (2 нет ни у SIGINT:130, ни у SIGTERM:143,
+      // ни у SIGHUP:129): мутант, который вместо реального code просто возвращает signalExitCodes[signal],
+      // здесь не совпадёт со 143/130/129 случайно, как совпал бы при коде 143 и сигнале SIGTERM.
+      {
+        const killed = [];
+        const child = new EventEmitter();
+        child.kill = (s) => killed.push(s);
+        const processLike = new EventEmitter();
+        let exitCode = null;
+        processLike.exit = (code) => { exitCode = code; };
 
-    runForwardingSignals(
-      SIGNAL_FORWARDING.layer,
-      ['check', '--project-dir', 'p'],
-      { platform, spawnImpl: () => child, processLike },
-    );
+        runForwardingSignals(SIGNAL_FORWARDING.layer, ['check', '--project-dir', 'p'], { platform, spawnImpl: () => child, processLike });
+        assert.equal(processLike.listenerCount(signal), 1, `${platform}/${signal} before`);
 
-    processLike.emit('SIGTERM');
-    assert.deepEqual(killed, platform === 'win32' ? [] : ['SIGTERM'], platform);
-    // Ребёнок сам решил свой код выхода (собственная уборка на SIGTERM/SIGHUP) — снаружи он просто
-    // передаётся дальше, а не переопределяется таблицей signalExitCodes.
-    child.emit('exit', 143);
-    assert.equal(exitCode, 143, platform);
+        processLike.emit(signal);
+        assert.deepEqual(killed, platform === 'win32' ? [] : [signal], `${platform}/${signal} kill`);
+
+        child.emit('exit', 2);
+        assert.equal(exitCode, 2, `${platform}/${signal} real code passthrough`);
+        for (const other of Object.keys(SIGNAL_FORWARDING.layer.signalExitCodes)) {
+          assert.equal(processLike.listenerCount(other), 0, `${platform}/${signal} listener ${other} removed after exit`);
+        }
+      }
+      // 2) Ребёнка убило самим сигналом без явного кода (code=null, signal='SIGTERM', как отдаёт Node,
+      // когда сигнал дошёл до процесса без собственного обработчика) — код берём из таблицы signalExitCodes.
+      {
+        const child = new EventEmitter();
+        child.kill = () => {};
+        const processLike = new EventEmitter();
+        let exitCode = null;
+        processLike.exit = (code) => { exitCode = code; };
+
+        runForwardingSignals(SIGNAL_FORWARDING.layer, ['check', '--project-dir', 'p'], { platform, spawnImpl: () => child, processLike });
+        processLike.emit(signal);
+        child.emit('exit', null, 'SIGTERM');
+        assert.equal(exitCode, SIGNAL_FORWARDING.layer.signalExitCodes[signal], `${platform}/${signal} table fallback`);
+        for (const other of Object.keys(SIGNAL_FORWARDING.layer.signalExitCodes)) {
+          assert.equal(processLike.listenerCount(other), 0, `${platform}/${signal} listener ${other} removed after signal-only exit`);
+        }
+      }
+    }
   }
 });

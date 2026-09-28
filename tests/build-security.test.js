@@ -10,6 +10,7 @@ const {
   frameAnalysisCommand,
   paletteCommand,
   reframeCommand,
+  remotionLayerRenderCommand,
   remotionRenderCommand,
   videoProbeCommand,
 } = require('../scripts/build-commands');
@@ -158,6 +159,18 @@ test('Remotion preview options stay typed and become separate argv entries', () 
       props: `${HOSTILE}.json`,
       ...invalid,
     }), /scale|crf|frame|concurrency|overwrite/i);
+  }
+});
+
+test('remotionLayerRenderCommand validates concurrency the same way remotionRenderCommand does', () => {
+  const resolved = { command: process.execPath, argsPrefix: ['/repo/remotion-cli.js', '--env-file=/repo/config/remotion-public.env'] };
+  const base = { entry: 'motion-v01/src/index.jsx', composition: 'Layer', output: '/tmp/layer.mp4', publicDir: '/tmp/layer-public' };
+  const ok = remotionLayerRenderCommand(resolved, base);
+  assert.ok(ok.args.includes('--concurrency=50%'));
+  const custom = remotionLayerRenderCommand(resolved, { ...base, concurrency: 4 });
+  assert.ok(custom.args.includes('--concurrency=4'));
+  for (const concurrency of ['50%;touch sentinel', '0%', '101%', 0, -1, 257, 'abc', null]) {
+    assert.throws(() => remotionLayerRenderCommand(resolved, { ...base, concurrency }), /concurrency/i);
   }
 });
 
