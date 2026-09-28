@@ -1,6 +1,6 @@
-// Звук для гейтов: моно 8 кГц s16le из ffmpeg, огибающая по 50 мс в dBFS, корреляция Пирсона,
-// поиск короткой/сдвинутой утечки голоса в звуке слоя (окно + лаг) и доля звука слоя вне известных
-// вставок (G7, Task 26).
+// Звук для гейтов: моно 8 кГц s16le из ffmpeg (и float полной полосы для громкости G8), огибающая
+// по 50 мс в dBFS, корреляция Пирсона, поиск короткой/сдвинутой утечки голоса в звуке слоя (окно +
+// лаг) и доля звука слоя вне известных вставок (G7, Task 26).
 const { spawnSync } = require('node:child_process');
 
 const SAMPLE_RATE = 8000;
@@ -22,10 +22,10 @@ function reasonFor(result) {
   return `процесс завершился со статусом ${String(result.status)}`;
 }
 
-function pcmFromFfmpeg(inputArgs, { maxBuffer = 256 * 1024 * 1024, spawnImpl = spawnSync } = {}) {
+// Запуск ffmpeg с PCM в stdout: общая обработка сбоев для pcmFromFfmpeg и floatPcmFromFfmpeg.
+function ffmpegPcmBytes(inputArgs, outputArgs, { maxBuffer, spawnImpl }) {
   const result = spawnImpl('ffmpeg', [
-    '-hide_banner', '-loglevel', 'error', ...inputArgs,
-    '-ac', '1', '-ar', String(SAMPLE_RATE), '-f', 's16le', '-acodec', 'pcm_s16le', '-',
+    '-hide_banner', '-loglevel', 'error', ...inputArgs, ...outputArgs, '-',
   ], { encoding: 'buffer', maxBuffer, shell: false });
   // Молчаливый провал здесь означал бы «звука нет» вместо «ffmpeg не смог его отдать» — гейт принял
   // бы пустой PCM за тишину и дал бы ложный pass.
@@ -43,9 +43,27 @@ function pcmFromFfmpeg(inputArgs, { maxBuffer = 256 * 1024 * 1024, spawnImpl = s
     }
     throw new Error(`ffmpeg не смог отдать звук: ${reason}`);
   }
-  const bytes = result.stdout;
+  return result.stdout;
+}
+
+function pcmFromFfmpeg(inputArgs, { maxBuffer = 256 * 1024 * 1024, spawnImpl = spawnSync } = {}) {
+  const bytes = ffmpegPcmBytes(inputArgs, ['-ac', '1', '-ar', String(SAMPLE_RATE), '-f', 's16le', '-acodec', 'pcm_s16le'],
+    { maxBuffer, spawnImpl });
   const samples = new Int16Array(Math.floor(bytes.length / 2));
   for (let i = 0; i < samples.length; i += 1) samples[i] = bytes.readInt16LE(i * 2);
+  return samples;
+}
+
+// Полная полоса для громкости (G8): float32, каналы чередуются. Без округления до 16 бит —
+// K-взвешивание поднимает верха на 4 дБ, и s16 обрезал бы пики громкого голоса.
+function floatPcmFromFfmpeg(inputArgs, { sampleRate, channels, maxBuffer = 256 * 1024 * 1024, spawnImpl = spawnSync } = {}) {
+  if (!(Number.isInteger(sampleRate) && sampleRate > 0 && Number.isInteger(channels) && channels > 0)) {
+    throw new Error('floatPcmFromFfmpeg: sampleRate и channels должны быть целыми числами > 0');
+  }
+  const bytes = ffmpegPcmBytes(inputArgs, ['-ac', String(channels), '-ar', String(sampleRate), '-f', 'f32le', '-acodec', 'pcm_f32le'],
+    { maxBuffer, spawnImpl });
+  const samples = new Float32Array(Math.floor(bytes.length / 4));
+  for (let i = 0; i < samples.length; i += 1) samples[i] = bytes.readFloatLE(i * 4);
   return samples;
 }
 
@@ -223,5 +241,6 @@ function audibleOutside(envelope, spans, {
 
 module.exports = {
   BLOCK, BLOCK_SEC, FLOOR_DB, SAMPLE_RATE,
-  audibleOutside, bestLagPearson, blockDb, decodeAudio, envelopeDb, formatSeconds, pcmFromFfmpeg, pearson, windowedMax,
+  audibleOutside, bestLagPearson, blockDb, decodeAudio, envelopeDb, floatPcmFromFfmpeg, formatSeconds, pcmFromFfmpeg,
+  pearson, windowedMax,
 };

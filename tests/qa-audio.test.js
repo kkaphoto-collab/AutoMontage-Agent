@@ -8,7 +8,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { runTool, toolAvailable } = require('./helpers/media-fixtures');
 const {
-  BLOCK, audibleOutside, bestLagPearson, blockDb, decodeAudio, envelopeDb, pcmFromFfmpeg, pearson, windowedMax,
+  BLOCK, audibleOutside, bestLagPearson, blockDb, decodeAudio, envelopeDb, floatPcmFromFfmpeg, pcmFromFfmpeg, pearson, windowedMax,
 } = require('../scripts/qa/audio');
 
 test('envelope is -90 dBFS on silence and ~-3 dBFS on a full-scale sine', () => {
@@ -206,6 +206,27 @@ test('ffmpeg failures are errors, never a silent pass', () => {
   assert.throws(() => pcmFromFfmpeg(['-i', 'missing.wav'], { spawnImpl: failing }), /ffmpeg не смог отдать звук: No such file/);
   const ok = () => ({ status: 0, stdout: Buffer.from([1, 0, 255, 255]), stderr: Buffer.alloc(0) });
   assert.deepEqual([...pcmFromFfmpeg([], { spawnImpl: ok })], [1, -1]);
+});
+
+// Полная полоса для громкости (G8): float без округления до 16 бит — K-взвешивание поднимает
+// верха на 4 дБ, и s16 обрезал бы пики громкого голоса.
+test('floatPcmFromFfmpeg asks for float PCM at the given rate and channels and keeps ffmpeg errors', () => {
+  const calls = [];
+  const bytes = Buffer.alloc(12);
+  [0.5, -1.25, 2].forEach((v, i) => bytes.writeFloatLE(v, i * 4));
+  const ok = (command, args) => { calls.push(args); return { status: 0, stdout: bytes, stderr: Buffer.alloc(0) }; };
+  assert.deepEqual([...floatPcmFromFfmpeg(['-i', 'x.wav'], { sampleRate: 48000, channels: 2, spawnImpl: ok })], [0.5, -1.25, 2]);
+  assert.deepEqual(calls[0], ['-hide_banner', '-loglevel', 'error', '-i', 'x.wav',
+    '-ac', '2', '-ar', '48000', '-f', 'f32le', '-acodec', 'pcm_f32le', '-']);
+  const failing = () => ({ status: 1, stdout: Buffer.alloc(0), stderr: Buffer.from('No such file') });
+  assert.throws(() => floatPcmFromFfmpeg(['-i', 'x.wav'], { sampleRate: 48000, channels: 2, spawnImpl: failing }),
+    /ffmpeg не смог отдать звук: No such file/);
+  const noAudio = () => ({ status: 1, stdout: Buffer.alloc(0), stderr: Buffer.from("Stream map '0:a:0' matches no streams.") });
+  assert.throws(() => floatPcmFromFfmpeg(['-i', 'clip.mp4'], { sampleRate: 48000, channels: 2, spawnImpl: noAudio }),
+    /в clip\.mp4 нет звуковой дорожки/);
+  for (const bad of [{ sampleRate: 0, channels: 2 }, { sampleRate: 48000, channels: 0 }, { sampleRate: 48000.5, channels: 2 }, {}]) {
+    assert.throws(() => floatPcmFromFfmpeg(['-i', 'x.wav'], { ...bad, spawnImpl: ok }), /floatPcmFromFfmpeg: sampleRate и channels/);
+  }
 });
 
 test('ENOENT gets a doctor hint, not the generic "ffmpeg не смог отдать звук"', () => {
