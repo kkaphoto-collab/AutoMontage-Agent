@@ -140,22 +140,45 @@ function findPlanViolation(metafile, { root, kitRoot, kitFiles = [], layerFiles 
   }
 
   const violations = [];
+  // ENV_DEFINE — синтетический модуль без собственных импортов, проверять его наравне с прочими
+  // ключами не нужно оборачивать отдельным исключением: цикл по input.imports просто ничего не
+  // сделает (0 итераций), а resolve()/isKit() на нём безопасны, потому что несуществующий путь
+  // canonicalPath отдаёт как есть, не бросая.
   for (const [key, input] of Object.entries(metafile?.inputs || {})) {
-    if (key === ENV_DEFINE) continue;
     const entry = key === STDIN;
     const file = entry ? null : resolve(key);
     if (!entry && isKit(file)) continue;
     for (const record of input.imports || []) {
       const problem = entry ? entryProblem(record) : planProblem(record);
       if (problem) {
-        violations.push({ ...problem, file: entry ? 'сборка слоя' : slash(p.relative(root, file)), inLayer: entry || within(root, file) });
+        violations.push({ ...problem, key: entry ? STDIN : key, file: entry ? 'сборка слоя' : slash(p.relative(root, file)), inLayer: entry || within(root, file) });
       }
     }
   }
   // Первым называем импорт из файла самого слоя: помощник снаружи может нарушать и сам, но
   // исправлять автору нужно строку в своём файле.
   const first = violations.find((v) => v.inLayer) || violations[0];
-  return first ? { file: first.file, spec: first.spec, reason: first.reason } : null;
+  if (!first) return null;
+  // Файл, где буквально стоит запрещённый импорт, не обязан быть src/plan.js: например, план
+  // подключает свой helper со сценами, а тот сам тянет remotion. Тогда одного имени файла мало —
+  // автору негде искать причину, если он открывает plan.js и не видит там ничего подозрительного.
+  // Называем первый файл слоя, который по metafile прямо импортирует нарушивший файл (обычно это
+  // и есть src/plan.js); когда нарушивший файл подключён самим entry (это и есть первые четыре
+  // файла слоя), добавлять нечего.
+  const via = first.key && first.key !== STDIN ? directImporter(metafile, first.key) : null;
+  const file = via && via !== STDIN ? `${first.file} (подключён из ${slash(via)})` : first.file;
+  return { file, spec: first.spec, reason: first.reason };
+}
+
+// Первый файл в metafile, чей список imports содержит ключ target — то есть первый, через кого
+// esbuild вообще увидел этот файл. Линейный проход по input'ам достаточен: граф импортов слоя
+// небольшой, а нам нужен только один (любой) прямой импортёр, не полная цепочка до entry.
+function directImporter(metafile, target) {
+  for (const [key, input] of Object.entries(metafile?.inputs || {})) {
+    if (key === target) continue;
+    if ((input.imports || []).some((record) => record.path === target)) return key;
+  }
+  return null;
 }
 
 // Пути внутрь kit в сообщениях — в виде импорта '@automontage/motion-kit/…', без домашней папки
