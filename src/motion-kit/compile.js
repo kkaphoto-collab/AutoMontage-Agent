@@ -60,3 +60,22 @@ export function compileLayer(plan, { fps, width, height, durationInFrames, words
     waivers: plan.waivers || [],
   };
 }
+
+// Единая точка построения плана: Node-манифест (scripts/motion-kit-node.js) и Root.jsx слоя
+// вызывают buildPlan через одну и ту же функцию, чтобы у гейта (секунды, до рендера) и у самого
+// рендера были одинаковые сообщения об ошибках и один и тот же скомпилированный слой.
+export function compilePlan(buildPlan, ctx) {
+  if (typeof buildPlan !== 'function') {
+    throw new Error('plan.js должен экспортировать default function buildPlan');
+  }
+  let plan;
+  try {
+    plan = buildPlan(ctx);
+  } catch (error) {
+    throw new Error(`src/plan.js упал при построении плана — ${error.message}`);
+  }
+  if (!plan || typeof plan !== 'object' || Array.isArray(plan)) {
+    throw new Error('buildPlan в src/plan.js должен вернуть объект плана');
+  }
+  return compileLayer(plan, ctx);
+}

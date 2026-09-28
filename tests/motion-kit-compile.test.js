@@ -108,3 +108,31 @@ test('compileItems rejects a negative at and an at at or after the composition e
     /items a: начинается после конца ролика/,
   );
 });
+
+// Task 19 review: единая точка построения плана — Node-манифест (scripts/motion-kit-node.js) и
+// будущий Root.jsx (задача 29) вызывают buildPlan через один и тот же compilePlan, чтобы у гейта
+// и у рендера были одинаковые правила ошибок и один и тот же скомпилированный слой.
+test('compilePlan calls buildPlan with ctx and compiles the result exactly like compileLayer', () => {
+  const buildPlan = (ctx) => ({ camera: plan.camera, items: [], hook: ctx.words.length ? 'speaker' : 'enumeration' });
+  const compiled = kit.compilePlan(buildPlan, cfg);
+  assert.deepEqual(compiled, kit.compileLayer(buildPlan(cfg), cfg));
+});
+
+test('compilePlan rejects a non-function buildPlan with a Russian hint', () => {
+  assert.throws(() => kit.compilePlan(undefined, cfg), /plan\.js должен экспортировать default function buildPlan/);
+  assert.throws(() => kit.compilePlan(null, cfg), /plan\.js должен экспортировать default function buildPlan/);
+});
+
+test('compilePlan wraps a throwing buildPlan instead of leaking a raw stack', () => {
+  const buildPlan = () => { throw new Error('boom'); };
+  assert.throws(() => kit.compilePlan(buildPlan, cfg), /src\/plan\.js упал при построении плана — boom/);
+});
+
+test('compilePlan rejects a buildPlan that does not return a plan object', () => {
+  assert.throws(() => kit.compilePlan(() => undefined, cfg), /buildPlan в src\/plan\.js должен вернуть объект плана/);
+  assert.throws(() => kit.compilePlan(() => [1, 2], cfg), /buildPlan в src\/plan\.js должен вернуть объект плана/);
+});
+
+test('compilePlan lets kit validation errors (e.g. a missing camera.face) pass through unprefixed', () => {
+  assert.throws(() => kit.compilePlan(() => ({ camera: { shots: [] }, items: [] }), cfg), /camera\.face/);
+});
