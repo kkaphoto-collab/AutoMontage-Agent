@@ -36,7 +36,7 @@ function parseArgs(argv, flags) {
     const key = flag.slice(2, eq === -1 ? undefined : eq);
     if (!Object.hasOwn(flags, key)) throw new Error(`неизвестный флаг --${key}`);
     if (eq !== -1) {
-      if (flags[key] === 'bool') throw new Error(`флаг --${key} без значения`);
+      if (flags[key] === 'bool') throw new Error(`флаг --${key} не принимает значения`);
       const value = flag.slice(eq + 1);
       throw new Error(`пишите --${key} ${value === '' ? '<значение>' : value} (без =)`);
     }

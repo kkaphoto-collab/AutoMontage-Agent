@@ -41,6 +41,11 @@ export function compileInserts(inserts = [], { fps, durationInFrames } = {}) {
     const clampedByEnd = hasDuration && rawTo > durationInFrames;
     if (!(to > from)) throw new Error(`inserts[${i}] (${label}): to должен быть больше from`);
     const cover = insert.cover ?? insert.kind !== 'donor';
+    // stock/screen/scene рисуются на весь кадр всегда: cover: false сказал бы манифесту (G4), что
+    // спикер виден, пока его закрывает вставка. Оверлеем поверх спикера бывает только donor.
+    if (!cover && insert.kind !== 'donor') {
+      throw new Error(`inserts[${i}] (${label}): вставка ${insert.kind} всегда закрывает спикера: cover: false допустим только для donor`);
+    }
     if (cover) {
       // Закрывающая (cover) вставка обязана быть достаточно длинной, чтобы спикер успел
       // вернуться в фокус ДО начала close (awaysFromInserts: away.to = to − close − exit) —

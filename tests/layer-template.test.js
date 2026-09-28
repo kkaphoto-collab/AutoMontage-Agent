@@ -42,12 +42,13 @@ test('template imports only the kit, never another reel or an absolute path', ()
 
 // --- Смоук: шаблон, скопированный в папку слоя, собирается гейтом и рендерится ---
 
-// Маленькая библиотека звуков с ролями из имён (как makeSfxLibrary Task 34): файлы для SSR не нужны.
+// Маленькая библиотека звуков: имена как в настоящей библиотеке, роль — отдельным полем (вспышка
+// обязана искать затвор по роли, а не по имени). Файлы для SSR не нужны.
 const SFX_LIBRARY = {
   sounds: {
-    pop: { file: 'sfx/pop.wav', lengthSec: 0.15, peakSec: 0.01, role: 'pop', notable: false, volume: 0.55, sha256: 'a'.repeat(64) },
-    whoosh: { file: 'sfx/whoosh.wav', lengthSec: 0.6, peakSec: 0.3, role: 'whoosh', notable: true, volume: 0.7, sha256: 'b'.repeat(64) },
-    shutter: { file: 'sfx/shutter.wav', lengthSec: 0.2, peakSec: 0.02, role: 'shutter', notable: true, volume: 0.6, sha256: 'c'.repeat(64) },
+    'pop-soft': { file: 'sfx/pop-soft.wav', lengthSec: 0.15, peakSec: 0.01, role: 'pop', notable: false, volume: 0.55, sha256: 'a'.repeat(64) },
+    'whoosh-air': { file: 'sfx/whoosh-air.wav', lengthSec: 0.6, peakSec: 0.3, role: 'whoosh', notable: true, volume: 0.7, sha256: 'b'.repeat(64) },
+    'shutter-click': { file: 'sfx/shutter-click.wav', lengthSec: 0.2, peakSec: 0.02, role: 'shutter', notable: true, volume: 0.6, sha256: 'c'.repeat(64) },
   },
 };
 
@@ -87,6 +88,14 @@ function loadLayerFile(layerDir, file, remotion) {
   });
 }
 
+// Правка скопированного plan.js так, как её сделал бы агент ролика; без совпадения тест падает сразу.
+function patchPlan(layerDir, search, replacement) {
+  const file = path.join(layerDir, 'src', 'plan.js');
+  const text = fs.readFileSync(file, 'utf8');
+  assert.ok(text.includes(search), `в plan.js нет «${search}»`);
+  fs.writeFileSync(file, text.replace(search, replacement));
+}
+
 function renderRoot(layerDir, layer, frame) {
   const { fps, width, height, durationInFrames } = layer;
   const { LayerComposition } = loadLayerFile(layerDir, 'src/Root.jsx', remotionStub({ frame, fps, width, height, durationInFrames }));
@@ -109,7 +118,7 @@ test('the copied template builds a manifest through buildLayerManifest with came
   assert.ok(manifest.texts.some((text) => text.id === 'title'));
   assert.ok(manifest.texts.some((text) => text.id === 'screenshot'));
   assert.deepEqual(manifest.inserts.map((i) => [i.id, i.kind, i.cover, i.src]), [['stock-1', 'stock', true, 'stock/placeholder.mp4']]);
-  assert.deepEqual(manifest.cues.kept.map((cue) => cue.name).sort(), ['pop', 'shutter', 'whoosh']);
+  assert.deepEqual(manifest.cues.kept.map((cue) => cue.name).sort(), ['pop-soft', 'shutter-click', 'whoosh-air']);
   assert.deepEqual(manifest.cues.dropped, []);
   // Субтитры уходят на время стока, и их окно hide совпадает с кадрами вставки.
   const stock = manifest.inserts[0];
@@ -190,13 +199,15 @@ test('Root renders speaker, title, screenshot card, shutter flash, stock insert,
   const manifest = buildLayerManifest(layerDir);
   const stock = manifest.inserts[0];
   const card = manifest.texts.find((text) => text.id === 'screenshot');
-  const shutter = manifest.cues.kept.find((cue) => cue.name === 'shutter');
+  const shutter = manifest.cues.kept.find((cue) => cue.name === 'shutter-click');
   const audios = (html) => (html.match(/<audio /g) || []).length;
 
   const start = renderRoot(layerDir, layer, 0);
   assert.match(start, /<video src="\/static\/speaker\.mp4"/);
   assert.match(start, /data-kit-text="captions"/);
   assert.match(start, /Привет,/);
+  // Субтитры — шрифтом слоя, а не sans-serif по умолчанию.
+  assert.match(start, /data-kit-text="captions"[^>]*><span style="font-family:KitOnest/);
   assert.equal(audios(start), 3, 'звуковая дорожка — все оставшиеся звуки');
   assert.doesNotMatch(start, /data-kit-text="title"/);
 
@@ -213,6 +224,10 @@ test('Root renders speaker, title, screenshot card, shutter flash, stock insert,
   assert.match(shot, /data-kit-text="screenshot"/);
   assert.match(shot, /<img src="\/static\/shots\/placeholder\.png"/);
   assert.match(shot, /example\.com/);
+  // Скриншот прокручивается после входа карточки: до окна прокрутки — верх страницы, в середине — ниже.
+  const scrolled = (html) => Number(/object-position:50% ([\d.]+)%/.exec(html)[1]);
+  assert.equal(scrolled(renderRoot(layerDir, layer, card.from + 2)), 0);
+  assert.ok(scrolled(shot) > 10 && scrolled(shot) < 90, `прокрутка в середине карточки ${scrolled(shot)} %`);
 
   // Вспышка — на ударе оставшегося звука затвора, после входа карточки (mask — 8 эталонных кадров).
   assert.ok(shutter.hitFrame >= card.from + 8, `затвор ${shutter.hitFrame}, карточка с ${card.from}`);
@@ -256,4 +271,79 @@ test('InsertContent draws a cover screen as a browser window inside the safe zon
   assert.match(scene, /background-color:#0c1018/);
   // Донор без cover — оверлей поверх спикера: заливка на весь кадр закрыла бы спикера на весь ролик.
   assert.equal(render(React.createElement(InsertContent, { insert: insert({ kind: 'donor', cover: false, src: 'donor/clip.mp4' }) })), '');
+});
+
+test('title card at 1920×1080 keeps the 1080 reference size: k is the short side, not the width', (t) => {
+  const { layerDir, layer } = makeLayer(t, { width: 1920, height: 1080 });
+  const html = renderRoot(layerDir, layer, 30);
+  assert.match(html, /data-kit-text="title"/);
+  assert.match(html, /font-size:64px/);
+  assert.match(html, /border-radius:28px/);
+});
+
+test('short sources keep the hook: a 4 s layer starts its stock at 3 s, a 3 s layer has no stock, no gate fails', (t) => {
+  for (const [seconds, expected] of [[4, [['stock-1', 75, 100]]], [3, []]]) {
+    const { layerDir } = makeLayer(t, { seconds });
+    const manifest = buildLayerManifest(layerDir);
+    assert.deepEqual(manifest.inserts.map((i) => [i.id, i.from, i.to]), expected, `${seconds} с`);
+    const gates = runTimelineGates(manifest, getProfile('avatar'));
+    assert.deepEqual(gates.filter((g) => g.status === 'fail').map((g) => g.id), [], `${seconds} с`);
+    assert.equal(statuses(gates).G4, 'pass', `${seconds} с: спикер в кадре весь хук`);
+  }
+});
+
+test('a screen insert an agent adds to plan.js hides captions and is drawn through FullscreenReveal only inside its window', (t) => {
+  const { layerDir, layer } = makeLayer(t);
+  patchPlan(layerDir, 'const inserts = [];',
+    "const inserts = [{ id: 'screen-1', kind: 'screen', from: 1, to: 2, src: 'shots/screen.png' }];");
+  const manifest = buildLayerManifest(layerDir);
+  const screen = manifest.inserts.find((i) => i.id === 'screen-1');
+  assert.deepEqual([screen.from, screen.to, screen.cover], [25, 50, true]);
+  // hide собран из вставок: ни один кадр субтитров не попадает под новый экран.
+  for (const text of manifest.texts.filter((item) => item.static)) {
+    assert.ok(text.until <= screen.from || text.from >= screen.to, `${text.id} [${text.from}, ${text.until}) под экраном`);
+  }
+  for (const frame of [screen.from - 5, screen.to, screen.to + 5]) {
+    const html = renderRoot(layerDir, layer, frame);
+    assert.doesNotMatch(html, /data-kit-bleed="screen-1"|shots\/screen\.png/, `кадр ${frame} вне окна вставки`);
+  }
+  const inside = renderRoot(layerDir, layer, screen.from + 15);
+  assert.match(inside, /data-kit-bleed="screen-1"/);
+  assert.match(inside, /<img src="\/static\/shots\/screen\.png"/);
+  assert.doesNotMatch(inside, /data-kit-text="captions"/);
+});
+
+test('BAD CASE: a stock insert with cover: false cannot slip past G4 — the layer does not compile', (t) => {
+  const { layerDir } = makeLayer(t);
+  patchPlan(layerDir, "kind: 'stock',", "kind: 'stock', cover: false,");
+  assert.throws(() => buildLayerManifest(layerDir), /вставка stock всегда закрывает спикера: cover: false допустим только для donor/);
+});
+
+test('Root draws each insert by its contract and refuses a kind/cover combination outside it', (t) => {
+  const { layerDir, layer } = makeLayer(t);
+  const stub = remotionStub({ frame: 20, fps: layer.fps, width: layer.width, height: layer.height, durationInFrames: layer.durationInFrames });
+  const { Insert } = loadLayerFile(layerDir, 'src/Root.jsx', stub);
+  const insert = (fields) => ({ id: 'x', from: 10, to: 60, src: 'clip.mp4', cover: true, kb: [1.03, 1.1], sfx: null, ...fields });
+  const draw = (fields) => render(React.createElement(Insert, { insert: insert(fields) }));
+  assert.match(draw({ kind: 'stock' }), /data-kit-bleed="x"[\s\S]*<video src="\/static\/clip\.mp4"/);
+  assert.match(draw({ kind: 'screen' }), /data-kit-bleed="x"/);
+  assert.match(draw({ kind: 'scene' }), /data-kit-bleed="x"/);
+  assert.match(draw({ kind: 'donor' }), /data-kit-bleed="x"/);
+  assert.equal(draw({ kind: 'donor', cover: false }), '');
+  for (const fields of [{ kind: 'stock', cover: false }, { kind: 'screen', cover: false }, { kind: 'meme' }]) {
+    assert.throws(() => draw(fields), /Root\.jsx: вставка x/, JSON.stringify(fields));
+  }
+});
+
+test('scenes.jsx names an unknown view and plays a full-screen donor muted from its own start', () => {
+  const stub = remotionStub({ frame: 20, fps: 25, width: 1080, height: 1920 });
+  const { InsertContent, SceneContent } = loadEsm('templates/motion-layer/src/scenes.jsx', {
+    stubs: { remotion: stub, react: React, 'react/jsx-runtime': require('react/jsx-runtime') },
+  });
+  const item = { id: 'chart-1', kind: 'card', from: 0, until: 50, props: { view: 'chart' } };
+  assert.throws(() => render(React.createElement(SceneContent, { item })), /неизвестный view «chart» у элемента chart-1/);
+  const donor = { id: 'donor-1', kind: 'donor', from: 10, to: 60, src: 'donor/clip.mp4', cover: true, kb: [1.03, 1.1], sfx: null };
+  const html = render(React.createElement(InsertContent, { insert: donor }));
+  assert.match(html, /data-sequence-from="10" data-sequence-duration="50"/);
+  assert.match(html, /<video src="\/static\/donor\/clip\.mp4" muted=""/);
 });

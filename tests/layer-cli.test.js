@@ -108,10 +108,10 @@ test('parseArgs checks the key before = first: unknown key, bool flag and an emp
   });
   // Булев флаг значения не принимает вовсе — совет «пишите --wait 1» был бы неверным.
   assert.throws(() => parseArgs(['--wait=1'], flags), (error) => {
-    assert.equal(error.message, 'флаг --wait без значения');
+    assert.equal(error.message, 'флаг --wait не принимает значения');
     return true;
   });
-  assert.throws(() => parseArgs(['--wait='], flags), /флаг --wait без значения/);
+  assert.throws(() => parseArgs(['--wait='], flags), /флаг --wait не принимает значения/);
   // Пустое значение после = — подсказка без двойного пробела.
   assert.throws(() => parseArgs(['--project-dir='], flags), (error) => {
     assert.equal(error.message, 'пишите --project-dir <значение> (без =)');
@@ -307,8 +307,8 @@ test('resolveLayer gives a friendly message for a missing layer and wraps other 
     () => resolveLayer({ 'project-dir': projectDir, layer: 'motion-v99' }),
     (error) => {
       assert.match(error.message, /папка слоя motion-v99 не найдена — создайте: automontage layer new/);
-      // Подсказка готова к копированию: настоящая папка проекта, а не заглушка <p>.
-      assert.ok(error.message.endsWith(`--project-dir ${projectDir}`), error.message);
+      // Подсказка готова к копированию: настоящая папка проекта в кавычках (пути с пробелами), а не <p>.
+      assert.ok(error.message.endsWith(`--project-dir "${projectDir}"`), error.message);
       assert.doesNotMatch(error.message, /<p>/);
       return true;
     },

@@ -14,10 +14,14 @@ const FONTS = [{ family: 'KitOnest', file: 'fonts/Onest.ttf' }, { family: 'KitOs
 
 // Сток — StockInsert; остальные полноэкранные (cover) вставки — FullscreenReveal с содержимым ролика,
 // иначе спикер уходит под вставку, а кадр остаётся чёрным. Вставку без cover (donor) ролик рисует сам.
-function Insert({ insert }) {
-  if (insert.kind === 'stock') return <StockInsert insert={insert} />;
-  if (insert.cover) return <FullscreenReveal insert={insert}><InsertContent insert={insert} /></FullscreenReveal>;
-  return <InsertContent insert={insert} />;
+// Другое сочетание kind/cover разошлось бы с манифестом гейтов (G4 читает cover) — стоп.
+export function Insert({ insert }) {
+  if (insert.cover && insert.kind === 'stock') return <StockInsert insert={insert} />;
+  if (insert.cover && ['screen', 'scene', 'donor'].includes(insert.kind)) {
+    return <FullscreenReveal insert={insert}><InsertContent insert={insert} /></FullscreenReveal>;
+  }
+  if (!insert.cover && insert.kind === 'donor') return <InsertContent insert={insert} />;
+  throw new Error(`Root.jsx: вставка ${insert.id} (kind ${insert.kind}, cover ${insert.cover}) вне контракта слоя — cover: false только у donor`);
 }
 
 export function LayerComposition() {

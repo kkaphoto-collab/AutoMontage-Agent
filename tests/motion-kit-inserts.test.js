@@ -19,6 +19,28 @@ test('invalid inserts are rejected', () => {
   assert.throws(() => kit.compileInserts([{ kind: 'stock', from: 2, to: 2 }], { fps: 25 }), /to должен быть больше from/);
 });
 
+// BAD CASE (ревью задачи 29): stock с cover: false компилировался как «спикер виден» — G4 пропускал
+// вставку в первые 2 с, а StockInsert всё равно рисовал её на весь кадр. stock/screen/scene всегда
+// полноэкранные, поэтому манифест обязан говорить cover: true; оверлеем бывает только donor.
+test('stock, screen and scene always cover the speaker: cover: false is rejected, a donor accepts both', () => {
+  for (const kind of ['stock', 'screen', 'scene']) {
+    for (const cover of [false, 0]) {
+      assert.throws(() => kit.compileInserts([{ id: `${kind}-x`, kind, from: 1, to: 3, cover }], { fps: 25 }), (error) => {
+        assert.equal(error.message, `inserts[0] (${kind}-x): вставка ${kind} всегда закрывает спикера: cover: false допустим только для donor`);
+        return true;
+      });
+    }
+    assert.equal(kit.compileInserts([{ kind, from: 1, to: 3, cover: true }], { fps: 25 })[0].cover, true);
+    assert.equal(kit.compileInserts([{ kind, from: 1, to: 3 }], { fps: 25 })[0].cover, true);
+  }
+  const donors = kit.compileInserts([
+    { kind: 'donor', from: 1, to: 3, cover: true },
+    { kind: 'donor', from: 4, to: 5, cover: false },
+    { kind: 'donor', from: 6, to: 7 },
+  ], { fps: 25 });
+  assert.deepEqual(donors.map((i) => i.cover), [true, false, false]);
+});
+
 test('covering inserts send the speaker away and bring it back before the insert closes', () => {
   // stock: from=2s=50f, to=4s=100f. away.to = to − ref25(CLOSE_FRAMES=6) − ref25(exitFrames=10)
   // = 100 − 6 − 10 = 84: the return ramp must finish exactly when the close (card shrinking back

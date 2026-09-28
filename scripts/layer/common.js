@@ -35,7 +35,7 @@ function resolveLayer(options) {
   const name = options.layer;
   if (!LAYER_NAME.test(name || '')) throw new Error('--layer должен быть вида motion-v01');
   if (!fs.existsSync(path.join(project.projectDir, name))) {
-    throw new Error(`папка слоя ${name} не найдена — создайте: automontage layer new --project-dir ${project.projectDir}`);
+    throw new Error(`папка слоя ${name} не найдена — создайте: automontage layer new --project-dir "${project.projectDir}"`);
   }
   let layerDir;
   try {

@@ -1,5 +1,5 @@
 // Дизайн карточек и полноэкранных вставок этого ролика: палитра, шрифты и композиции — свои для каждой темы.
-import { AbsoluteFill, useVideoConfig } from 'remotion';
+import { AbsoluteFill, OffthreadVideo, Sequence, staticFile, useVideoConfig } from 'remotion';
 import { BrowserFrame, REVEAL_FRAMES, ScrollShot, closeWindow, ref25, revealCard } from '@automontage/motion-kit';
 
 // id вставки screen → адрес страницы в окне браузера (у скомпилированной вставки нет props).
@@ -27,11 +27,11 @@ export function SceneContent({ item }) {
       </BrowserFrame>
     );
   }
-  return null;
+  throw new Error(`scenes.jsx: неизвестный view «${view}» у элемента ${item.id} — добавьте его дизайн в SceneContent`);
 }
 
-// Содержимое полноэкранных вставок screen/scene (сток StockInsert рисует сам). Скриншот на весь кадр —
-// окно браузера внутри safe-зоны (revealCard), иначе в 9:16 хром окна уходит под интерфейс площадки.
+// Содержимое полноэкранных вставок screen/scene/donor (сток StockInsert рисует сам). Скриншот на весь
+// кадр — окно браузера внутри safe-зоны (revealCard), иначе в 9:16 хром окна уходит под интерфейс площадки.
 export function InsertContent({ insert }) {
   const { fps, width, height } = useVideoConfig();
   // Оверлей без cover (донор поверх спикера) ролик рисует сам — в своей рамке и в своём окне времени:
@@ -46,6 +46,16 @@ export function InsertContent({ insert }) {
             <ScrollShot src={insert.src} from={insert.from + ref25(REVEAL_FRAMES, fps)} to={closeWindow(insert, fps).start} scroll={1} />
           </BrowserFrame>
         </div>
+      </AbsoluteFill>
+    );
+  }
+  if (insert.kind === 'donor' && insert.src) {
+    // Чужое видео — с его собственного начала и без звука: в звуке слоя только эффекты (G7).
+    return (
+      <AbsoluteFill>
+        <Sequence from={insert.from} durationInFrames={insert.to - insert.from} layout="none">
+          <OffthreadVideo src={staticFile(insert.src)} muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        </Sequence>
       </AbsoluteFill>
     );
   }
