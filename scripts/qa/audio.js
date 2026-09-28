@@ -57,21 +57,35 @@ function formatSeconds(value) {
   return String(Number(value.toFixed(6)));
 }
 
-// -ss перед -i — быстрый seek по контейнеру (до декодирования), -map 0:a:0 берёт первую звуковую
-// дорожку явно (нет аудио вообще — ffmpeg сам откажет понятной ошибкой, а не молчащим видео-выводом).
+// -ss и -t стоят ПОСЛЕ -i (выходные опции): ffmpeg декодирует звук с начала и отбрасывает сэмплы
+// до fromSec точно по сэмплу. -ss перед -i (seek по контейнеру) на AAC в MP4/M4A/MOV без видео и на
+// части перемуксованных файлов сдвигал звук раньше на задержку кодека — до ~21 мс, то есть почти на
+// целый блок огибающей (повторное ревью задачи 25). Декодировать 8 кГц моно с начала дёшево; при
+// fromSec 0 -ss не нужен вовсе. -map 0:a:0 берёт первую звуковую дорожку явно (нет аудио вообще —
+// ffmpeg сам откажет понятной ошибкой, а не молчащим видео-выводом).
 function decodeAudio(file, { fromSec = 0, durationSec = null, spawnImpl } = {}) {
+  if (!(Number.isFinite(fromSec) && fromSec >= 0)) {
+    throw new Error('decodeAudio: fromSec должен быть конечным числом ≥ 0');
+  }
   if (durationSec !== null && durationSec !== undefined
     && !(Number.isFinite(durationSec) && durationSec > 0)) {
     throw new Error('decodeAudio: durationSec должен быть конечным положительным числом');
   }
   const samples = pcmFromFfmpeg([
-    '-ss', formatSeconds(fromSec), ...(durationSec ? ['-t', formatSeconds(durationSec)] : []),
-    '-i', file, '-map', '0:a:0', '-vn',
+    '-i', file,
+    ...(fromSec > 0 ? ['-ss', formatSeconds(fromSec)] : []),
+    ...(durationSec ? ['-t', formatSeconds(durationSec)] : []),
+    '-map', '0:a:0', '-vn',
   ], { spawnImpl });
   // fromSec за концом файла (или отрезок целиком после последнего сэмпла) ffmpeg молча отдаёт
   // пустой поток — гейт иначе принял бы «нет данных» за «полная тишина» и разрешил бы то, что на
   // самом деле не проверил.
-  if (samples.length === 0) throw new Error('нет звука в заданном отрезке');
+  if (samples.length === 0) {
+    const range = durationSec
+      ? `${formatSeconds(fromSec)}–${formatSeconds(fromSec + durationSec)} с`
+      : `с ${formatSeconds(fromSec)} с до конца`;
+    throw new Error(`нет звука в заданном отрезке: ${file}, ${range}`);
+  }
   return samples;
 }
 
@@ -153,6 +167,8 @@ function windowedMax(a, b, windowBlocks, {
   minDbA = -60, minAudibleShare = 0.4, maxLagBlocks = 6,
   hop = Math.max(1, Math.floor(windowBlocks / 4)),
 } = {}) {
+  // hop 0 или отрицательный зацикливал бы сетку навсегда (start += 0), NaN молча давал бы null.
+  if (!(Number.isInteger(hop) && hop >= 1)) throw new Error('windowedMax: hop должен быть целым числом ≥ 1');
   const n = Math.min(a.length, b.length);
   const lastStart = n - windowBlocks;
   if (lastStart < 0) return null;
@@ -174,12 +190,16 @@ function windowedMax(a, b, windowBlocks, {
 
 // Секунды слышимых блоков слоя (> minDb) вне известных окон звука (например cues.kept слоя,
 // пересчитанные вызывающим кодом в секунды по [startFrame, startFrame+durationFrames)/fps) —
-// сигнал G7 «в звуке слоя есть не только эффекты» (Task 26; сама проверка порога — там). Каждый
-// span расширяется вправо на tailSec: естественное затухание эффекта может звучать чуть дольше
-// заявленной длины, и это не должно засчитываться как утечка голоса.
-function audibleOutside(envelope, spans, { minDb = -60, blockSec = BLOCK_SEC, tailSec = 0.15 } = {}) {
+// сигнал G7 «в звуке слоя есть не только эффекты» (Task 26; сама проверка порога — там). Реверберация
+// тут ни при чём: kit обрезает звук ровно на durationFrames. Запасы покрывают кодек AAC (окно MDCT
+// 1024 сэмпла ≈ 21 мс на каждое из двух поколений: рендер Remotion → layer normalize): headSec до
+// начала span — предэхо резкой атаки, которое AAC размазывает в предыдущий блок; tailSec после
+// конца — такое же смазывание обреза и затухания.
+function audibleOutside(envelope, spans, {
+  minDb = -60, blockSec = BLOCK_SEC, headSec = 0.1, tailSec = 0.15,
+} = {}) {
   const round6 = (value) => Math.round(value * 1e6) / 1e6;
-  const extended = (spans || []).map(([from, to]) => [round6(from), round6(to + tailSec)]);
+  const extended = (spans || []).map(([from, to]) => [round6(from - headSec), round6(to + tailSec)]);
   let seconds = 0;
   const stretches = [];
   let openFrom = null;

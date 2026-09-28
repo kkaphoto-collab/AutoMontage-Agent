@@ -130,7 +130,10 @@ test('a 1 s audible stretch outside the spans is reported almost exactly, with i
   assert.deepEqual(stretches, [{ fromSec: 0.5, toSec: 1.5 }]);
 });
 
-test('the tail margin after a span absorbs a short reverberation right after it, but not further out', () => {
+// Хвост — не реверберация: kit обрезает звук ровно на durationFrames (с коротким затуханием), и
+// дольше заявленной длины файл не звучит. Запас после span покрывает смазывание кодека AAC (окно
+// MDCT 1024 сэмпла ≈ 21 мс на каждое из двух поколений: Remotion → layer normalize).
+test('the tail margin after a span absorbs AAC smearing right after it, but not further out', () => {
   const FLOOR = -90;
   const LOUD = -20;
   // span [0, 0,5) + tailSec(0,15) → заглушено фактически до 0,65 с. Блок 0,60..0,65 (индекс 12)
@@ -139,6 +142,61 @@ test('the tail margin after a span absorbs a short reverberation right after it,
   const { seconds, stretches } = audibleOutside(envelope, [[0, 0.5]], { tailSec: 0.15 });
   assert.equal(seconds, 0.05);
   assert.deepEqual(stretches, [{ fromSec: 0.7, toSec: 0.75 }]);
+});
+
+test('audibleOutside pads 0.15 s after a span by default (no tailSec passed)', () => {
+  const envelope = Float64Array.from({ length: 20 }, (_, i) => (i === 12 ? -20 : -90));
+  assert.equal(audibleOutside(envelope, [[0, 0.5]], { headSec: 0 }).seconds, 0);
+  assert.equal(audibleOutside(envelope, [[0, 0.5]], { headSec: 0, tailSec: 0 }).seconds, 0.05);
+});
+
+// Предэхо AAC: кодек размазывает резкую атаку эффекта назад, в блок ПЕРЕД началом span. Запас
+// headSec (по умолчанию 0,1 с) до начала span не даёт засчитать это предэхо как звук вне эффектов.
+test('audibleOutside pads 0.1 s before a span by default and the pad is configurable', () => {
+  // span [0,5, 0,6). Блок 8 (0,40..0,45) внутри запаса 0,1 с — не считается; блок 7 (0,35..0,40)
+  // уже до запаса — считается.
+  const envelope = Float64Array.from({ length: 20 }, (_, i) => (i === 7 || i === 8 ? -20 : -90));
+  const withDefaults = audibleOutside(envelope, [[0.5, 0.6]]);
+  assert.equal(withDefaults.seconds, 0.05);
+  assert.deepEqual(withDefaults.stretches, [{ fromSec: 0.35, toSec: 0.4 }]);
+  assert.equal(audibleOutside(envelope, [[0.5, 0.6]], { headSec: 0 }).seconds, 0.1);
+  assert.equal(audibleOutside(envelope, [[0.5, 0.6]], { headSec: 0.2 }).seconds, 0);
+});
+
+test('audibleOutside counts only blocks louder than -60 dBFS by default', () => {
+  const envelope = Float64Array.from({ length: 20 }, (_, i) => (i === 3 ? -70 : i === 15 ? -50 : -90));
+  const { seconds, stretches } = audibleOutside(envelope, []);
+  assert.equal(seconds, 0.05);
+  assert.deepEqual(stretches, [{ fromSec: 0.75, toSec: 0.8 }]);
+});
+
+test('an audible stretch running to the very end of the envelope keeps its stretch', () => {
+  const envelope = Float64Array.from({ length: 20 }, (_, i) => (i >= 15 ? -20 : -90));
+  const { seconds, stretches } = audibleOutside(envelope, [[0.1, 0.2]]);
+  assert.equal(seconds, 0.25);
+  assert.deepEqual(stretches, [{ fromSec: 0.75, toSec: 1 }]);
+});
+
+// Шаг сетки по умолчанию — windowBlocks/4. Утечка (блоки 2,3,8,9) набирает долю 4/8 только в окне
+// [2,10): при шаге /2 (0,4,8,12) ни одно окно сетки её не видит, при /4 (0,2,4,…) — окно 2.
+test('windowedMax steps by a quarter window by default', () => {
+  const a = new Float64Array(20).fill(-90);
+  const b = new Float64Array(20).fill(-90);
+  [[2, -20, -18], [3, -32, -30], [8, -22, -20], [9, -36, -34]].forEach(([i, va, vb]) => { a[i] = va; b[i] = vb; });
+  const found = windowedMax(a, b, 8);
+  assert.ok(found, 'утечку должно найти окно с шагом в четверть');
+  assert.equal(found.startBlock, 2);
+  assert.equal(windowedMax(a, b, 8, { hop: 4 }), null);
+});
+
+// hop 0 или отрицательный раньше зацикливал поиск навсегда (start += 0), NaN молча давал null.
+test('windowedMax refuses a hop that is not a positive integer', () => {
+  const x = new Float64Array(20).fill(-20);
+  // Порядок важен только для старого кода: NaN падает сразу, а 0/−1 там зацикливались бы.
+  for (const hop of [NaN, 1.5, Infinity, '2', 0, -1]) {
+    assert.throws(() => windowedMax(x, x, 8, { hop }), /windowedMax: hop должен быть целым числом ≥ 1/);
+  }
+  assert.doesNotThrow(() => windowedMax(x, x, 8, { hop: 1 }));
 });
 
 // --- Ревью задачи 25, п.4: причина сбоя ffmpeg — приоритет stderr → error.message → сигнал/статус ---
@@ -226,7 +284,35 @@ test('decodeAudio refuses a non-finite or non-positive durationSec', () => {
 
 test('decodeAudio throws a clear message on an empty decode instead of returning an empty array', () => {
   const empty = () => ({ status: 0, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) });
-  assert.throws(() => decodeAudio('f.wav', { fromSec: 999, spawnImpl: empty }), /нет звука в заданном отрезке/);
+  assert.throws(() => decodeAudio('f.wav', { fromSec: 999, spawnImpl: empty }),
+    /нет звука в заданном отрезке: f\.wav, с 999 с до конца/);
+  assert.throws(() => decodeAudio('clip.mp4', { fromSec: 2.5, durationSec: 1, spawnImpl: empty }),
+    /нет звука в заданном отрезке: clip\.mp4, 2\.5–3\.5 с/);
+});
+
+test('decodeAudio refuses a negative, non-finite or non-number fromSec', () => {
+  const { spy } = captureArgv();
+  for (const bad of [-0.5, NaN, Infinity, '1', null]) {
+    assert.throws(() => decodeAudio('f.wav', { fromSec: bad, spawnImpl: spy }),
+      /decodeAudio: fromSec должен быть конечным числом ≥ 0/);
+  }
+  assert.doesNotThrow(() => decodeAudio('f.wav', { fromSec: 0, spawnImpl: spy }));
+});
+
+// -ss ПЕРЕД -i (seek по контейнеру) сдвигал звук AAC-файлов без видео на задержку кодека (до ~21 мс).
+// Seek после -i декодирует с начала и режет точно по сэмплу; при fromSec 0 -ss не нужен вовсе.
+test('decodeAudio seeks after the input and omits -ss entirely from the start', () => {
+  const { calls, spy } = captureArgv();
+  decodeAudio('f.m4a', { spawnImpl: spy });
+  decodeAudio('f.m4a', { durationSec: 2, spawnImpl: spy });
+  decodeAudio('f.m4a', { fromSec: 1.5, durationSec: 2, spawnImpl: spy });
+  assert.ok(!calls[0].includes('-ss'));
+  assert.ok(!calls[1].includes('-ss'));
+  assert.ok(calls[1].indexOf('-t') > calls[1].indexOf('-i'));
+  const [, , third] = calls;
+  assert.ok(third.indexOf('-ss') > third.indexOf('-i'), `-ss должен стоять после -i: ${third.join(' ')}`);
+  assert.equal(third[third.indexOf('-ss') + 1], '1.5');
+  assert.ok(third.indexOf('-t') > third.indexOf('-i'));
 });
 
 // --- Реальный ffmpeg ---
@@ -284,6 +370,52 @@ test('a real -ss/-t decode lands on the silence-then-tone boundary it asked for'
   // decodeAudio. Блоки 10..19 — чистый тон (~-3 дБФС).
   for (let i = 0; i < 9; i += 1) assert.equal(envelope[i], -90, `блок ${i} должен быть тишиной`);
   for (let i = 10; i < 20; i += 1) assert.ok(Math.abs(envelope[i] + 3.01) < 0.2, `блок ${i}: ${envelope[i]}`);
+});
+
+// Реальная находка повторного ревью задачи 25: на m4a без видео -ss 0 перед -i сдвигал звук на
+// ~21 мс раньше — блок 19 (0,95..1,00 с) перед тоном звучал на −6,9 дБФС вместо тишины.
+test('a real audio-only m4a decodes sample-exact from the start and from a mid-file offset', (t) => {
+  if (!toolAvailable('ffmpeg')) { t.skip('ffmpeg не найден в PATH'); return; }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-audio-m4a-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const m4a = path.join(dir, 'silence-then-tone.m4a');
+  runTool('ffmpeg', [
+    '-y', '-v', 'error',
+    '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=mono:d=1',
+    '-f', 'lavfi', '-i', 'aevalsrc=sin(2*PI*440*t):s=48000:d=1',
+    '-filter_complex', '[0:a][1:a]concat=n=2:v=0:a=1', '-c:a', 'aac',
+    m4a,
+  ], dir);
+  // Первый сэмпл громче −12 дБФС — начало тона с точностью до сэмпла 8 кГц.
+  const onsetSec = (samples) => samples.findIndex((v) => Math.abs(v) > 8192) / 8000;
+
+  const whole = decodeAudio(m4a);
+  const envelope = envelopeDb(whole);
+  assert.ok(envelope[19] < -60, `блок 19 перед тоном должен быть тишиной: ${envelope[19]} дБФС`);
+  assert.ok(envelope[21] > -6, `блок 21 — уже тон: ${envelope[21]} дБФС`);
+  assert.ok(Math.abs(onsetSec(whole) - 1) < 0.002, `тон начинается на 1,0 с, а не ${onsetSec(whole)} с`);
+
+  const tail = decodeAudio(m4a, { fromSec: 0.73 });
+  const tailEnvelope = envelopeDb(tail);
+  assert.ok(tailEnvelope[4] < -60, `блок 4 (0,20..0,25 с) до тона: ${tailEnvelope[4]} дБФС`);
+  assert.ok(Math.abs(onsetSec(tail) - 0.27) < 0.002, `после fromSec 0,73 тон начинается на 0,27 с, а не ${onsetSec(tail)} с`);
+});
+
+// Резкая атака щелчка ровно на границе блока (0,5 с): AAC даёт предэхо в предыдущем блоке
+// (около −47 дБФС, громче порога −60), и без запаса headSec этот блок засчитывался бы как звук вне
+// эффектов у совершенно чистого слоя.
+test('a real AAC click starting on a block boundary has no audible sound outside its span with defaults', (t) => {
+  if (!toolAvailable('ffmpeg')) { t.skip('ffmpeg не найден в PATH'); return; }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-audio-click-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const m4a = path.join(dir, 'click.m4a');
+  runTool('ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi', '-i',
+    "aevalsrc='0.8*sin(2*PI*3000*t)*between(t,0.5,0.52)':s=48000:d=1.5", '-c:a', 'aac', m4a], dir);
+  const envelope = envelopeDb(decodeAudio(m4a));
+  const spans = [[0.5, 0.52]];
+  assert.ok(envelope[9] > -60, `сценарий должен реально давать слышимое предэхо в блоке 9: ${envelope[9]} дБФС`);
+  assert.equal(audibleOutside(envelope, spans, { headSec: 0 }).seconds, 0.05);
+  assert.deepEqual(audibleOutside(envelope, spans), { seconds: 0, stretches: [] });
 });
 
 test('a real decode whose sample count is not a multiple of the block drops the partial tail block', (t) => {
