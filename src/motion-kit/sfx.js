@@ -51,7 +51,9 @@ export function sfxFromItems(items, extra, { fps, library, durationInFrames }) {
     const durationFrames = Math.max(1, Math.min(bedFrames ?? natural, natural, durationInFrames - startFrame));
     cues.push({
       id: `${sound.name}@${hitFrame}#${n}`, name: sound.name, file: sound.file, startFrame, hitFrame, durationFrames,
-      vol, role, notable: NOTABLE_ROLES.includes(role), bed: bedFrames !== null, prio: prio ?? ROLE_PRIO[role] ?? 1,
+      // library.json звука может пометить его заметным явно (notable) — своё слово сильнее
+      // угадывания по роли; без явного поля поведение прежнее (роль из NOTABLE_ROLES).
+      vol, role, notable: sound.notable ?? NOTABLE_ROLES.includes(role), bed: bedFrames !== null, prio: prio ?? ROLE_PRIO[role] ?? 1,
     });
     n += 1;
   };

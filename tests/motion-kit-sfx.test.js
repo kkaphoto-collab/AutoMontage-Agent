@@ -17,6 +17,18 @@ test('a whoosh starts early so its peak lands on the element entrance', () => {
   assert.deepEqual([cue.startFrame, cue.hitFrame, cue.notable, cue.role], [90, 100, true, 'whoosh']);
 });
 
+// Отклонение от плана Task 30 (п.1): library.json может пометить звук заметным явно — своё слово
+// сильнее угадывания по роли в обе стороны (ui обычно не заметен, whoosh обычно заметен).
+test('an explicit notable field in the library overrides the role default in both directions', () => {
+  const libWithNotable = { sounds: {
+    'ui-select': { file: 'sfx/ui-select.wav', lengthSec: 0.2, peakSec: 0.01, notable: true },
+    'whoosh-quiet': { file: 'sfx/whoosh-quiet.wav', lengthSec: 0.5, peakSec: 0.2, notable: false },
+  } };
+  const cues = kit.sfxFromItems([{ from: 10, sfx: 'ui-select' }, { from: 200, sfx: 'whoosh-quiet' }], [],
+    { fps: 25, library: libWithNotable, durationInFrames: 500 });
+  assert.deepEqual(cues.map((c) => [c.name, c.notable]), [['ui-select', true], ['whoosh-quiet', false]]);
+});
+
 test('roles resolve to library files and volumes follow spec > library > role', () => {
   const cues = kit.sfxFromItems([
     { from: 10, sfx: 'pop' }, { from: 40, sfx: { name: 'click-soft' } }, { from: 80, sfx: { name: 'click-soft', vol: 0.4 } },
