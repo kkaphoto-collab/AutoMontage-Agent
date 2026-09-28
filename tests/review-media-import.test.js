@@ -732,7 +732,7 @@ test('video process argv relies on cross-version default autorotation and metada
     '-hide_banner', '-loglevel', 'error', '-i', master.args.at(-1),
     '-map', '0:v:0', '-map', '0:a:0', '-map_metadata', '-1',
     '-vf', "scale=w='min(1280,iw)':h='min(1280,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,fps=24,pad=ceil(iw/2)*2:ceil(ih/2)*2:0:0",
-    '-c:v', 'libvpx', '-crf', '32', '-b:v', '0',
+    '-c:v', 'libvpx', '-threads', '1', '-crf', '32', '-b:v', '0',
     '-c:a', 'libopus', '-ar', '48000', '-ac', '2', '-b:a', '96k',
     '-t', '1', '-fs', String(budgets.proxy), '-y', proxy.args.at(-1),
   ]);
@@ -768,6 +768,11 @@ test('video process argv relies on cross-version default autorotation and metada
   assert.deepEqual(cleanupOrphanImportedStages({ projectDir }), [claimPath]);
   assert.equal(fs.existsSync(result.filePath), true);
   assert.equal(fs.existsSync(result.previewPath), true);
+});
+
+test('regression: VP8 review proxy encodes in one thread so imports do not crawl under render load', () => {
+  const source = require('node:fs').readFileSync(require.resolve('../scripts/review/media-import.js'), 'utf8');
+  assert.match(source, /'-c:v', 'libvpx', '-threads', '1', '-crf', '32', '-b:v', '0'/);
 });
 
 test('image normalization relies on cross-version default autorotation and remains single-frame, metadata-free, and alpha-capable', async (t) => {

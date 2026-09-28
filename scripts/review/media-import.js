@@ -925,7 +925,7 @@ function videoProxyInvocation(owned, source, outputFps, signal, quota) {
   args.push(
     '-map_metadata', '-1',
     '-vf', `scale=w='min(1280,iw)':h='min(1280,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,fps=${proxyFps},pad=ceil(iw/2)*2:ceil(ih/2)*2:0:0`,
-    '-c:v', 'libvpx', '-crf', '32', '-b:v', '0',
+    '-c:v', 'libvpx', '-threads', '1', '-crf', '32', '-b:v', '0',
   );
   if (source.hasAudio) {
     args.push('-c:a', 'libopus', '-ar', '48000', '-ac', '2', '-b:a', '96k');
