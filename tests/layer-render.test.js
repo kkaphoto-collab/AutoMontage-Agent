@@ -140,6 +140,38 @@ test('the Remotion AAC tail (+60 ms) is trimmed to the frames: video, audio and 
   assert.equal(container, 6);
 });
 
+// Мутант «убрали apad»: звук исходника (5,5 с) короче видео (6 с) — нормализация дополняет его тишиной
+// ровно до длительности кадров, а не оставляет коротким внутри контейнера полной длины.
+test('normalisation pads audio shorter than the video with silence to the full length', { skip: !hasFfmpeg }, async (t) => {
+  const { layerDir, run } = await scaffold(t);
+  assert.equal(await run({ runToolImpl: fakeRemotion(6, 'anullsrc=r=48000:cl=mono:d=5.5').runToolImpl }), 0);
+  const { audio } = streams(path.join(layerDir, 'renders', 'layer-01.mp4'));
+  assert.equal(Number(audio.duration), 6);
+});
+
+// Мутант «убрали first_pts=0»: звук исходника начинается на 0,1 с позже видео (буфер энкодера, как у
+// настоящего Remotion) — нормализация кладёт его на 0 и обрезает ровно по длине кадров, а не оставляет
+// сдвиг и лишний хвост.
+test('normalisation starts audio that begins late at 0 and ends exactly at the video length', { skip: !hasFfmpeg }, async (t) => {
+  const { layerDir, run } = await scaffold(t);
+  const runToolImpl = (command, args, options) => {
+    if (options.stage !== 'layer Remotion render') return runProcessTool(command, args, options);
+    const output = args[args.indexOf('render') + 3];
+    runTool('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=540x960:r=25:d=6',
+      '-itsoffset', '0.1', '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=mono:d=6', '-c:a', 'aac',
+      '-pix_fmt', 'yuvj420p', '-colorspace', 'bt470bg', '-c:v', 'libx264', output]);
+    return null;
+  };
+  assert.equal(await run({ runToolImpl }), 0);
+  const out = path.join(layerDir, 'renders', 'layer-01.mp4');
+  const { audio, container } = streams(out);
+  assert.equal(Number(audio.duration), 6);
+  assert.equal(container, 6);
+  const startTime = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'a:0',
+    '-show_entries', 'stream=start_time', '-of', 'json', out], { encoding: 'utf8' })).streams[0].start_time;
+  assert.equal(Number(startTime), 0);
+});
+
 // G6 меряет видеопоток слоя, а не контейнер: звук дополнен тишиной до полной длины и не прячет короткое видео.
 test('BAD CASE: a video shorter than the composition fails G6 even though its audio is padded to full length', { skip: !hasFfmpeg }, async (t) => {
   const { projectDir, run, report } = await scaffold(t);
