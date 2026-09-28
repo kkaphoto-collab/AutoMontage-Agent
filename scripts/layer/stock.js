@@ -9,11 +9,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { loadBrollConfig } = require('../broll/config');
 const { createPexelsProvider, VIDEO_HOSTS } = require('../broll/pexels');
+const { validateProvenance } = require('../broll/provenance');
 const { LIMITS, requestRemote } = require('../broll/remote');
 const { probeVideo } = require('../media-probe');
 const { buildLayerManifest } = require('../motion-kit-node');
 const { runTool } = require('../process');
-const { candidateProvenance } = require('../review/broll-discovery');
 const { formatNumber, markdownCell, readLayerJson, resolveLayer, sha256File } = require('./common');
 
 const ENGINE_ROOT = path.join(__dirname, '..', '..');
@@ -92,11 +92,16 @@ function isDirect(candidate) {
     && DIRECT_HOSTS.includes(url.hostname) && /\.mp4$/iu.test(url.pathname);
 }
 
+// Те же девять полей provenance, что candidateProvenance в scripts/review/broll-discovery.js
+// собирает для Review: слой их проверяет напрямую через validateProvenance (scripts/broll/provenance),
+// а не через Review-модуль — код слоя не должен зависеть от кода Review.
+const PROVENANCE_KEYS = ['provider', 'providerAssetId', 'sourcePage', 'author', 'license', 'queryOriginal', 'queryEnglish', 'retrievedAt', 'rendition'];
+
 // id идёт в имя файла, поэтому только цифры; источник, автор и лицензия — тем же контрактом provenance,
 // что у B-roll в Review (https-адреса, NFKC-текст без управляющих символов, рендишн).
 function assertCandidate(candidate) {
   let provenance = null;
-  try { provenance = candidateProvenance(candidate); } catch { provenance = null; }
+  try { provenance = validateProvenance(Object.fromEntries(PROVENANCE_KEYS.map((key) => [key, candidate[key]]))); } catch { provenance = null; }
   const onPexels = (url) => PAGE_HOSTS.includes(new URL(url).hostname);
   if (!provenance || provenance.provider !== 'pexels' || !ASSET_ID.test(provenance.providerAssetId)
     || !onPexels(provenance.sourcePage) || !onPexels(provenance.author.url)) {
@@ -145,7 +150,10 @@ async function fetchStock(options, deps, env) {
   const queryOriginal = options['query-original'] || options.query;
 
   // preferSize: самый маленький рендишн, покрывающий кадр слоя, — не качаем UHD ради кадра 540×960.
-  const provider = (deps.createProvider || createPexelsProvider)({ apiKey, preferSize: { width: layer.width, height: layer.height } });
+  // videoHosts: DIRECT_HOSTS — только прямые mp4 Pexels даже смотрят внутрь выбора рендишна; иначе
+  // preferSize мог бы предпочесть меньший, но зеркальный на player.vimeo.com файл, и весь кандидат
+  // потом отсеивался бы isDirect() ниже, хотя у него был подходящий прямой файл покрупнее.
+  const provider = (deps.createProvider || createPexelsProvider)({ apiKey, preferSize: { width: layer.width, height: layer.height }, videoHosts: DIRECT_HOSTS });
   const orientation = layer.height > layer.width ? 'portrait' : layer.height < layer.width ? 'landscape' : 'square';
   let found;
   try {

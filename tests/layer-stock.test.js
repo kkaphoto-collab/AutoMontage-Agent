@@ -297,10 +297,19 @@ test('a short key is not mistaken for a leak in the provenance row', { skip: !ha
   assert.ok(fs.existsSync(clip));
 });
 
+test('layer code does not depend on Review code', () => {
+  // scripts/layer/* — общий движок; scripts/review/* — только браузерный Review. Слой проверяет
+  // provenance напрямую через scripts/broll/provenance, а не через scripts/review/broll-discovery.
+  const source = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'layer', 'stock.js'), 'utf8');
+  assert.doesNotMatch(source, /require\(['"]\.\.\/review\//);
+});
+
 test('control and format characters of the query never reach SOURCE.md', { skip: !hasFfmpeg }, async (t) => {
   const { runStock, sourceMd } = await scaffold(t);
   assert.equal(await runStock({ sec: '1', 'query-original': 'люди\u202e за\tноутбуком | ok' }), 0);
   const row = sourceMd().split('\n').find((line) => line.includes('pexels-12345'));
   assert.doesNotMatch(row, /[\u202e\t]/u);
-  assert.match(row, /«люди заноутбуком \\\| ok»/);
+  // Таб — граница слов, а не мусор: он становится пробелом, а не пропадает («за ноутбуком»,
+  // а не слитное «заноутбуком»).
+  assert.match(row, /«люди за ноутбуком \\\| ok»/);
 });

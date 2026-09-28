@@ -148,10 +148,11 @@ function writeJson(file, value) {
 
 const relative = (projectDir, file) => path.relative(projectDir, file).split(path.sep).join('/');
 
-// Ячейка Markdown-таблицы (SOURCE.md): переносы строк — пробел, прочие управляющие и невидимые символы
-// форматирования (\p{Cc}, \p{Cf}: табуляция, bidi-override) убираются, `|` экранируется — ячейка
-// остаётся одной и не сдвигает столбцы.
-const markdownCell = (value) => String(value).replace(/\r\n|\r|\n/gu, ' ').replace(/[\p{Cc}\p{Cf}]/gu, '').replace(/\|/gu, '\\|');
+// Ячейка Markdown-таблицы (SOURCE.md): переносы строк и табуляция — граница слов, а не мусор,
+// поэтому становятся пробелом, а не пропадают (иначе «за\tноутбуком» слиплось бы в «заноутбуком»);
+// остальные управляющие и невидимые символы форматирования (\p{Cc}, \p{Cf}: BEL, bidi-override)
+// убираются совсем, `|` экранируется — ячейка остаётся одной и не сдвигает столбцы.
+const markdownCell = (value) => String(value).replace(/\r\n|\r|\n|\t/gu, ' ').replace(/[\p{Cc}\p{Cf}]/gu, '').replace(/\|/gu, '\\|');
 
 // Число для сообщений по-русски: до сотых, с запятой (29,97 fps, 6,3 с).
 const formatNumber = (value) => String(Number(Number(value).toFixed(2))).replace('.', ',');

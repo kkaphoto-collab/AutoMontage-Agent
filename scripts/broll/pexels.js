@@ -70,7 +70,7 @@ function eligible(width, height, search) {
         : width === height)
   );
 }
-function normalizeCandidate(item, search, preferSize = null) {
+function normalizeCandidate(item, search, preferSize = null, videoHosts = VIDEO_HOSTS) {
   if (!Number.isSafeInteger(item?.id) || item.id <= 0) return null;
   const sourcePage = safeUrl(item.url, PAGE_HOSTS, undefined, 500);
   const author =
@@ -140,7 +140,7 @@ function normalizeCandidate(item, search, preferSize = null) {
         f &&
         Number.isSafeInteger(f.id) &&
         f.file_type === 'video/mp4' &&
-        safeUrl(f.link, VIDEO_HOSTS, /\.mp4$/i) &&
+        safeUrl(f.link, videoHosts, /\.mp4$/i) &&
         eligible(f.width, f.height, {}) &&
         f.width <= 4096 && f.height <= 4096 &&
         f.width * f.height <= 8847360,
@@ -202,7 +202,7 @@ function normalizeCandidate(item, search, preferSize = null) {
 }
 const validSize = (size) => size !== null && typeof size === 'object'
   && [size.width, size.height].every((side) => Number.isSafeInteger(side) && side > 0 && side <= 32768);
-function createPexelsProvider({ apiKey, request = requestRemote, preferSize } = {}) {
+function createPexelsProvider({ apiKey, request = requestRemote, preferSize, videoHosts = VIDEO_HOSTS } = {}) {
   return {
     async search(input) {
       if (!apiKey) throw failure('BROLL_KEY_MISSING');
@@ -235,7 +235,7 @@ function createPexelsProvider({ apiKey, request = requestRemote, preferSize } = 
         const candidates = [],
           seen = new Set();
         for (const item of items.slice(0, 80)) {
-          const candidate = normalizeCandidate(item, search, preferSize ?? null);
+          const candidate = normalizeCandidate(item, search, preferSize ?? null, videoHosts);
           if (
             candidate &&
             !JSON.stringify(candidate).includes(apiKey) &&
