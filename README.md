@@ -789,6 +789,9 @@ Remotion (анимация плашек кодом), faster-whisper (распо�
 - [CHANGELOG.md](CHANGELOG.md) – история релизов и заметные изменения по версиям.
 - [SECURITY.md](SECURITY.md) – политика отчётов об уязвимостях и правила для dependency advisories.
 - [AGENTS.md](AGENTS.md) – правила работы AI-агентов и обязательный синхрон документации.
+- [CONTRIBUTING.md](CONTRIBUTING.md) – как сообщить о баге или идее: формы задач, приоритеты и
+  [доска задач](https://github.com/orgs/mcdenil-skills/projects/1).
+- [ROADMAP.md](ROADMAP.md) – крупные направления развития продукта.
 
 ### Версии и история изменений
 

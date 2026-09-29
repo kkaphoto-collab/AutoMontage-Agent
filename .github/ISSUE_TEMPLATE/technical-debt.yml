@@ -1,0 +1,91 @@
+name: Технический долг
+description: Код, тест, документ или процесс работает, но стал сложным, хрупким или устаревшим.
+title: "[Техдолг] "
+labels: ["type:technical-debt"]
+projects: ["mcdenil-skills/1"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Технический долг – это как беспорядок в мастерской: работать пока можно, но каждое новое
+        дело даётся дороже. Опишите, где беспорядок и чем он мешает.
+
+        **Не вставляйте сюда** API-ключи, токены, пароли, личные данные, клиентские видео
+        и сырые логи с личными путями. Репозиторий публичный.
+
+  - type: textarea
+    id: where
+    attributes:
+      label: Где долг
+      description: Файл, модуль, тест, документ или процесс. Можно дать ссылку на код в репозитории.
+      placeholder: "Пример: scripts/review/ – одна и та же проверка пути повторена в трёх местах."
+    validations:
+      required: true
+
+  - type: textarea
+    id: observed
+    attributes:
+      label: Как сейчас
+      description: Что именно устроено неудобно, запутанно или устарело.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Как должно быть
+      description: Каким вы видите порядок после исправления.
+    validations:
+      required: true
+
+  - type: textarea
+    id: hinders
+    attributes:
+      label: Чем мешает
+      description: "Что из-за долга делать дольше, дороже или опаснее: новые функции, тесты, релизы, поиск ошибок."
+    validations:
+      required: true
+
+  - type: textarea
+    id: risk
+    attributes:
+      label: Что будет, если отложить
+      description: "Риск откладывания: баги, потеря данных, медленный CI, путаница для новых сессий агента."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Где это
+      description: Выберите ближайшее. Если не уверены, выберите «Не знаю».
+      options:
+        - motion-kit
+        - QA-гейты
+        - Review
+        - Пульт
+        - Preview и рендер
+        - Звук
+        - Документация и курс
+        - Тесты и CI
+        - Инфраструктура
+        - Не знаю
+    validations:
+      required: true
+
+  - type: textarea
+    id: done
+    attributes:
+      label: Как понять, что долг закрыт
+      description: Проверяемый признак готовности.
+      placeholder: "Пример: проверка пути живёт в одной функции, старые копии удалены, npm test зелёный."
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Проверка перед отправкой
+      options:
+        - label: В тексте нет ключей, паролей, личных данных, клиентских видео и личных путей.
+          required: true

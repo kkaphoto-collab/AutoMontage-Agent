@@ -1,0 +1,17 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Уязвимость безопасности
+    url: https://github.com/mcdenil-skills/AutoMontage-Agent/security/advisories/new
+    about: Закрытая форма. Не публикуйте уязвимость, ключ или рабочий эксплойт в открытой задаче.
+  - name: Как установить и запустить
+    url: https://github.com/mcdenil-skills/AutoMontage-Agent/blob/main/README.md
+    about: Установка, первые команды и ответы на частые вопросы.
+  - name: Курс «Ролики с нуля»
+    url: https://github.com/mcdenil-skills/AutoMontage-Agent/blob/main/docs/reels-guide/README.md
+    about: Путь новичка от идеи и текста до публикации ролика.
+  - name: Motion-kit и проверки G1–G12
+    url: https://github.com/mcdenil-skills/AutoMontage-Agent/blob/main/docs/MOTION-KIT.md
+    about: Что делать, если проверка остановила preview, и как устроен motion-слой.
+  - name: Как вести задачи
+    url: https://github.com/mcdenil-skills/AutoMontage-Agent/blob/main/CONTRIBUTING.md
+    about: Как выбрать форму, приоритет и статус задачи на доске.
