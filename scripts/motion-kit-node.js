@@ -2,7 +2,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const Module = require('node:module');
-const { buildSync } = require('esbuild');
 const { MOTION_KIT_ALIAS, MOTION_KIT_DIR } = require('./remotion-webpack');
 
 const ENGINE_ROOT = path.join(__dirname, '..');
@@ -36,7 +35,9 @@ const LAYER_FILES = [
   ['src/sfx-library.js', 'слой создаётся командой automontage layer new'],
 ];
 
+// esbuild грузится только при сборке: модуль тянут и команды, которым сборка не нужна (через layer/common).
 function bundle(stdin, extra = {}) {
+  const { buildSync } = require('esbuild');
   return buildSync({
     stdin: { loader: 'js', ...stdin },
     bundle: true, platform: 'node', format: 'cjs', write: false,

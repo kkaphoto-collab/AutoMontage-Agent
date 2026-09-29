@@ -1054,7 +1054,8 @@ QA и `automontage demo` работают без provider API-ключей.
   в Review обязателен encoder `libwebp`; video import также использует `libx264`, `libvpx`,
   `libopus` и AAC. `automontage doctor` проверяет WebP и объясняет выбор отдельной полной сборки.
 - esbuild 0.28.1 (явная закреплённая зависимость) – сборка kit и `plan.js` слоя в Node для
-  команд `layer` (`scripts/motion-kit-node.js`).
+  команд `layer` (`scripts/motion-kit-node.js`). Грузится лениво, только при сборке: `automontage
+  preview` тянет реестр слоёв (`layer/registry` → `layer/common`), но esbuild не загружает.
 - Chromium для Playwright – browser regression tests и пересборка PNG-моков скриптами
   `shot-*`; обычный Review открывается в установленном системном браузере.
 - Tesseract OCR локально проверяет изображения и три кадра выбранного видео на встроенный текст.

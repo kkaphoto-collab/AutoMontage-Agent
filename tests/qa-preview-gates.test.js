@@ -407,3 +407,16 @@ test('a preview report with layer inputs is never taken for a layer render repor
   assert.equal(findRenderReport(dir, sha('c')), null);
   assert.equal(findRenderReport(dir, sha('r')).kind, 'layer-render');
 });
+
+// preview любого ролика не должен грузить esbuild и сборщик kit: барьер тянет реестр слоёв (layer/registry →
+// layer/common), а общий модуль слоя раньше сразу требовал motion-kit-node и с ним esbuild.
+test('requiring preview.js loads neither esbuild nor the kit builder', () => {
+  const { spawnSync } = require('node:child_process');
+  const root = path.join(__dirname, '..');
+  const script = `require(${JSON.stringify(path.join(root, 'scripts', 'preview.js'))});
+    const loaded = Object.keys(require.cache).filter((k) => /[\\\\/]esbuild[\\\\/]|motion-kit-node\\.js$/u.test(k));
+    process.stdout.write(JSON.stringify(loaded.map((k) => k.slice(${JSON.stringify(root)}.length))));`;
+  const child = spawnSync(process.execPath, ['-e', script], { cwd: root, encoding: 'utf8', shell: false });
+  assert.equal(child.status, 0, child.stderr);
+  assert.deepEqual(JSON.parse(child.stdout), []);
+});

@@ -1,7 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { assertCompositionId } = require('../build-commands');
-const { loadKitCore } = require('../motion-kit-node');
 const { readProjectManifest, resolveProjectPath } = require('../project/workspace');
 const { hashFile, writeJsonAtomic } = require('../pult/files');
 
@@ -99,6 +98,9 @@ function readLayerJson(layerDir) {
     throw new Error('layer.json должен быть объектом');
   }
   assertCompositionId(layer.composition, 'layer.json: composition');
+  // Сборщик kit (и с ним esbuild) – только здесь: common тянет и барьер preview через реестр слоёв, а preview
+  // любого ролика не должен грузить esbuild.
+  const { loadKitCore } = require('../motion-kit-node');
   loadKitCore().assertMasterDb(layer.sfxMasterDb);
   return layer;
 }
