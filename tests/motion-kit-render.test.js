@@ -329,7 +329,6 @@ test('fill presets (L, R, top, custom dy) blend the sharp speaker into the fill 
     const composition = await selectComposition({ serveUrl, id: 'Layer', inputProps: { preset }, puppeteerInstance: browser });
     const output = path.join(work, `${preset}.png`);
     await renderStill({ serveUrl, composition, frame: 0, output, inputProps: { preset }, imageFormat: 'png', puppeteerInstance: browser, logLevel: 'error' });
-    if (process.env.AUTOMONTAGE_TEST_KEEP_STILLS) fs.copyFileSync(output, path.join(process.env.AUTOMONTAGE_TEST_KEEP_STILLS, `seam-${preset}.png`));
     const p = profile(gray(output), across);
     let maxStep = 0;
     let at = 0;
