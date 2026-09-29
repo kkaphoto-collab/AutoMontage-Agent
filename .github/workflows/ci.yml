@@ -178,6 +178,10 @@ jobs:
       - name: Запустить Review browser tests
         run: npm run test:review-ui
 
+      # Иначе первый настоящий preview скачивает браузер Remotion внутри ожидания теста.
+      - name: Подготовить браузер Remotion
+        run: npx remotion browser ensure
+
       - name: Проверить настоящий preview, approval и final на синтетических медиа
         run: node --test --test-concurrency=1 tests/broll-preview-e2e.test.js tests/video-broll-e2e.test.js tests/custom-face-media-real.test.js
 

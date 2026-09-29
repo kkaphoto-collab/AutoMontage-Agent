@@ -126,7 +126,26 @@ function assertNoProjectSymlink(root, segments, fileSystem, label) {
   }
 }
 
+// Запись исчезла между проверкой и использованием: другой процесс как раз убрал файл.
+function isVanishedEntry(error) {
+  return Boolean(error && (error.code === 'ENOENT' || error.code === 'ENOTDIR'));
+}
+
+// Проверка пути читает файловую систему несколькими вызовами подряд. Если чужой процесс удалил
+// файл посреди проверки (например, отпустил lease), проверка повторяется целиком с нуля: каждый
+// повтор снова отказывает symlink и выходу за проект, а не пропускает шаг.
 function resolveProjectPath(projectDir, storedPath, options = {}) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return resolveProjectPathOnce(projectDir, storedPath, options);
+    } catch (error) {
+      if (attempt < 3 && isVanishedEntry(error)) continue;
+      throw error;
+    }
+  }
+}
+
+function resolveProjectPathOnce(projectDir, storedPath, options) {
   const label = options.label || 'project path';
   const fileSystem = options.fileSystem || fs;
   if (typeof storedPath !== 'string' || storedPath.length === 0 || storedPath.includes('\0')) {
@@ -968,12 +987,22 @@ function acquireProjectMutationLease(projectDir, {
   platform = process.platform,
 } = {}) {
   const resolvedProjectDir = path.resolve(projectDir);
-  const leasePath = resolveProjectPath(resolvedProjectDir, PROJECT_MUTATION_LEASE, {
-    label: 'project mutation lease',
-    fileSystem,
-    mustExist: false,
-    type: 'file',
-  });
+  let leasePath;
+  try {
+    leasePath = resolveProjectPath(resolvedProjectDir, PROJECT_MUTATION_LEASE, {
+      label: 'project mutation lease',
+      fileSystem,
+      mustExist: false,
+      type: 'file',
+    });
+  } catch (error) {
+    // Lease другого процесса исчезает и появляется непрерывно: это занятость, а не сбой.
+    // Но если пропала сама папка проекта, это не «повторите позже»: отдаём исходную ошибку.
+    if (isVanishedEntry(error) && lstatIfPresent(fileSystem, resolvedProjectDir)?.isDirectory()) {
+      throw manifestConflict();
+    }
+    throw error;
+  }
   const token = safeTemporaryId(temporaryId);
   const owner = {
     version: 1,

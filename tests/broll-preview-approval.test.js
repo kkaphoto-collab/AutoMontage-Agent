@@ -611,6 +611,173 @@ test(
   },
 );
 
+test(
+  'the server takes no project lease while a preview job runs',
+  { timeout: 20000 },
+  async (t) => {
+    const { startReviewServer } = require('../scripts/review/server');
+    const { spawn } = require('node:child_process');
+    const f = fixture(t);
+    fs.writeFileSync(path.join(f.workspace.dir, 'transcript/words.json'), '[]');
+    const leasePath = path.join(f.workspace.dir, '.project-mutation.lock');
+    let jobRunning = false;
+    let leasesDuringJob = 0;
+    // Lease берётся жёсткой ссылкой на project-mutation.lock: считаем такие ссылки сервера,
+    // пока preview-процесс жив.
+    const fileSystem = new Proxy(fs, {
+      get(target, key) {
+        if (key !== 'linkSync') return Reflect.get(target, key);
+        return (existing, destination) => {
+          if (jobRunning && path.resolve(String(destination)) === leasePath) leasesDuringJob += 1;
+          return target.linkSync(existing, destination);
+        };
+      },
+    });
+    const session = await startReviewServer({
+      projectDir: f.workspace.dir,
+      editable: true,
+      open: false,
+      fileSystem,
+      runToolImpl: () => ({ status: 1 }),
+      previewSpawnImpl(command, args, options) {
+        const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 1200)'], options);
+        jobRunning = true;
+        child.once('close', () => {
+          jobRunning = false;
+        });
+        return child;
+      },
+    });
+    try {
+      const headers = {
+        Authorization: `Bearer ${session.token}`,
+        Origin: session.origin,
+        'Content-Type': 'application/json',
+      };
+      const state = await (
+        await fetch(session.origin + '/api/state', { headers })
+      ).json();
+      const response = await fetch(session.origin + '/api/broll/preview', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          baseRevision: state.session.baseRevision,
+          baseHash: state.session.baseHash,
+          manifestHash: state.session.manifestHash,
+          kind: 'full',
+        }),
+      });
+      assert.equal(response.status, 202);
+      const { jobId } = await response.json();
+      const deadline = Date.now() + 10000;
+      let job;
+      let polls = 0;
+      do {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        job = await (
+          await fetch(`${session.origin}/api/broll/preview-job?id=${encodeURIComponent(jobId)}`, { headers })
+        ).json();
+        await fetch(session.origin + '/api/state', { headers });
+        polls += 1;
+      } while (job.status === 'running' && Date.now() < deadline);
+      assert.equal(job.status, 'complete');
+      assert.ok(polls > 5, `опросов во время preview: ${polls}`);
+      assert.equal(leasesDuringJob, 0, `сервер брал project lease во время preview: ${leasesDuringJob}`);
+    } finally {
+      await new Promise((resolve) => session.server.close(resolve));
+      await session.waitForActiveImports();
+    }
+  },
+);
+
+test(
+  'status polls of a running preview never take the project lease its publication needs',
+  { timeout: 20000 },
+  async (t) => {
+    const { startReviewServer } = require('../scripts/review/server');
+    const { spawn } = require('node:child_process');
+    const f = fixture(t);
+    fs.writeFileSync(path.join(f.workspace.dir, 'transcript/words.json'), '[]');
+    const stopFile = path.join(path.dirname(f.workspace.dir), 'stop-publisher');
+    // Как публикация настоящего preview.js: берёт и отпускает project lease, пока браузер
+    // опрашивает задание. Конфликт с опросом сервера = preview сорван «stale snapshot».
+    // Файл-сигнал и предел по времени гарантируют, что процесс не крутится после сбоя теста.
+    const publisher = `
+      const fs = require('node:fs');
+      const { acquireProjectMutationLease } = require(${JSON.stringify(path.join(__dirname, '..', 'scripts', 'project', 'workspace.js'))});
+      const dir = ${JSON.stringify(f.workspace.dir)};
+      const stopFile = ${JSON.stringify(stopFile)};
+      console.log('ready');
+      const end = Date.now() + 3000;
+      let conflicts = 0;
+      const pause = new Int32Array(new SharedArrayBuffer(4));
+      while (Date.now() < end && !fs.existsSync(stopFile)) {
+        try { acquireProjectMutationLease(dir).release(); }
+        catch (error) { if (error.code !== 'PROJECT_MANIFEST_CONFLICT') throw error; conflicts += 1; }
+        // Промежуток без lease: в него успевает войти опрос сервера, если он берёт lease.
+        Atomics.wait(pause, 0, 0, 2);
+      }
+      process.exit(conflicts ? 3 : 0);
+    `;
+    let ready;
+    const started = new Promise((resolve) => {
+      ready = resolve;
+    });
+    const session = await startReviewServer({
+      projectDir: f.workspace.dir,
+      editable: true,
+      open: false,
+      runToolImpl: () => ({ status: 1 }),
+      previewSpawnImpl(command, args, options) {
+        const child = spawn(process.execPath, ['-e', publisher], options);
+        child.stdout.once('data', ready);
+        return child;
+      },
+    });
+    try {
+      const headers = {
+        Authorization: `Bearer ${session.token}`,
+        Origin: session.origin,
+        'Content-Type': 'application/json',
+      };
+      const state = await (
+        await fetch(session.origin + '/api/state', { headers })
+      ).json();
+      const response = await fetch(session.origin + '/api/broll/preview', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          baseRevision: state.session.baseRevision,
+          baseHash: state.session.baseHash,
+          manifestHash: state.session.manifestHash,
+          kind: 'full',
+        }),
+      });
+      assert.equal(response.status, 202);
+      const { jobId } = await response.json();
+      await started;
+      const deadline = Date.now() + 10000;
+      let job;
+      let polls = 0;
+      do {
+        const poll = await fetch(
+          `${session.origin}/api/broll/preview-job?id=${encodeURIComponent(jobId)}`,
+          { headers },
+        );
+        job = { http: poll.status, ...(await poll.json()) };
+        polls += 1;
+        assert.equal(job.http, 200, `опрос задания вернул HTTP ${job.http}: ${job.error}`);
+      } while (job.status === 'running' && Date.now() < deadline);
+      assert.ok(polls > 5, `опросов во время публикации: ${polls}`);
+      assert.equal(job.status, 'complete', `опрос задания сорвал публикацию: ${job.error}`);
+    } finally {
+      fs.writeFileSync(stopFile, 'stop');
+      await new Promise((resolve) => session.server.close(resolve));
+      await session.waitForActiveImports();
+    }
+  },
+);
+
 test('final all-file barrier rejects a prior preview modified during the later source hash', (t) => {
   const f = fixture(t); const p = f.preview();
   const descriptors = new Map(); let sourceReads = 0; let mutated = false;
