@@ -5,6 +5,8 @@ const path = require('node:path');
 
 const ROOT = path.resolve(__dirname, '..');
 const read = relativePath => fs.readFileSync(path.join(ROOT, relativePath), 'utf8');
+// Фраза из документа с любыми переносами строк и отступами между словами.
+const words = phrase => new RegExp(phrase.split(' ').map(w => w.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')).join('\\s+'), 'u');
 
 test('every montage route points new chats to the shared choice contract', () => {
   const contract = read('skills/reel-turnkey/references/creative-motion.md');
@@ -108,12 +110,18 @@ test('motion layer brief and creative motion start with the kit and its gates', 
   const checklist = read('skills/reel-turnkey/references/qa-checklist.md');
   assert.match(checklist, /2,5 секунды/);
   assert.match(checklist, /automontage layer check/);
-  // Правило владельца о музыке остаётся рядом с G8, чья заглушка ждёт калибровки.
-  assert.match(checklist, /12–18 dB ниже голоса/u);
-  assert.match(checklist, /G8[\s\S]*заглушк/u);
-  // Широкое правило: музыку ради заглушки G8 не трогают вовсе, а не только игнорируют подсказку.
+  // Правило 12–18 dB осталось только для живой записи и роликов без слоя kit; для аватара –
+  // откалиброванный коридор G8 по утверждённому эталону (D-035).
+  assert.match(checklist, words('Живая запись и ролики без слоя kit: под речью музыка примерно на 12–18 dB ниже голоса'));
+  assert.match(creative, words('«12–18 dB, 8–10 dB по просьбе» относится к живой записи и роликам без слоя kit'));
   for (const [name, text] of [['brief', brief], ['creative', creative], ['checklist', checklist]]) {
-    assert.match(text, /ради заглушки не меня/u, name);
+    assert.match(text, words('откалиброван по утверждённому эталонному preview'), name);
+    assert.match(text, words('35–41 LU, стоп ниже 3 LU или выше 46 LU'), name);
+    // Просьба «музыку слышнее» – разрыв меньше на 6–8 LU, предупреждение ожидаемо.
+    assert.match(text, /6–8 (?:LU|дБ)[\s\S]{0,80}предупреждение G8[\s\S]{0,20}ожидаемо/u, name);
+    // Музыку ведёт утверждённый рецепт: ради гейта против вкуса владельца её не меняют.
+    assert.match(text, words('Против вкуса владельца музыку ради гейта не меня'), name);
+    assert.doesNotMatch(text, /заглушк[^\n]*G8|G8[^\n]*заглушк|до калибровки/u, name);
   }
 });
 
@@ -134,10 +142,14 @@ test('reel skills start motion layers from the kit and gate them before the pult
     assert.doesNotMatch(text, /зелёными отчётами/u, file);
     // layer sheet работает с текущим preview, а не с рендером слоя.
     assert.match(block, /layer sheet[^\n]*\n?[^\n]*текущего preview/u, file);
-    // Заглушка G8 до калибровки: brief без музыки, громкость музыки ради неё не трогают.
-    assert.match(block, /без `--music`/u, file);
-    assert.match(block, /ради заглушки не\s+меня/u, file);
-    assert.match(block, /music\.gainDb[^\n]*не выполняй/u, file);
+    // Откалиброванный G8: утверждённый рецепт музыки проходит, «слышнее» даёт ожидаемое предупреждение,
+    // а музыку ради гейта против вкуса владельца не меняют.
+    assert.match(block, words('Коридор G8 для аватара откалиброван по утверждённому эталону'), file);
+    assert.match(block, words('предупреждение вне 35–41 LU, стоп ниже 3 или выше 46 LU'), file);
+    assert.match(block, words('`layer brief --music <трек>` по умолчанию собирает утверждённый рецепт'), file);
+    assert.match(block, words('на 6–8 дБ: предупреждение G8 тогда ожидаемо'), file);
+    assert.match(block, words('Против вкуса владельца музыку ради гейта не меня'), file);
+    assert.doesNotMatch(block, /заглушк|до калибровки|без `--music`/u, file);
     // Утверждает только владелец.
     assert.match(block, /Утверждает только владелец[\s\S]{0,40}«Утверждаю» в пульте[\s\S]{0,20}«утверждаю»\s+в\s+чате/u, file);
     assert.doesNotMatch(block, /\u2014/u, file);

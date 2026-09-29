@@ -811,8 +811,10 @@ Pexels подменён. `tests/qa-preview.test.js` в той же маске �
   `automontage layer new --project-dir`, а `.env.example` и `ASSETS.md` называют
   `AUTOMONTAGE_SFX_DIR`;
 - гейты (`qa-*`): форма отчёта и коды выхода, G1–G5 и G9–G11 по манифесту, G6 и G7 по настоящему
-  звуку и видео, замер G8 в LU, G12 по доле контуров, барьер preview (строгий только для слоя из
-  реестра, справочный G8 для прочих, отчёт `qa/preview-*`, сбой записи);
+  звуку и видео, замер G8 в LU (логика G8 – на явном тестовом коридоре; отдельный тест закрепляет
+  откалиброванный коридор `avatar` 3/35/38/41/46 LU и то, что разрыв эталона 37,95 LU в нём
+  проходит), G12 по доле контуров, барьер preview (строгий только для слоя из реестра, справочный
+  G8 для прочих, отчёт `qa/preview-*`, сбой записи);
 - команды (`layer-*`): `new`, `words`, `check`, `render` (с подменой Remotion), `import`, `brief`,
   `stock`, `sheet`, ожидание свободной машины `layer-busy.test.js`, шаблон слоя
   `layer-template.test.js` и маршрутизация CLI, строгие флаги и коды выхода `layer-cli.test.js`.
@@ -864,8 +866,8 @@ AUTOMONTAGE_TEST_MOTION_RENDER=1 node --test tests/motion-kit-render.test.js tes
 Ручная проверка слоя перед показом владельцу:
 
 1. `automontage layer check` и `automontage layer render` без ❌; предупреждения прочитаны.
-2. `automontage preview` опубликован (до калибровки – brief без `--music`), отчёт
-   `qa/preview-*.txt` без стопа.
+2. `automontage preview` опубликован, отчёт `qa/preview-*.txt` без стопа; с утверждённым рецептом
+   музыки аватар-роликов G8 около 38 LU (коридор 35–41 LU).
 3. `automontage layer sheet --project-dir projects/<ролик>`: на контакт-листе `qa/sheet-*.jpg`
    текст внутри рамки safe-зоны, нет пустых кадров (G12), графика не выпала.
 4. Глазами в preview – кадры входов и выходов карточек и вставок, первые 3 с (спикер виден),
