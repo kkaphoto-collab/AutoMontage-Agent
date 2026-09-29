@@ -10,12 +10,12 @@ export function FullscreenReveal({ insert, children }) {
   if (p === null) return null;
   const opacity = insertOpacity(frame, insert, fps);
   // Тот же порог видимости, что и у KitBox (isShown/VISIBLE_MIN): на последнем отрисованном
-  // кадре close (to − 1, на высоком fps иногда и соседнем) opacity уже практически 0 — не
+  // кадре close (to − 1, на высоком fps иногда и соседнем) opacity уже практически 0 – не
   // декодируем и не рисуем фактически невидимый кадр вставки.
   if (!isShown({ o: opacity })) return null;
   const card = revealCard(width, height);
   const inset = (value) => (value * (1 - p)).toFixed(1);
-  // Тот же коэффициент, что и safeRect: ширина к канону 1080 (портрет) / 1920 (ландшафт) — радиус
+  // Тот же коэффициент, что и safeRect: ширина к канону 1080 (портрет) / 1920 (ландшафт) – радиус
   // скругления масштабируется вместе с реальным разрешением композиции.
   const portrait = height > width;
   const radius = 28 * (width / (portrait ? 1080 : 1920));
@@ -23,9 +23,9 @@ export function FullscreenReveal({ insert, children }) {
   return <AbsoluteFill data-kit-bleed={insert.id} style={{ clipPath, opacity }}>{children}</AbsoluteFill>;
 }
 
-// StockInsert получает уже скомпилированную вставку (compileInserts): from/to — кадры глобального
+// StockInsert получает уже скомпилированную вставку (compileInserts): from/to – кадры глобального
 // таймкода, а не секунды плана. Сам StockInsert обязан стоять на верхнем уровне композиции, а не
-// внутри чужой <Sequence> — useCurrentFrame() здесь глобальный кадр (от него считают и Ken Burns,
+// внутри чужой <Sequence> – useCurrentFrame() здесь глобальный кадр (от него считают и Ken Burns,
 // и revealProgress), как и в SpeakerLayer. Внутренний <Sequence from={insert.from}> нужен только
 // видео стока: оно проигрывается с собственного нуля, а не с глобального таймкода, как аватар.
 export function StockInsert({ insert, children = null }) {

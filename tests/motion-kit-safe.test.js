@@ -24,7 +24,7 @@ test('overflow reports only the sides that leave the safe rect', () => {
 });
 
 // Ревью задачи 23 (важно): дефолтный epsilon (0,5 px) пристёгнут с обеих сторон в обеих версиях
-// (ESM kit.overflow и CommonJS-двойник) — 0,4 px ниже эпсилона (шум округления) не считается
+// (ESM kit.overflow и CommonJS-двойник) – 0,4 px ниже эпсилона (шум округления) не считается
 // выходом, 0,6 px уже считается.
 test('the default 0.5 px epsilon is exact on both the ESM and CommonJS overflow twins', () => {
   const safe = kit.safeRect(1080, 1920);

@@ -8,8 +8,8 @@ export function speakerTransform(state, track) {
   return {
     position: 'absolute', left: 0, top: 0, width: track.width, height: track.height,
     transformOrigin: `${track.face.x}px ${track.face.y}px`,
-    // translate() записан ДО scale(): так итоговый сдвиг точки лица равен ровно dx/dy — то, что
-    // читают гейты G1/G2 из манифеста камеры. Поменять порядок на scale() translate() — сдвиг лица
+    // translate() записан ДО scale(): так итоговый сдвиг точки лица равен ровно dx/dy – то, что
+    // читают гейты G1/G2 из манифеста камеры. Поменять порядок на scale() translate() – сдвиг лица
     // начнёт масштабироваться вместе с картинкой, и манифест разойдётся с тем, что видно в кадре.
     transform: `translate(${state.dx.toFixed(3)}px, ${state.dy.toFixed(3)}px) scale(${state.s.toFixed(6)})`,
     filter: filters.length ? filters.join(' ') : undefined,
@@ -17,7 +17,7 @@ export function speakerTransform(state, track) {
 }
 
 // Заливка краёв боковых планов: центрированный оверскан (по 10 % запаса с каждой стороны от
-// уменьшенной вчетверо копии, растянутой в 4,8 раза), а не от левого верхнего угла — иначе
+// уменьшенной вчетверо копии, растянутой в 4,8 раза), а не от левого верхнего угла – иначе
 // blur(5px) съедает края и оставляет тёмную полосу шириной в десятки px на R- и top-планах,
 // где камера уходит в сторону.
 export function speakerFillStyle(track) {
@@ -29,9 +29,9 @@ export function speakerFillStyle(track) {
   };
 }
 
-// Аватар — один OffthreadVideo muted по глобальному таймкоду (голос идёт из мастер-видео).
+// Аватар – один OffthreadVideo muted по глобальному таймкоду (голос идёт из мастер-видео).
 // SpeakerLayer обязан стоять на верхнем уровне композиции, а не внутри <Sequence>: useCurrentFrame
-// здесь — глобальный кадр исходника, тот же, что видит манифест гейтов.
+// здесь – глобальный кадр исходника, тот же, что видит манифест гейтов.
 // Хвост после lastFrame заморожен; открытые края боковых планов залиты уменьшенной размытой копией.
 export function SpeakerLayer({ src, track, lastFrame, trimBefore = 0 }) {
   const frame = useCurrentFrame();
@@ -41,9 +41,9 @@ export function SpeakerLayer({ src, track, lastFrame, trimBefore = 0 }) {
     <OffthreadVideo src={staticFile(src)} muted trimBefore={trimBefore || undefined}
       style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
   );
-  // lastFrame — кадр композиции (не кадр исходного файла): для клипа длиной N кадров, обрезанного
+  // lastFrame – кадр композиции (не кадр исходного файла): для клипа длиной N кадров, обрезанного
   // на T кадров спереди (trimBefore = T), это N − 1 − T.
-  // Freeze держим смонтированным всегда, когда lastFrame конечен, и переключаем только active —
+  // Freeze держим смонтированным всегда, когда lastFrame конечен, и переключаем только active –
   // иначе смена обёртки в момент перехода через lastFrame размонтирует и заново монтирует video.
   const held = Number.isFinite(lastFrame)
     ? <Freeze frame={lastFrame} active={frame > lastFrame}>{video}</Freeze>

@@ -26,19 +26,19 @@ export function compileCamera(spec, { fps, width, height, durationInFrames }) {
   if (!spec?.face || !Number.isFinite(spec.face.x) || !Number.isFinite(spec.face.y)) {
     throw new Error('camera.face {x, y} обязателен: точка лица в кадре исходника, px');
   }
-  // Пресеты и покачивание заданы для кадра шириной 1080 (короткая сторона) — масштабируем под исходник.
+  // Пресеты и покачивание заданы для кадра шириной 1080 (короткая сторона) – масштабируем под исходник.
   const k = Math.min(width, height) / 1080;
   const presets = Object.fromEntries(Object.entries({ ...DEFAULT_PRESETS, ...(spec.presets || {}) })
     .map(([name, p]) => [name, { ...p, ...(p.dx !== undefined ? { dx: p.dx * k } : {}), ...(p.dy !== undefined ? { dy: p.dy * k } : {}) }]));
   const f = (sec) => secToFrame(sec, fps);
-  // Исходный индекс в spec.shots запоминаем ДО сортировки по at — иначе ошибка «camera.shots[N]»
+  // Исходный индекс в spec.shots запоминаем ДО сортировки по at – иначе ошибка «camera.shots[N]»
   // называет позицию после сортировки, а не тот план, который написал человек в plan.js.
   const shots = (spec.shots || [])
     .map((shot, originalIndex) => ({ shot, originalIndex }))
     .sort((a, b) => a.shot.at - b.shot.at)
     .map(({ shot, originalIndex }, index) => {
       if (!presets[shot.preset]) throw new Error(`camera.shots[${originalIndex}]: неизвестный пресет «${shot.preset}»`);
-      // shot.dx/dy — ручной сдвиг в пикселях кадра исходника (уже в реальном масштабе, k не
+      // shot.dx/dy – ручной сдвиг в пикселях кадра исходника (уже в реальном масштабе, k не
       // применяется); dx/dy пресета заданы для кадра шириной 1080 и масштабированы выше через k.
       return { index, from: f(shot.at), preset: shot.preset, drift: shot.drift || 'in', dx: shot.dx, dy: shot.dy };
     });
@@ -64,7 +64,7 @@ export function withAways(track, aways) {
 export function cameraAt(track, frame) {
   const cfg = CAMERA_DEFAULTS;
   const fps = track.fps;
-  // Все длительности cfg заданы в кадрах эталона 25 fps — переводим в кадры композиции, чтобы
+  // Все длительности cfg заданы в кадрах эталона 25 fps – переводим в кадры композиции, чтобы
   // ритм дрейфа, панча, размытия и ухода был одинаковым в секундах на любом fps.
   const shot = track.shots.reduce((current, s) => (s.from <= frame ? s : current), track.shots[0]);
   const preset = track.presets[shot.preset];
@@ -72,20 +72,20 @@ export function cameraAt(track, frame) {
   const p = DRIFT(Math.min(1, Math.max(0, (frame - shot.from) / span)));
   const grow = shot.drift === 'in' ? p : shot.drift === 'out' ? 1 - p : 0;
   let s = preset.s * (1 + cfg.drift.amp * grow);
-  // base — масштаб пресета с дрейфом, ДО панчей и ДО ограничения maxScale: гейт G3 (scripts/qa/
+  // base – масштаб пресета с дрейфом, ДО панчей и ДО ограничения maxScale: гейт G3 (scripts/qa/
   // timeline-gates.js) читает его, чтобы отличить «пресет сам крупнее предела» от «панч упёрся в
-  // потолок» — причину клэмпа нельзя достоверно угадать по форме кривой (ступенька/спираль), а
+  // потолок» – причину клэмпа нельзя достоверно угадать по форме кривой (ступенька/спираль), а
   // база всегда знает, что было задумано ДО панча.
   const base = s;
 
   for (const punch of track.punches) {
-    // После релиза (until + releaseFrames) множитель панча уже точно равен 1 — не вызываем
+    // После релиза (until + releaseFrames) множитель панча уже точно равен 1 – не вызываем
     // spring() дальше: Remotion заново проигрывает симуляцию от кадра 0 на каждый вызов, и цикл
     // по всем кадрам до конца ролика делает манифест квадратичным по длине (120 с × 60 fps с
-    // одним панчем — секунды вместо десятков мс).
+    // одним панчем – секунды вместо десятков мс).
     if (frame < punch.from || frame >= punch.until + ref25(cfg.punch.releaseFrames, fps)) continue;
     // spring() сам переводит кадры в секунды через переданный fps, поэтому реальную скорость
-    // подъёма панча масштабировать не нужно — только releaseFrames ниже (это ramp, не spring).
+    // подъёма панча масштабировать не нужно – только releaseFrames ниже (это ramp, не spring).
     const on = spring({
       frame: frame - punch.from, fps,
       config: { damping: cfg.punch.damping, stiffness: cfg.punch.stiffness, mass: cfg.punch.mass },
@@ -110,7 +110,7 @@ export function cameraAt(track, frame) {
 
   const requested = s;
   s = Math.min(s, track.maxScale);
-  // Период покачивания cfg.sway задан в секундах через кадры при 25 fps — frame * 25 / fps
+  // Период покачивания cfg.sway задан в секундах через кадры при 25 fps – frame * 25 / fps
   // переводит текущий кадр в «кадры на 25 fps», поэтому период колебания одинаков в секундах.
   const sway = cfg.sway.reduce((sum, w) => sum + w.px * track.k * Math.sin(((frame * 25) / fps) / w.period), 0);
   let dx = (shot.dx ?? preset.dx ?? 0) + sway;
@@ -127,13 +127,13 @@ export function cameraAt(track, frame) {
 const PUNCT = /[.,!?…:;]$/u;
 
 // Раскадровка по словам: план не длиннее maxSec, режем по концу слова (по возможности на знаке
-// препинания). Молчание без подходящего слова — долгое начало до первой реплики, пауза внутри
-// речи, хвост после последнего слова — режем поровну на куски ≤ maxSec, чтобы не оставить план
+// препинания). Молчание без подходящего слова – долгое начало до первой реплики, пауза внутри
+// речи, хвост после последнего слова – режем поровну на куски ≤ maxSec, чтобы не оставить план
 // длиннее лимита. Рядом с самым концом (ближе minSec к endSec) разрез не ставим, чтобы не оставить
 // вспышку короче minSec в последних кадрах.
 export function autoShots(words, { endSec, maxSec = 2.2, minSec = 1.2, cycle = ['W', 'M', 'W', 'L', 'W', 'R'] } = {}) {
   // Проверяем ДО цикла split(): maxSec ≤ 0 делает шаг деления на ноль и зацикливает split()
-  // навсегда, а не просто выдаёт плохой результат — поэтому это исключение, а не тихий дефолт.
+  // навсегда, а не просто выдаёт плохой результат – поэтому это исключение, а не тихий дефолт.
   if (!(maxSec > 0) || !(minSec >= 0) || minSec > maxSec || !Array.isArray(cycle) || !cycle.length) {
     throw new Error('autoShots: нужны maxSec > 0, 0 ≤ minSec ≤ maxSec и непустой cycle');
   }
@@ -163,8 +163,8 @@ export function autoShots(words, { endSec, maxSec = 2.2, minSec = 1.2, cycle = [
     const next = i + 1 < list.length ? Math.min(list[i + 1].e, end) : end;
     const since = cut - last;
     const urgent = next - last > maxSec;
-    // Обычный порог minSec — на паузе или знаке препинания; если иначе план неизбежно
-    // превысит maxSec к следующему слову — режем раньше, но не короче половины minSec.
+    // Обычный порог minSec – на паузе или знаке препинания; если иначе план неизбежно
+    // превысит maxSec к следующему слову – режем раньше, но не короче половины minSec.
     if ((since >= minSec && (PUNCT.test(word.t ?? word.w) || urgent)) || (urgent && since >= minSec / 2)) push(cut);
   }
   split(end);

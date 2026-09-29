@@ -4,15 +4,15 @@ const real = require('remotion');
 // Реальные spring/interpolate/Easing + подмена хуков и медиа-компонентов на простую разметку.
 //
 // Известные ограничения этой подмены (важно для новых тестов на её основе):
-// - Sequence не сдвигает useCurrentFrame и не прячет children за пределами своего окна — это
+// - Sequence не сдвигает useCurrentFrame и не прячет children за пределами своего окна – это
 //   просто <div> с data-атрибутами from/durationInFrames, без реального поведения Remotion;
 // - Freeze учитывает `active` (boolean или функция от текущего кадра, как в реальном Remotion,
-//   по умолчанию true) — обёртка <div data-freeze-active="true|false"> остаётся смонтированной
+//   по умолчанию true) – обёртка <div data-freeze-active="true|false"> остаётся смонтированной
 //   в обоих случаях (тест может убедиться, что video не размонтируется при переходе через
 //   lastFrame), а атрибут data-freeze="<frame>" появляется только пока active истинно; кадр
-//   внутри children всё равно не замораживает — useCurrentFrame не подменяет;
+//   внутри children всё равно не замораживает – useCurrentFrame не подменяет;
 // - renderToStaticMarkup никогда не выполняет эффекты, поэтому continueRender/cancelRender в
-//   таких тестах недостижимы — посчитать можно только вызовы delayRender;
+//   таких тестах недостижимы – посчитать можно только вызовы delayRender;
 // - остальные компоненты Remotion (Loop, Series, Html5Audio и т. д.) не подменены и попадут в
 //   настоящие реализации из 'remotion', которые ждут реальный Remotion-рендер, а не Node-тест.
 function remotionStub({ frame = 0, fps = 25, width = 1080, height = 1920, durationInFrames = 100000, calls = {} } = {}) {

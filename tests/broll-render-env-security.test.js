@@ -70,7 +70,7 @@ const builders = {
 };
 
 // entry/composition реальны только для final/preview/chunk (src/index.js + LessonSeq, still впереди
-// добавляет своё имя подкоманды) и для layer (свой слой, своя композиция) — у каждого builder свои.
+// добавляет своё имя подкоманды) и для layer (свой слой, своя композиция) – у каждого builder свои.
 const POSITIONALS_BY_BUILDER = {
   final: ['render', 'src/index.js', 'LessonSeq'],
   preview: ['render', 'src/index.js', 'LessonSeq'],

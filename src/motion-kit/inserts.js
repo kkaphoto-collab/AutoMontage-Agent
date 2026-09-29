@@ -10,14 +10,14 @@ export const KB_DEFAULT = Object.freeze([1.03, 1.1]);
 
 function assertKb(kb, label) {
   if (!Array.isArray(kb) || kb.length !== 2 || !kb.every((v) => Number.isFinite(v) && v >= 1)) {
-    throw new Error(`${label}: kb должен быть парой чисел ≥ 1, например [1.03, 1.1] — получено ${JSON.stringify(kb)}`);
+    throw new Error(`${label}: kb должен быть парой чисел ≥ 1, например [1.03, 1.1] – получено ${JSON.stringify(kb)}`);
   }
 }
 
 // Секунды в сообщении об ошибке округляются ВВЕРХ до сотых: если округлить к ближайшему, автор
 // plan.js, дословно переписавший показанное число, мог получить вставку, которая всё ещё короче
 // реального минимума в кадрах (secToFrame способен округлить обратно вниз). Вычитаем 1e-9 перед
-// Math.ceil как общую страховку от шума с плавающей точкой в value*100 — деление секунд на fps не
+// Math.ceil как общую страховку от шума с плавающей точкой в value*100 – деление секунд на fps не
 // гарантирует точное число сотых при любых minFrames/fps, хотя для нынешних вызовов (17/25,
 // 33/50 и т. п.) такого сдвига не возникает; без вычитания шум мог бы завысить показанный минимум
 // на одну сотую.
@@ -40,11 +40,11 @@ export function compileInserts(inserts = [], { fps, durationInFrames } = {}) {
     const to = hasDuration ? Math.min(rawTo, durationInFrames) : rawTo;
     const clampedByEnd = hasDuration && rawTo > durationInFrames;
     if (!(to > from)) throw new Error(`inserts[${i}] (${label}): to должен быть больше from`);
-    // Непустая строка вроде 'false' или 'no' — truthy в JS и молча стала бы cover: true в
+    // Непустая строка вроде 'false' или 'no' – truthy в JS и молча стала бы cover: true в
     // манифесте вместо предупреждения автору plan.js об опечатке (булево значение он явно имел
-    // в виду). undefined/null — «не задано», ими по-прежнему управляет дефолт ниже.
+    // в виду). undefined/null – «не задано», ими по-прежнему управляет дефолт ниже.
     if (insert.cover !== undefined && insert.cover !== null && typeof insert.cover !== 'boolean') {
-      throw new Error(`inserts[${i}] (${label}): cover должен быть true или false — получено ${JSON.stringify(insert.cover)}`);
+      throw new Error(`inserts[${i}] (${label}): cover должен быть true или false – получено ${JSON.stringify(insert.cover)}`);
     }
     const cover = insert.cover ?? insert.kind !== 'donor';
     // stock/screen/scene рисуются на весь кадр всегда: cover: false сказал бы манифесту (G4), что
@@ -54,9 +54,9 @@ export function compileInserts(inserts = [], { fps, durationInFrames } = {}) {
     }
     if (cover) {
       // Закрывающая (cover) вставка обязана быть достаточно длинной, чтобы спикер успел
-      // вернуться в фокус ДО начала close (awaysFromInserts: away.to = to − close − exit) —
+      // вернуться в фокус ДО начала close (awaysFromInserts: away.to = to − close − exit) –
       // короче этого камера не успевает, и на стыке виден размытый/полупрозрачный спикер.
-      // +1 кадр сверх close+exit — иначе на самой границе away.to − away.from вырождается в 0
+      // +1 кадр сверх close+exit – иначе на самой границе away.to − away.from вырождается в 0
       // (спасает только Math.max-подстраховка в awaysFromInserts, а не честный расчёт).
       const minFrames = ref25(CLOSE_FRAMES, fps) + ref25(CAMERA_DEFAULTS.away.exitFrames, fps) + 1;
       if (to - from < minFrames) {
@@ -65,7 +65,7 @@ export function compileInserts(inserts = [], { fps, durationInFrames } = {}) {
           ? ` (обрезана концом ролика до ${((to - from) / fps).toFixed(2)} с)`
           : '';
         throw new Error(
-          `inserts[${i}] (${label}): закрывающая вставка короче минимума ${minFrames} кадров (${minSec} с)${clampNote} — камера не успеет вернуть спикера в фокус до начала закрытия`
+          `inserts[${i}] (${label}): закрывающая вставка короче минимума ${minFrames} кадров (${minSec} с)${clampNote} – камера не успеет вернуть спикера в фокус до начала закрытия`
         );
       }
     }
@@ -83,14 +83,14 @@ export function compileInserts(inserts = [], { fps, durationInFrames } = {}) {
 }
 
 // Полноэкранная вставка закрывает спикера на входе и обязана вернуть его ДО начала close (см.
-// revealProgress) — иначе сжимающаяся обратно карточка открывает ещё размытого/полупрозрачного
+// revealProgress) – иначе сжимающаяся обратно карточка открывает ещё размытого/полупрозрачного
 // спикера, и на стыке на миг видно тёмное смазанное кольцо вместо резкого лица. Возврат длится
-// ref25(exitFrames) кадров — то же значение, что cameraAt берёт из CAMERA_DEFAULTS.away.exitFrames
+// ref25(exitFrames) кадров – то же значение, что cameraAt берёт из CAMERA_DEFAULTS.away.exitFrames
 // для самого ramp'а (нельзя параметризовать по-другому, иначе ramp и уход разъедутся), и должен
 // ЗАКОНЧИТЬСЯ ровно к началу close, поэтому старт возврата сдвинут на close и на exit
 // одновременно: away.to = insert.to − close − exit. compileInserts гарантирует cover-вставкам
 // длину ≥ close + exit + 1 кадр, поэтому away.to − away.from ≥ 1 ВСЕГДА честно (без вырождения в
-// ноль-длину), а не только благодаря клэмпу ниже. Math.max — чистая подстраховка для вставок,
+// ноль-длину), а не только благодаря клэмпу ниже. Math.max – чистая подстраховка для вставок,
 // собранных в обход compileInserts (там такой гарантии длины нет).
 export function awaysFromInserts(inserts, { fps = 25 } = {}) {
   const close = ref25(CLOSE_FRAMES, fps);
@@ -100,9 +100,9 @@ export function awaysFromInserts(inserts, { fps = 25 } = {}) {
 }
 
 // Инсеты карточки вставки (для CSS inset()) считаем от той же safe-зоны, что и текстовые
-// элементы, а не отдельной константой под 1080x1920 — иначе на 1920x1080 карточка получает
+// элементы, а не отдельной константой под 1080x1920 – иначе на 1920x1080 карточка получает
 // неправильную высоту (safe-зона 9:16 не подходит для 16:9). top/left у safeRect уже офсеты от
-// края; right/bottom safeRect отдаёт абсолютными координатами — переводим их обратно в офсеты.
+// края; right/bottom safeRect отдаёт абсолютными координатами – переводим их обратно в офсеты.
 export function revealCard(width, height) {
   const safe = safeRect(width, height);
   return { top: safe.top, right: width - safe.right, bottom: height - safe.bottom, left: safe.left };
@@ -119,7 +119,7 @@ export function closeWindow(insert, fps = 25) {
   return { start, end };
 }
 
-// 0 — вставка ещё карточкой внутри safe-зоны, 1 — на весь кадр; null — вставки нет. REVEAL — кадры
+// 0 – вставка ещё карточкой внутри safe-зоны, 1 – на весь кадр; null – вставки нет. REVEAL – кадры
 // эталонных 25 fps, пересчитываются под fps композиции.
 export function revealProgress(frame, insert, fps = 25) {
   if (frame < insert.from || frame >= insert.to) return null;
@@ -128,7 +128,7 @@ export function revealProgress(frame, insert, fps = 25) {
   return prog(frame, insert.from, reveal) * (1 - prog(frame, start, end - start, EASE.inOut));
 }
 
-// Угасание вставки к моменту закрытия: 1 до начала close, 0 на последнем кадре (to − 1) — то же
+// Угасание вставки к моменту закрытия: 1 до начала close, 0 на последнем кадре (to − 1) – то же
 // close-окно, что двигает revealProgress, чтобы вставка не «зависала» видимой дольше карточки.
 export function insertOpacity(frame, insert, fps = 25) {
   if (frame < insert.from || frame >= insert.to) return null;
@@ -137,7 +137,7 @@ export function insertOpacity(frame, insert, fps = 25) {
 }
 
 // Общая проверка «скомпилированности» вставки для React-компонентов: from/to обязаны быть целыми
-// кадрами (compileInserts), а не секундами из сырого plan.js — иначе ошибка расплывчатая (NaN
+// кадрами (compileInserts), а не секундами из сырого plan.js – иначе ошибка расплывчатая (NaN
 // где-то в разметке) вместо явного указания на пропущенный compileInserts. Используется всеми
 // компонентами, которые рисуют insert после компиляции (FullscreenReveal, StockInsert и будущие
 // screen/scene вставки).

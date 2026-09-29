@@ -47,8 +47,8 @@ test('typed reveals characters monotonically and completes on time', () => {
 });
 
 // Граничные случаи сверх плана: цельный элемент без mask-хвоста и cut-вход не должны падать
-// с непонятной ошибкой (cut — валидный enter.kind, но ветка расчёта для него отсутствует
-// в теле if/else if — проверяем, что это не бросает исключение и даёт нейтральную анимацию).
+// с непонятной ошибкой (cut – валидный enter.kind, но ветка расчёта для него отсутствует
+// в теле if/else if – проверяем, что это не бросает исключение и даёт нейтральную анимацию).
 test('cut enter kind is accepted and yields a neutral (not-animated) transform', () => {
   const item = { id: 'c', kind: 'text', from: 0, until: 20, box, enter: { kind: 'cut' } };
   const a = kit.animOf(item, 5, 25);
@@ -63,9 +63,9 @@ test('mask enter kind clips progressively and does not throw', () => {
   assert.ok(typeof a.clip === 'string' && a.clip.startsWith('inset('));
 });
 
-// Ревью задачи 23 (minor): на самом первом кадре маски (p=0) clip закрывает 100% ширины — реально
+// Ревью задачи 23 (minor): на самом первом кадре маски (p=0) clip закрывает 100% ширины – реально
 // ничего не нарисовано, хотя o остаётся полным (маска не трогает прозрачность). isShown обязан
-// видеть это через reveal, а не только через o — иначе манифест (itemExtentAt) и рендер (KitBox)
+// видеть это через reveal, а не только через o – иначе манифест (itemExtentAt) и рендер (KitBox)
 // «видят» габарит кадра, которого зритель не видит вовсе.
 test('a fully closed mask on its very first frame is not shown (reveal 0), even though opacity stays 1', () => {
   const item = { id: 'm2', kind: 'text', from: 0, until: 20, box, enter: { kind: 'mask' } };
@@ -76,12 +76,12 @@ test('a fully closed mask on its very first frame is not shown (reveal 0), even 
   assert.equal(kit.itemExtentAt(item, 0, 25), null);
 });
 
-// Пружина Remotion пересчитывает физику от кадра 0 на каждый вызов (O(кадр) внутри) — без клэмпа
+// Пружина Remotion пересчитывает физику от кадра 0 на каждый вызов (O(кадр) внутри) – без клэмпа
 // кадра (settledFrame) манифест из многих долгоживущих items становится квадратичным по длине
-// (ревью задачи 23). measureSpring() определяет момент оседания (within threshold) — после него
+// (ревью задачи 23). measureSpring() определяет момент оседания (within threshold) – после него
 // клэмпнутый и настоящий кадр обязаны давать визуально тот же результат (разница ≤ 1e-6 px), а не
 // грубое приближение. Step 0 задачи 24 (усиление): раньше проверялись только две точки далеко за
-// оседанием на одном fps — теперь сканируем окно в 50 кадров СРАЗУ после самой точки оседания (где
+// оседанием на одном fps – теперь сканируем окно в 50 кадров СРАЗУ после самой точки оседания (где
 // клэмп и настоящий кадр впервые расходятся, если расходятся вообще) на 25 и 60 fps.
 test('the spring clamp used to avoid a quadratic manifest build does not change animOf output for a long-lived item', () => {
   const { spring, measureSpring } = require('remotion');
@@ -109,9 +109,9 @@ test('exit frames 0 keeps the element fully visible until the very last frame', 
   assert.equal(kit.animOf(item, 19, 25).o, 1);
 });
 
-// Ревью: itemExtentAt считал полуширину/полувысоту как (w*cos+h*sin)/2 без abs — для th>90°
+// Ревью: itemExtentAt считал полуширину/полувысоту как (w*cos+h*sin)/2 без abs – для th>90°
 // cos(th) уходит в минус, и хабарит переворачивается (left>right), из-за чего гейт safe-zone (G5)
-// молча пропускает элемент, который реально вылезает за кадр. Эталон — та же формула ограничивающего
+// молча пропускает элемент, который реально вылезает за кадр. Эталон – та же формула ограничивающего
 // прямоугольника повёрнутого прямоугольника, что использует ревью (min/max по 4 повёрнутым углам).
 function cssExtent(item, a) {
   const { x, y, w, h } = item.box;
@@ -143,7 +143,7 @@ test('rotations beyond 90 degrees keep left <= right and top <= bottom and match
 });
 
 // Ревью: на последнем видимом кадре (until-1) прозрачность ещё не доходила до 0 (0.36 на 25 fps
-// при exit.frames:5) — элемент визуально выключался рывком на кадр раньше конца затухания.
+// при exit.frames:5) – элемент визуально выключался рывком на кадр раньше конца затухания.
 // Интервал затухания должен заканчиваться на until-1 (последний реально отрисованный кадр), не на
 // until (кадр, который вообще не рендерится).
 test('exit reaches full transparency by the very last visible frame, not one frame later', () => {

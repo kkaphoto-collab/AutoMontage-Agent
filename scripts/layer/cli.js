@@ -1,4 +1,4 @@
-// scripts/layer/cli.js — запускается из scripts/cli.js через `node`, поэтому без shebang
+// scripts/layer/cli.js – запускается из scripts/cli.js через `node`, поэтому без shebang
 const USAGE = `usage: automontage layer new|words|check|render|import|brief|stock|sheet --project-dir <папка> [...]
 
   layer new    --project-dir P [--dir motion-v01] [--profile avatar|live]    слой из деталей motion-kit
@@ -18,7 +18,7 @@ const COMMANDS = Object.freeze({
 });
 
 // check/render пишут qa-отчёт (`<проект>/qa/<имя>.json`) только когда сами дошли до его записи.
-// Если роутер поймал исключение — значит отчёт не написан, и результат нельзя путать с честным
+// Если роутер поймал исключение – значит отчёт не написан, и результат нельзя путать с честным
 // «стоп» отчёта (код 1, см. scripts/qa/report.js exitCodeFor): это «оценить нельзя», код 2.
 // У остальных команд отчёта нет вовсе, поэтому их ошибки остаются кодом 1.
 const GATE_COMMANDS = new Set(['check', 'render']);
@@ -54,14 +54,14 @@ function parseArgs(argv, flags) {
   return options;
 }
 
-// commands — необязательный override для тестов (передаёт абсолютный путь к тестовому модулю
+// commands – необязательный override для тестов (передаёт абсолютный путь к тестовому модулю
 // вместо реальной подкоманды из COMMANDS), продакшен всегда использует дефолт.
 async function main(argv = process.argv.slice(2), { commands = COMMANDS } = {}) {
   // Ошибка plan.js покажет строку src/plan.js, а не строку бандла (Task 19).
   process.setSourceMapsEnabled(true);
   // Помощь видна без модуля подкоманды (`layer new --project-dir p --help` не требует new.js), но только
   // на месте флага: `--help` значением быть не может (значения с -- отклоняются), а `-h` сразу после
-  // --флага может оказаться его значением (`--title -h`) — такой случай решает parseArgs по FLAGS модуля.
+  // --флага может оказаться его значением (`--title -h`) – такой случай решает parseArgs по FLAGS модуля.
   if (argv.some((token, i) => token === '--help' || (token === '-h' && !(argv[i - 1] || '').startsWith('--')))) {
     console.log(USAGE);
     return 0;
@@ -88,7 +88,7 @@ async function main(argv = process.argv.slice(2), { commands = COMMANDS } = {}) 
     }
     return code;
   } catch (error) {
-    // error?.message ?? … переживает throw 'строка' и throw undefined — не только throw new Error.
+    // error?.message ?? … переживает throw 'строка' и throw undefined – не только throw new Error.
     const message = error?.message ?? String(error);
     console.error(`❌ layer ${command} отменён: ${message}`);
     return GATE_COMMANDS.has(command) ? 2 : 1;

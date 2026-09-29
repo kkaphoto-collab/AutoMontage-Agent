@@ -19,7 +19,7 @@ export function KitBox({ item, children }) {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   if (!Number.isFinite(item.from) || !Number.isFinite(item.until)) {
-    // Частая ошибка — передать в KitBox сырой items[] из plan.js (там at/until в секундах плана,
+    // Частая ошибка – передать в KitBox сырой items[] из plan.js (там at/until в секундах плана,
     // а не item.from/until в кадрах композиции). KitBox рендерится на верхнем уровне, а не внутри
     // <Sequence>, и всегда ждёт результат compileLayer/compileItems.
     throw new Error(

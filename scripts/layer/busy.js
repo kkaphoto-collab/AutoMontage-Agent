@@ -1,21 +1,21 @@
-// Занятость машины — только по настоящим процессам node и их полной командной строке (не по тексту
+// Занятость машины – только по настоящим процессам node и их полной командной строке (не по тексту
 // script-обёрток). knowledge/render-queue-pgrep-deadlock.md: `pgrep -f "remotion render"` однажды
-// поймал zsh-обёртку, которая просто держала текст скрипта в своей командной строке — очереди ждали
-// друг друга 4 часа. Здесь сначала берём только процессы, у которых сам исполняемый файл (`comm=`) —
+// поймал zsh-обёртку, которая просто держала текст скрипта в своей командной строке – очереди ждали
+// друг друга 4 часа. Здесь сначала берём только процессы, у которых сам исполняемый файл (`comm=`) –
 // node, и лишь потом смотрим на их полную командную строку.
 //
 // Диагностика «на глаз», а не блокировка: между двумя проверками занятости два процесса могут увидеть
-// свободную машину одновременно и оба начать рендер — файлового лока или другого взаимного исключения
+// свободную машину одновременно и оба начать рендер – файлового лока или другого взаимного исключения
 // здесь нет. Более того, нормализация ffmpeg и декодирование PCM для G7 внутри `layer render` (уже
-// после самого Remotion-рендера) не матчат ни один маркер и не попадают под REMOTION_CLI — свой же
+// после самого Remotion-рендера) не матчат ни один маркер и не попадают под REMOTION_CLI – свой же
 // долгий хвост рендера другой процесс не увидит как занятость.
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
-// 'scripts/cli.js preview' — не голое 'cli.js preview': тот бы совпал и с «remotion-cli.js preview»,
-// v4-алиасом Remotion Studio (ничего не рендерит, ложная занятость — ровно то, чего требует избегать
+// 'scripts/cli.js preview' – не голое 'cli.js preview': тот бы совпал и с «remotion-cli.js preview»,
+// v4-алиасом Remotion Studio (ничего не рендерит, ложная занятость – ровно то, чего требует избегать
 // «нет ложных срабатываний от … Studio …»).
-// 'scripts/project/build-master.js' — automontage master: полное перекодирование исходника ffmpeg,
+// 'scripts/project/build-master.js' – automontage master: полное перекодирование исходника ffmpeg,
 // такой же тяжёлый процесс, как рендер.
 const MARKERS = ['remotion render', 'scripts/cli.js preview', 'scripts/build.js', 'scripts/preview.js', 'scripts/motion/build.js',
   'scripts/project/build-master.js'];
@@ -25,7 +25,7 @@ const MARKERS = ['remotion render', 'scripts/cli.js preview', 'scripts/build.js'
 // «renderfoo». Любые токены, а не только «--флаги»: путь движка с пробелом («--env-file=…/my projects/…»)
 // разрывал группу флагов, и настоящий рендер слоя не считался занятостью. Цена (редкая): если в пути
 // движка есть « render » отдельным словом («…/my render tools/…» в --env-file), Studio и still этого
-// движка тоже покажутся занятостью — ложное ожидание, а не пропущенный рендер.
+// движка тоже покажутся занятостью – ложное ожидание, а не пропущенный рендер.
 const REMOTION_CLI = /(?:@remotion[\\/]cli[\\/]\S+|[\\/]\.bin[\\/]remotion)\s(?:.*\s)?render(?:\s|$)/u;
 const defaultPs = (args) => execFileSync('ps', args, { encoding: 'utf8', shell: false });
 // «--template» раньше ловился отдельной проверкой снаружи (scripts/cli.js + --template): это просто
@@ -39,9 +39,9 @@ function parseTriples(text) {
   });
 }
 
-// Цепочка предков текущего процесса от process.pid до 1 (launchd/init) по уже снятому снимку ps —
+// Цепочка предков текущего процесса от process.pid до 1 (launchd/init) по уже снятому снимку ps –
 // без отдельного ps-вызова. Раньше «свои» pid были жёстко [process.pid, process.ppid]: если между
-// automontage и слоем стоит ещё один узел-обёртка (например codex exec "…cli.js preview…" — дед
+// automontage и слоем стоит ещё один узел-обёртка (например codex exec "…cli.js preview…" – дед
 // процесса, текст промпта которого случайно совпал с маркером), layer render ждал бы собственного деда
 // часами. Теперь исключается КАЖДЫЙ предок, а не только прямой родитель.
 function ancestorChain(rows, pid) {
@@ -54,7 +54,7 @@ function ancestorChain(rows, pid) {
     seen.add(current);
     if (current === 1) break;
     const row = byPid.get(current);
-    if (!row) break; // процесс уже пропал из снимка — дальше цепочку не знаем, но что нашли — исключаем
+    if (!row) break; // процесс уже пропал из снимка – дальше цепочку не знаем, но что нашли – исключаем
     current = row.ppid;
   }
   return chain;
@@ -65,17 +65,17 @@ function parsePidCommand(line) {
   return match ? { pid: Number(match[1]), command: match[2].replace(/\s+/gu, ' ') } : null;
 }
 
-// Два вызова ps на один опрос: (1) снимок ВСЕХ pid/ppid/comm — по нему строится цепочка предков и
+// Два вызова ps на один опрос: (1) снимок ВСЕХ pid/ppid/comm – по нему строится цепочка предков и
 // список node-кандидатов; (2) один пакетный запрос полных командных строк только этих кандидатов.
 // Нарочно нет маркера для «automontage layer render» / «scripts/layer/cli.js render»: до того, как
-// такой процесс сам дождался свободной машины и запустил настоящий Remotion, он — просто ждущий node,
+// такой процесс сам дождался свободной машины и запустил настоящий Remotion, он – просто ждущий node,
 // неотличимый по командной строке от другого такого же ждущего процесса. Если бы это считалось
 // занятостью, два одновременно запущенных `automontage layer render` видели бы друг друга занятыми и
-// ждали бы вечно — та же взаимная блокировка, что в knowledge/render-queue-pgrep-deadlock.md, только на
+// ждали бы вечно – та же взаимная блокировка, что в knowledge/render-queue-pgrep-deadlock.md, только на
 // этом модуле вместо pgrep -f. Настоящий рендер слоя всё равно ловит REMOTION_CLI ниже, когда он
 // реально стартует.
 function busyRenders({ psImpl = defaultPs, selfPids = null, platform = process.platform } = {}) {
-  if (platform === 'win32') return []; // на Windows нет `ps` — не подключаем ради этого wmic/tasklist
+  if (platform === 'win32') return []; // на Windows нет `ps` – не подключаем ради этого wmic/tasklist
   const rows = parseTriples(psImpl(['-A', '-o', 'pid=,ppid=,comm=']));
   const excluded = selfPids || ancestorChain(rows, process.pid);
   const nodePids = rows
@@ -86,7 +86,7 @@ function busyRenders({ psImpl = defaultPs, selfPids = null, platform = process.p
   try {
     lines = psImpl(['-o', 'pid=,command=', '-p', nodePids.join(',')]).split('\n');
   } catch (_) {
-    return []; // список пропал между двумя снимками (гонка) — этот раунд без результата, опрос повторится
+    return []; // список пропал между двумя снимками (гонка) – этот раунд без результата, опрос повторится
   }
   const busy = [];
   for (const raw of lines) {
@@ -100,8 +100,8 @@ function busyRenders({ psImpl = defaultPs, selfPids = null, platform = process.p
   return busy;
 }
 
-// Для человека (лог ожидания и текст таймаута): без ведущего исполняемого файла — пользователю полезен
-// хвост («scripts/preview.js --project-dir p»), а не путь до node; длинный хвост — последние 160
+// Для человека (лог ожидания и текст таймаута): без ведущего исполняемого файла – пользователю полезен
+// хвост («scripts/preview.js --project-dir p»), а не путь до node; длинный хвост – последние 160
 // символов, там имя скрипта, проект и выходной файл.
 const SHOWN_CHARS = 160;
 function shownCommand(command) {
@@ -120,7 +120,7 @@ async function waitUntilFree({
   platform = process.platform,
 } = {}) {
   if (platform === 'win32') {
-    log('проверка занятости машины недоступна на Windows — рендер начнётся сразу');
+    log('проверка занятости машины недоступна на Windows – рендер начнётся сразу');
     return;
   }
   const started = now();
@@ -131,7 +131,7 @@ async function waitUntilFree({
       busy = busyImpl();
     } catch (error) {
       if (error?.code === 'ENOENT') {
-        log('проверка занятости недоступна: нет команды ps — рендер начнётся сразу');
+        log('проверка занятости недоступна: нет команды ps – рендер начнётся сразу');
         return;
       }
       throw error;

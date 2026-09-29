@@ -31,7 +31,7 @@ test('profiles are deeply frozen, so a gate cannot mutate thresholds seen by lat
   } catch {
     threw = true;
   }
-  // В строгом режиме присваивание в замороженный объект бросает; в нестрогом — тихо ничего не
+  // В строгом режиме присваивание в замороженный объект бросает; в нестрогом – тихо ничего не
   // меняет. Оба исхода означают, что порог не мутировал.
   assert.ok(threw || avatar.rhythm.stopSec === 2.5);
   assert.equal(avatar.rhythm.stopSec, 2.5);
@@ -45,23 +45,23 @@ test('waivers need a reason and only soften waivable gates', () => {
 });
 
 // Мутационная проверка: если убрать условие "g.status !== 'fail'", waiver стал бы менять статус
-// предупреждения, а не только провала — это уже другое, более сильное решение, чем «списать
+// предупреждения, а не только провала – это уже другое, более сильное решение, чем «списать
 // провал», и владелец не давал такого waiver.
 test('a waiver only softens the fail gate it names, not a warn gate with the same id', () => {
   const out = applyWaivers([gate('G1', 'x', { status: 'warn' })], [{ gate: 'G1', reason: 'r' }]);
   assert.equal(out[0].status, 'warn');
 });
 
-// waiver.reason.trim() в hint — с ведущими/хвостовыми пробелами, чтобы поймать регресс на
+// waiver.reason.trim() в hint – с ведущими/хвостовыми пробелами, чтобы поймать регресс на
 // нетримленый текст.
 test('a waiver hint trims the stored reason, not just the match check', () => {
   const out = applyWaivers([gate('G1', 'x', { status: 'fail' })], [{ gate: 'G1', reason: '  пауза на эмоции  ' }]);
   assert.equal(out[0].hint, 'исключение: пауза на эмоции');
 });
 
-// waivers — не обязательно то, что уже провалидировал compileLayer: applyWaivers может получить
+// waivers – не обязательно то, что уже провалидировал compileLayer: applyWaivers может получить
 // manifest.json прямо с диска или ручной вызов. Форма входа доверия не заслуживает, но падать на
-// ней нельзя — просто не находим исключение.
+// ней нельзя – просто не находим исключение.
 test('applyWaivers ignores malformed waiver entries instead of crashing', () => {
   const failing = [gate('G1', 'x', { status: 'fail' })];
   for (const bad of [{ G1: 'x' }, [null], [{ gate: 'G1', reason: 123 }], [{ gate: 'G1', reason: ['ok'] }]]) {
@@ -86,7 +86,7 @@ test('report summary, exit codes and the Russian text', () => {
   assert.match(text, /→ разбейте план/);
 });
 
-// Отчёт с error — не «всё хорошо», даже если gates пуст: сборка/чтение упали раньше, чем
+// Отчёт с error – не «всё хорошо», даже если gates пуст: сборка/чтение упали раньше, чем
 // появился хоть один гейт, и это не «пройдено с предупреждениями», а «оценить нельзя».
 test('a report with an error never reads as good and always exits 2, even with an empty error string', () => {
   const withError = buildReport({ kind: 'layer-check', profile: 'avatar', gates: [], error: 'не собирается plan.js' });
@@ -109,7 +109,7 @@ test('a report with an error never reads as good and always exits 2, even with a
 });
 
 // 59.999 с делится на минуты ДО округления даёт 59,999.toFixed(2) = "60.00" внутри уже отрезанной
-// минутной части — печатался бы обман "0:60,00". Округляем до сантисекунд сначала, потом делим на
+// минутной части – печатался бы обман "0:60,00". Округляем до сантисекунд сначала, потом делим на
 // минуты; отрицательные секунды (опечатка в плане, округление на границе нуля) зажимаем в 0.
 test('clock rounds to centiseconds before splitting minutes, so 59.999s prints as 1:00,00', () => {
   const report = buildReport({ kind: 'layer-check', profile: 'avatar', gates: [
@@ -125,7 +125,7 @@ test('clock rounds to centiseconds before splitting minutes, so 59.999s prints a
   assert.match(text, /2:05,50–2:05,50 two-oh-five/);
 });
 
-// Секунды до нуля (опечатка в плане, округление на границе) не должны печататься как «-1:55,00» —
+// Секунды до нуля (опечатка в плане, округление на границе) не должны печататься как «-1:55,00» –
 // это ничего не говорит человеку, который не думает во внутренних кадрах.
 test('clock clamps negative seconds to 0:00,00 instead of printing a negative minute', () => {
   const report = buildReport({ kind: 'layer-check', profile: 'avatar', gates: [
@@ -148,7 +148,7 @@ test('reports land in <project>/qa and reject unsafe names', (t) => {
 });
 
 // Если renameSync падает (диск, права, антивирус держит файл), временный файл не должен остаться
-// лежать в qa/ — иначе следующий запуск копит мусор рядом с настоящими отчётами.
+// лежать в qa/ – иначе следующий запуск копит мусор рядом с настоящими отчётами.
 test('a failed rename cleans up its temp file instead of littering qa/', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-report-atomic-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -165,7 +165,7 @@ test('a failed rename cleans up its temp file instead of littering qa/', (t) => 
 });
 
 // Тот же приём, но сбой в другой точке: writeFileSync может успеть частично записать временный
-// файл (диск переполнился на середине, антивирус прервал запись) и только потом бросить — временный
+// файл (диск переполнился на середине, антивирус прервал запись) и только потом бросить – временный
 // файл должен исчезнуть точно так же, как при сбое renameSync, а не остаться битым мусором в qa/.
 test('a writeFileSync that writes a partial temp file and then throws also cleans it up', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-report-atomic-write-'));
@@ -174,7 +174,7 @@ test('a writeFileSync that writes a partial temp file and then throws also clean
   const brokenFileSystem = {
     mkdirSync: fs.mkdirSync.bind(fs),
     writeFileSync: (file, text, options) => {
-      // Реально пишем на диск только часть текста — временный файл существует, когда бросаем.
+      // Реально пишем на диск только часть текста – временный файл существует, когда бросаем.
       fs.writeFileSync(file, String(text).slice(0, 3), options);
       throw new Error('диск переполнен');
     },
@@ -190,14 +190,14 @@ test('gate() rejects a status outside pass/warn/fail/waived/skipped', () => {
   assert.throws(() => gate('G2', 'x', { status: 'weird' }), /status должен быть одним из/);
 });
 
-// gate(..., { spans: undefined }) — явное undefined в fields перекрывает дефолт через spread;
+// gate(..., { spans: undefined }) – явное undefined в fields перекрывает дефолт через spread;
 // без страховки formatReport упал бы на g.spans.slice(...).
 test('gate() falls back to an empty spans array even when spans: undefined is passed explicitly', () => {
   const g = gate('G1', 'x', { status: 'warn', spans: undefined });
   assert.deepEqual(g.spans, []);
 });
 
-// threshold: 0 — валидный порог (например, целевая громкость 0 dB), truthy-проверка его теряла бы;
+// threshold: 0 – валидный порог (например, целевая громкость 0 dB), truthy-проверка его теряла бы;
 // числовой threshold форматируется через number() (запятая), а не печатается сырым числом с точкой.
 test('formatReport shows a zero threshold and renders numeric thresholds with a Russian comma', () => {
   const text = formatReport(buildReport({ kind: 'preview', profile: 'avatar', gates: [
@@ -209,20 +209,20 @@ test('formatReport shows a zero threshold and renders numeric thresholds with a 
 });
 
 // Мутационная проверка: если убрать лимит .slice(0, 3), длинный список спанов раздувает .txt до
-// нечитаемости. Полный список уже есть в .json — .txt должен на него указать, а не дублировать.
+// нечитаемости. Полный список уже есть в .json – .txt должен на него указать, а не дублировать.
 test('formatReport shows only 3 spans and points at the full JSON report for the rest', () => {
   const spans = [1, 2, 3, 4].map((i) => ({ fromSec: i, toSec: i + 1, note: `n${i}` }));
   const text = formatReport(buildReport({ kind: 'preview', profile: 'avatar', gates: [gate('G1', 'x', { status: 'fail', spans })] }));
   assert.match(text, /n1[\s\S]*n2[\s\S]*n3/);
   assert.doesNotMatch(text, /n4/);
   // Раньше здесь печатался буквальный плейсхолдер «qa/<имя>.json»: formatReport не знает
-  // настоящего имени файла (его выбирает writeReport), печатать выдуманный путь — вводить в
+  // настоящего имени файла (его выбирает writeReport), печатать выдуманный путь – вводить в
   // заблуждение. Указываем на JSON-отчёт рядом, не называя файл, которого formatReport не видел.
   assert.doesNotMatch(text, /qa\/<имя>\.json/);
-  assert.match(text, /…и ещё 1 — полный список в JSON-отчёте рядом/);
+  assert.match(text, /…и ещё 1 – полный список в JSON-отчёте рядом/);
 });
 
-// Мутационная проверка: подсказка не должна печататься для pass — иначе pass-гейт с заметкой
+// Мутационная проверка: подсказка не должна печататься для pass – иначе pass-гейт с заметкой
 // выглядел бы как замечание, требующее внимания, наравне с warn/fail/waived/skipped.
 test('formatReport prints a gate hint everywhere except on a pass gate', () => {
   const text = formatReport(buildReport({ kind: 'preview', profile: 'avatar', gates: [
@@ -233,7 +233,7 @@ test('formatReport prints a gate hint everywhere except on a pass gate', () => {
   assert.match(text, /→ нет музыки/);
 });
 
-// Мутационная проверка: verdict для warn не должен совпадать с verdict для pass — иначе владелец
+// Мутационная проверка: verdict для warn не должен совпадать с verdict для pass – иначе владелец
 // не заметит, что часть гейтов предупредила.
 test('an all-warn report prints "есть предупреждения", not "всё хорошо"', () => {
   const text = formatReport(buildReport({ kind: 'preview', profile: 'avatar', gates: [gate('G9', 'x', { status: 'warn' })] }));
@@ -241,7 +241,7 @@ test('an all-warn report prints "есть предупреждения", not "в
   assert.doesNotMatch(text, /всё хорошо/);
 });
 
-// waived и skipped — не fail и не warn: если бы их считали иначе (как один из выживших мутантов
+// waived и skipped – не fail и не warn: если бы их считали иначе (как один из выживших мутантов
 // пытался), любой waiver или пропущенный из-за отсутствия входа гейт красил бы весь отчёт в СТОП.
 test('waived and skipped gates count neither as fail nor warn, so the report still passes', () => {
   const report = buildReport({ kind: 'preview', profile: 'avatar', gates: [
@@ -250,7 +250,7 @@ test('waived and skipped gates count neither as fail nor warn, so the report sti
   ] });
   assert.deepEqual(report.summary, { status: 'pass', fail: 0, warn: 0 });
   assert.equal(exitCodeFor(report), 0);
-  // Только waived (без fail/warn) — «всё хорошо», но с явным числом исключений, а не молча.
+  // Только waived (без fail/warn) – «всё хорошо», но с явным числом исключений, а не молча.
   assert.match(formatReport(report), /всё хорошо \(исключений: 1\)/);
 });
 
@@ -258,11 +258,11 @@ test('buildReport keeps unused waivers as {gate, reason} and formatReport asks t
   const report = buildReport({ kind: 'layer-check', profile: 'avatar', gates: [gate('G1', 'Ритм')],
     unusedWaivers: [{ gate: 'G1', reason: ' длинный план экрана ', extra: true }] });
   assert.deepEqual(report.unusedWaivers, [{ gate: 'G1', reason: 'длинный план экрана' }]);
-  // Лишнее исключение — подсказка автору, а не предупреждение: вердикт и код не меняются.
+  // Лишнее исключение – подсказка автору, а не предупреждение: вердикт и код не меняются.
   assert.deepEqual(report.summary, { status: 'pass', fail: 0, warn: 0 });
   assert.equal(exitCodeFor(report), 0);
-  // ℹ️, а не ☑️: ☑️ — значок гейта, который исключение действительно сняло.
-  assert.match(formatReport(report), /^ℹ️ исключение G1 не понадобилось: длинный план экрана — уберите его из plan\.js$/m);
+  // ℹ️, а не ☑️: ☑️ – значок гейта, который исключение действительно сняло.
+  assert.match(formatReport(report), /^ℹ️ исключение G1 не понадобилось: длинный план экрана – уберите его из plan\.js$/m);
   assert.doesNotMatch(formatReport(report), /☑️|даёт только предупреждение/);
   const plain = buildReport({ kind: 'layer-check', profile: 'avatar', gates: [] });
   assert.deepEqual(plain.unusedWaivers, []);
@@ -278,7 +278,7 @@ test('an unused waiver on a gate that only warns explains that a waiver lifts a 
     gates: [gate('G1', 'Ритм', { status: 'warn' }), gate('G4', 'Хук')],
     unusedWaivers: [{ gate: 'G1', reason: 'длинные планы' }, { gate: 'G4', reason: 'уход в хуке' }] });
   const text = formatReport(report);
-  assert.match(text, /^ℹ️ исключение G1 не понадобилось: длинные планы — уберите его из plan\.js\n {3}→ G1 даёт только предупреждение — исключение снимает лишь стоп$/m);
-  assert.match(text, /^ℹ️ исключение G4 не понадобилось: уход в хуке — уберите его из plan\.js$/m);
+  assert.match(text, /^ℹ️ исключение G1 не понадобилось: длинные планы – уберите его из plan\.js\n {3}→ G1 даёт только предупреждение – исключение снимает лишь стоп$/m);
+  assert.match(text, /^ℹ️ исключение G4 не понадобилось: уход в хуке – уберите его из plan\.js$/m);
   assert.equal(text.match(/даёт только предупреждение/g).length, 1);
 });

@@ -18,11 +18,11 @@ function transcriptPath(projectDir, manifest) {
   } catch (error) {
     throw new Error(`транскрипт проекта: ${error.message}`);
   }
-  if (!fs.existsSync(file)) throw new Error(`нет транскрипта ${stored} — сначала расшифруйте исходник проекта`);
+  if (!fs.existsSync(file)) throw new Error(`нет транскрипта ${stored} – сначала расшифруйте исходник проекта`);
   return file;
 }
 
-// spelling.json — {как услышал Whisper: как писать на экране}. Форма проверяется до записи words.js:
+// spelling.json – {как услышал Whisper: как писать на экране}. Форма проверяется до записи words.js:
 // null или массив иначе дали бы невнятный TypeError внутри kit, а старый words.js остаётся целым.
 function readSpelling(layerDir) {
   const file = path.join(layerDir, 'spelling.json');
@@ -40,18 +40,18 @@ function readSpelling(layerDir) {
 const quoted = (items, limit = 5) => `${items.slice(0, limit).map((item) => `«${item}»`).join(', ')}${items.length > limit ? ', …' : ''}`;
 
 // Что автору стоит знать о написании и словах: ключ spelling, который ничего не заменил (опечатка
-// или ключ из нескольких слов — kit сверяет слова по одному), и слова после конца исходника.
+// или ключ из нескольких слов – kit сверяет слова по одному), и слова после конца исходника.
 function wordNotes(words, spelling, durationSec, normWord) {
   const notes = [];
   const heard = new Set(words.map((word) => normWord(word.w)));
   const keys = Object.keys(spelling);
   const multi = keys.filter((key) => /\s/u.test(key.trim()));
   const missing = keys.filter((key) => !/\s/u.test(key.trim()) && !heard.has(normWord(key)));
-  if (multi.length) notes.push(`⚠️ spelling.json: ключи из нескольких слов не поддерживаются — kit сверяет слова по одному: ${quoted(multi)}`);
-  if (missing.length) notes.push(`⚠️ spelling.json: этих слов нет в транскрипте — написание не применилось: ${quoted(missing)}`);
+  if (multi.length) notes.push(`⚠️ spelling.json: ключи из нескольких слов не поддерживаются – kit сверяет слова по одному: ${quoted(multi)}`);
+  if (missing.length) notes.push(`⚠️ spelling.json: этих слов нет в транскрипте – написание не применилось: ${quoted(missing)}`);
   if (Number.isFinite(durationSec)) {
     const late = words.filter((word) => word.s >= durationSec);
-    if (late.length) notes.push(`⚠️ слова транскрипта после конца исходника (${formatNumber(durationSec)} с) — в слое их не будет: ${quoted(late.map((word) => word.w))}`);
+    if (late.length) notes.push(`⚠️ слова транскрипта после конца исходника (${formatNumber(durationSec)} с) – в слое их не будет: ${quoted(late.map((word) => word.w))}`);
   }
   return notes;
 }
@@ -70,15 +70,15 @@ function writeTextAtomic(file, text) {
   }
 }
 
-// Слова транскрипта проекта → src/words.js слоя с написанием из spelling.json. durationSec — длина
-// исходника слоя (для предупреждения о хвосте), warn — куда писать предупреждения.
+// Слова транскрипта проекта → src/words.js слоя с написанием из spelling.json. durationSec – длина
+// исходника слоя (для предупреждения о хвосте), warn – куда писать предупреждения.
 function writeLayerWords(projectDir, manifest, layerDir, { durationSec, warn = () => {} } = {}) {
   const transcript = transcriptPath(projectDir, manifest);
   const spelling = readSpelling(layerDir);
   const core = loadKitCore();
   const words = core.flattenTranscript(readJson(transcript, manifest.transcript.words), { spelling });
   for (const note of wordNotes(words, spelling, durationSec, core.normWord)) warn(note);
-  writeTextAtomic(path.join(layerDir, 'src', 'words.js'), `// Сгенерировано automontage layer words — не править руками.\nexport default ${JSON.stringify(words)};\n`);
+  writeTextAtomic(path.join(layerDir, 'src', 'words.js'), `// Сгенерировано automontage layer words – не править руками.\nexport default ${JSON.stringify(words)};\n`);
   return words.length;
 }
 

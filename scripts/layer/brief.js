@@ -1,6 +1,6 @@
-// automontage layer brief — черновик lesson brief для проверенного слоя kit: одна сцена broll на весь
-// хронометраж играет импортированный слой (звук слоя по умолчанию mix, D6), голос — из исходника по
-// глобальному таймкоду, музыка — по желанию. Формат brief прежний (D-036). Команда только публикует
+// automontage layer brief – черновик lesson brief для проверенного слоя kit: одна сцена broll на весь
+// хронометраж играет импортированный слой (звук слоя по умолчанию mix, D6), голос – из исходника по
+// глобальному таймкоду, музыка – по желанию. Формат brief прежний (D-036). Команда только публикует
 // draft: утверждает человек после просмотра preview.
 //
 // Одна сцена, а не несколько: brollEnvelope (src/scenes/BrollMedia.jsx) приглушает звук слоя на входе и
@@ -21,7 +21,7 @@ const FLAGS = { 'project-dir': 'value', asset: 'value', title: 'value', 'head-cr
   audio: 'value', music: 'value', 'music-gain-db': 'value', 'music-start-sec': 'value' };
 const AUDIO_MODES = ['mix', 'mute'];
 const SHA256 = /^[a-f0-9]{64}$/u;
-// Музыка под голос аватара: свой ducking и тише по умолчанию; живой голос — ducking движка.
+// Музыка под голос аватара: свой ducking и тише по умолчанию; живой голос – ducking движка.
 const AVATAR_DUCKING = Object.freeze({ thresholdDb: -40, ratio: 4, attackMs: 10, releaseMs: 260 });
 const MUSIC_GAIN_DB = Object.freeze({ avatar: -16, live: -12 });
 
@@ -42,7 +42,7 @@ function buildLayerBrief({ sourcePath, probe, entry, title, headCream, headOrang
     scenes: [{
       scene: 'broll', start: 0, end: probe.duration, videoTitle: ' ', headCream, headOrange, showSpeakerPip: false,
       brollMedia: { kind: 'video', src: entry.reference, sha256: entry.canonicalSha256, trimStartSec: 0, fit: 'cover', audioMode, overlay: 'none' },
-      reason: `Motion-слой ${entry.layer} на весь хронометраж: графика, звуки и субтитры внутри слоя, голос — из исходника по глобальному таймкоду. Слой прошёл layer check и layer render.`,
+      reason: `Motion-слой ${entry.layer} на весь хронометраж: графика, звуки и субтитры внутри слоя, голос – из исходника по глобальному таймкоду. Слой прошёл layer check и layer render.`,
     }],
   };
   if (music) {
@@ -52,11 +52,11 @@ function buildLayerBrief({ sourcePath, probe, entry, title, headCream, headOrang
   return brief;
 }
 
-// --asset (ссылка assets/broll/video/…/media.mp4 или sha256 ассета) — слой kit из реестра, чей отчёт layer
+// --asset (ссылка assets/broll/video/…/media.mp4 или sha256 ассета) – слой kit из реестра, чей отчёт layer
 // render (тот же рендер: sha256 и путь во входе «layer») всё ещё целый, пройденный и собран для текущего
 // исходника, а сам ассет цел.
 function checkedLayer(projectDir, sourcePath, asset) {
-  const refuse = (why) => new Error(`ассет не импортирован как проверенный слой (${why}) — сначала automontage layer import `
+  const refuse = (why) => new Error(`ассет не импортирован как проверенный слой (${why}) – сначала automontage layer import `
     + `--project-dir "${projectDir}" --file motion-vNN/renders/layer-NN.mp4`);
   const entry = SHA256.test(asset) ? findByCanonical(projectDir, asset) : findByReference(projectDir, asset);
   if (!entry) throw refuse(`${asset} нет в qa/layer-imports.json`);
@@ -74,19 +74,19 @@ function checkedLayer(projectDir, sourcePath, asset) {
   return { entry, record };
 }
 
-// Сцена слоя идёт на весь исходник: output.durationInFrames = round(длина × fps). Слой короче хотя бы на кадр —
-// preview упал бы на BROLL_MEDIA_CLIP_OVERRUN; длиннее больше допуска G6 — слой собран не под этот исходник.
-// Длина ассета — по видеопотоку из asset.json, как её сверяет preview.
+// Сцена слоя идёт на весь исходник: output.durationInFrames = round(длина × fps). Слой короче хотя бы на кадр –
+// preview упал бы на BROLL_MEDIA_CLIP_OVERRUN; длиннее больше допуска G6 – слой собран не под этот исходник.
+// Длина ассета – по видеопотоку из asset.json, как её сверяет preview.
 function assertFullLength({ record, probe, profile, projectDir }) {
   const sourceFrames = Math.round(probe.duration * probe.fps);
   const layerFrames = Math.round(record.durationSec * probe.fps);
   const tolerance = profile.duration.toleranceFrames;
   const lengths = `${formatNumber(record.durationSec)} с против ${formatNumber(probe.duration)} с`;
   if (layerFrames < sourceFrames) {
-    throw new Error(`слой короче исходника: ${lengths} — слой идёт одной сценой на весь ролик и кончился бы раньше него; ${newLayer(projectDir)}`);
+    throw new Error(`слой короче исходника: ${lengths} – слой идёт одной сценой на весь ролик и кончился бы раньше него; ${newLayer(projectDir)}`);
   }
   if (layerFrames - sourceFrames > tolerance) {
-    throw new Error(`слой длиннее исходника: ${lengths} (допуск ${tolerance} кадр) — слой собран не под этот исходник; ${newLayer(projectDir)}`);
+    throw new Error(`слой длиннее исходника: ${lengths} (допуск ${tolerance} кадр) – слой собран не под этот исходник; ${newLayer(projectDir)}`);
   }
 }
 
@@ -98,9 +98,9 @@ function numberFlag(options, flag) {
   return value;
 }
 
-// Музыка lesson-брифа — абсолютный путь к файлу в assets/music проекта (preview берёт brief.music.file как
+// Музыка lesson-брифа – абсолютный путь к файлу в assets/music проекта (preview берёт brief.music.file как
 // есть). Файл снаружи копируется туда под своим именем: те же байты под этим именем переиспользуются, другой
-// файл с этим именем не перезаписывается. Копирует run — после проверки brief.
+// файл с этим именем не перезаписывается. Копирует run – после проверки brief.
 function planMusic(projectDir, option) {
   const file = path.resolve(option);
   const stat = fs.lstatSync(file, { throwIfNoEntry: false });
@@ -114,14 +114,14 @@ function planMusic(projectDir, option) {
   const destination = resolveProjectPath(projectDir, storedPath, { label: 'assets/music', mustExist: false, type: 'file' });
   if (fs.lstatSync(destination, { throwIfNoEntry: false })) {
     if (sha256File(destination) !== sha256File(file)) {
-      throw new Error(`в assets/music уже есть другой файл ${path.basename(file)} — переименуйте файл музыки или укажите ${storedPath}`);
+      throw new Error(`в assets/music уже есть другой файл ${path.basename(file)} – переименуйте файл музыки или укажите ${storedPath}`);
     }
     return { file: destination, copyFrom: null };
   }
   return { file: destination, copyFrom: file, storedPath };
 }
 
-// deps: log — вывод (тихий в тестах).
+// deps: log – вывод (тихий в тестах).
 async function run(options, deps = {}) {
   const log = deps.log || console.log;
   const { projectDir, sourcePath } = projectFrom(options);
@@ -136,7 +136,7 @@ async function run(options, deps = {}) {
 
   const { entry, record } = checkedLayer(projectDir, sourcePath, options.asset);
   // Без звуковой дорожки слой с mix preview отверг бы позже (BROLL_MEDIA_AUDIO_REQUIRED).
-  if (audioMode !== 'mute' && record.hasAudio !== true) throw new Error('в слое нет звука — укажите --audio mute или пересоберите слой со звуками');
+  if (audioMode !== 'mute' && record.hasAudio !== true) throw new Error('в слое нет звука – укажите --audio mute или пересоберите слой со звуками');
   const profile = PROFILES[entry.profile];
   const probe = probeVideo(sourcePath);
   assertFullLength({ record, probe, profile, projectDir });
@@ -154,7 +154,7 @@ async function run(options, deps = {}) {
     + `${music ? `, музыка ${relative(projectDir, music.file)}` : ''}`);
   if (audioMode === 'mix') {
     const fade = formatNumber(profile.sfx.sceneFadeSec);
-    log(`Звук слоя в первые и последние ${fade} с приглушён огибающей сцены — эффект хука ставьте не раньше ${fade} с.`);
+    log(`Звук слоя в первые и последние ${fade} с приглушён огибающей сцены – эффект хука ставьте не раньше ${fade} с.`);
   }
   log(`Дальше: automontage preview --project-dir "${projectDir}" --brief ${result.relativePath}`);
   return 0;

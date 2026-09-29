@@ -20,26 +20,26 @@ test('KitBox places text at its box, marks it for safe-zone checks and hides out
 
 test('KitBox hides frames that are inside [from, until) but not yet opaque, using the same rule as the manifest', () => {
   // frame === from: вход ещё не стартовал, opacity animOf у fly/pop равна 0 в самом первом
-  // кадре — манифест (itemExtentAt) в этом кадре тоже должен вернуть null, KitBox обязан
+  // кадре – манифест (itemExtentAt) в этом кадре тоже должен вернуть null, KitBox обязан
   // рисовать то же самое, а не полупрозрачный div с data-kit-text.
   const atFrom = kitAt(10);
   assert.equal(render(React.createElement(atFrom.KitBox, { item: item() }, 'Текст')), '');
   assert.equal(atFrom.itemExtentAt(item(), 10, 25), null);
 
   // frame === until - 1: последний реально отрисованный кадр, но по расчёту exit прозрачность
-  // здесь уже дошла до 0 — манифест в этом же кадре тоже не увидит элемент.
+  // здесь уже дошла до 0 – манифест в этом же кадре тоже не увидит элемент.
   const atLastFrame = kitAt(59);
   assert.equal(render(React.createElement(atLastFrame.KitBox, { item: item() }, 'Текст')), '');
   assert.equal(atLastFrame.itemExtentAt(item(), 59, 25), null);
 
-  // frame === until: формально уже вне окна показа — тоже ничего не рисуем.
+  // frame === until: формально уже вне окна показа – тоже ничего не рисуем.
   const atUntil = kitAt(60);
   assert.equal(render(React.createElement(atUntil.KitBox, { item: item() }, 'Текст')), '');
 });
 
-// Ревью задачи 23 (minor): на первом кадре маски (p=0) clip закрывает 100% ширины — KitBox
+// Ревью задачи 23 (minor): на первом кадре маски (p=0) clip закрывает 100% ширины – KitBox
 // обязан рисовать ту же пустоту, что видит манифест (itemExtentAt null), а не полупрозрачный
-// (на деле — полностью закрытый) div с data-kit-text.
+// (на деле – полностью закрытый) div с data-kit-text.
 test('KitBox renders nothing on a fully closed mask frame, matching itemExtentAt null', () => {
   const maskItem = item({ enter: { kind: 'mask' } }); // from: 10, until: 60
   const atFrom = kitAt(10);
@@ -57,7 +57,7 @@ test('bleed items stay visible but never get the safe-zone text marker', () => {
 test('KitBox refuses a raw plan item: needs compiled from/until frame numbers, not plan seconds', () => {
   const kit = kitAt(30);
   // Форма из plan.js: at/until в секундах монтажного листа. until называется так же, как в
-  // скомпилированном виде, но from нет вообще — типичная ошибка «забыли compileLayer/compileItems».
+  // скомпилированном виде, но from нет вообще – типичная ошибка «забыли compileLayer/compileItems».
   const planShapedItem = { id: 'title', at: 0.4, until: 2.4 };
   assert.throws(
     () => render(React.createElement(kit.KitBox, { item: planShapedItem }, 'Текст')),
@@ -66,7 +66,7 @@ test('KitBox refuses a raw plan item: needs compiled from/until frame numbers, n
 });
 
 // Переводит стиль KitBox (left/top/width/height + translate/scale/rotate вокруг центра) обратно
-// в осепараллельный габарит — то же вычисление, что itemExtentAt делает из «сырых» a.dx/a.dy/a.s.
+// в осепараллельный габарит – то же вычисление, что itemExtentAt делает из «сырых» a.dx/a.dy/a.s.
 function bboxFromStyle(style) {
   const m = /translate\(([-\d.]+)px, ([-\d.]+)px\) scale\(([-\d.]+)\) rotate\(([-\d.]+)deg\)/.exec(style.transform);
   assert.ok(m, `unexpected transform: ${style.transform}`);
@@ -101,7 +101,7 @@ test('SpeakerLayer renders one muted video with the camera transform, fills side
   assert.equal(render(React.createElement(kitAt(120).SpeakerLayer, { src: 'speaker.mp4', track: away, lastFrame: 200 })), '');
 });
 
-// left/top задают положение верхнего левого угла ДО transform — это и есть transform-origin
+// left/top задают положение верхнего левого угла ДО transform – это и есть transform-origin
 // «0 0» для scale(), поэтому он остаётся на месте, а правый/нижний угол уезжает на width/height*scale.
 function fillBoxFromStyle(style) {
   const m = /scale\(([-\d.]+)\)/.exec(style.transform);
@@ -133,7 +133,7 @@ test('speakerFillStyle overscans the frame with a blur-safe margin (>= 3 sigma o
 });
 
 test('speakerTransform framing matches what the gates read: face moves by exactly dx/dy and non-fill shots leave no edge gap', () => {
-  // Прогон по всем официальным пресетам плюс панч на двух соотношениях сторон — та же проверка,
+  // Прогон по всем официальным пресетам плюс панч на двух соотношениях сторон – та же проверка,
   // что делают гейты G1/G2 по манифесту камеры. Регэксп жёстко требует порядок «translate() scale()»:
   // если он поменяется на «scale() translate()», exec вернёт null и assert.ok упадёт на первом кадре.
   const kit = kitAt(0);
@@ -193,13 +193,13 @@ test('SpeakerLayer keeps Freeze mounted and toggles active instead of remounting
   const cfg = { fps: 25, width: 1080, height: 1920, durationInFrames: 250 };
   const track = kitAt(0).compileCamera({ face: { x: 540, y: 787 }, shots: [{ at: 0, preset: 'W' }, { at: 2, preset: 'L' }] }, cfg);
   const atLast = render(React.createElement(kitAt(200).SpeakerLayer, { src: 'speaker.mp4', track, lastFrame: 200 }));
-  // Кадр 200 внутри бокового плана L (fill:true) — обе копии смонтированы через Freeze, но ещё
+  // Кадр 200 внутри бокового плана L (fill:true) – обе копии смонтированы через Freeze, но ещё
   // не держат кадр (active=false): data-freeze-active="false" доказывает, что обёртка осталась
   // на месте, а не пропала вместе с video, как было бы при условном рендере <Freeze> целиком.
   assert.equal((atLast.match(/data-freeze-active="false"/g) || []).length, 2);
   assert.doesNotMatch(atLast, /data-freeze="/);
   const afterLast = render(React.createElement(kitAt(201).SpeakerLayer, { src: 'speaker.mp4', track, lastFrame: 200 }));
-  // Кадр 201 внутри того же плана — заморожены обе копии: фон и основной кадр.
+  // Кадр 201 внутри того же плана – заморожены обе копии: фон и основной кадр.
   assert.equal((afterLast.match(/data-freeze="200"/g) || []).length, 2);
   assert.equal((afterLast.match(/data-freeze-active="true"/g) || []).length, 2);
 });
@@ -215,14 +215,14 @@ test('SpeakerLayer fades the fill and main copies together via the group opacity
   const html = render(React.createElement(kit.SpeakerLayer, { src: 'speaker.mp4', track: away, lastFrame: 200 }));
   const styles = [...html.matchAll(/<div style="([^"]*)"/g)].map((m) => m[1]);
   // Ровно один styled div на каждую копию (fill + main) плюс внешняя группа; Freeze-обёртки стиля
-  // не несут. opacity должна стоять только на внешней группе — по копиям делать нечего.
+  // не несут. opacity должна стоять только на внешней группе – по копиям делать нечего.
   assert.equal(styles.length, state.fill ? 3 : 2, `unexpected number of styled divs: ${html}`);
   assert.match(styles[0], /opacity:0\.5/);
   for (const inner of styles.slice(1)) assert.doesNotMatch(inner, /opacity/);
 });
 
 test('kitBoxStyle draws exactly the box itemExtentAt measures for the same frame (the gate sees what is drawn)', () => {
-  // kitBoxStyle/itemExtentAt — чистые функции с явным (item, frame, fps): один и тот же bundle
+  // kitBoxStyle/itemExtentAt – чистые функции с явным (item, frame, fps): один и тот же bundle
   // годится для любого frame/fps, стаб используется только когда нужно смонтировать сам KitBox.
   const kit = kitAt(0);
   const popItem = item({ id: 'pop-item', enter: { kind: 'pop' }, rot: 20, from: 10, until: 100,
@@ -273,7 +273,7 @@ test('FullscreenReveal opens from a safe-zone card to the full frame and closes 
   assert.equal(render(React.createElement(kitAt(120).StockInsert, { insert })), '');
 });
 
-// CARD не жёсткая константа под 1080x1920 (та давала карточку высотой 240px на 1920x1080) —
+// CARD не жёсткая константа под 1080x1920 (та давала карточку высотой 240px на 1920x1080) –
 // revealCard(width, height) считает инсеты от той же safe-зоны, что и текст, поэтому подходит
 // под оба соотношения сторон.
 test('revealCard derives its card insets from the safe-zone rect for both aspect ratios', () => {
@@ -302,7 +302,7 @@ test('FullscreenReveal scales its corner radius for a non-standard resolution to
   assert.match(html, /round 18\.7px\)/);
 });
 
-// Task 15 fix: revealProgress и insertOpacity читают одно closeWindow — на последнем реально
+// Task 15 fix: revealProgress и insertOpacity читают одно closeWindow – на последнем реально
 // отрисованном кадре (to − 1) opacity доходит ровно до 0, и FullscreenReveal обязан рисовать
 // пустоту (isShown/VISIBLE_MIN), а не декодировать фактически невидимый кадр стока; в середине
 // close, пока opacity ещё дробная, разметка должна нести именно это число.
@@ -321,7 +321,7 @@ test('FullscreenReveal renders nothing on the fully-closed last frame and the tr
 });
 
 // Гарантия из Step 0: не только StockInsert, но и сам FullscreenReveal отказывается рисовать
-// «сырую» вставку с секундами вместо скомпилированных кадров — чтобы будущие screen/scene
+// «сырую» вставку с секундами вместо скомпилированных кадров – чтобы будущие screen/scene
 // вставки, вызывающие FullscreenReveal напрямую, тоже получили эту защиту.
 test('FullscreenReveal refuses a raw plan-shaped insert with seconds instead of compiled frames', () => {
   const kit = kitAt(0);
@@ -334,7 +334,7 @@ test('FullscreenReveal refuses a raw plan-shaped insert with seconds instead of 
 
 // Пин точных цифр, которые видит зритель: card insets в inset() посчитаны от safeRect (проверено
 // отдельно выше), а сама строка clip-path обязана собирать их в правильном порядке (top right
-// bottom left) — перестановка left/right молча ломает форму карточки, не ломая ни одного теста
+// bottom left) – перестановка left/right молча ломает форму карточки, не ломая ни одного теста
 // на голые числа revealCard.
 test('FullscreenReveal draws the exact open-card clip-path for both aspect ratios at the start of the insert', () => {
   const insert = { id: 'stock-1', kind: 'stock', from: 50, to: 100, src: 'stock/a.mp4' };
@@ -349,12 +349,12 @@ test('StockInsert Ken Burns zoom rises linearly from kb[0] at from to kb[1] near
   const at = (frame) => render(React.createElement(kitAt(frame).StockInsert, { insert }));
   assert.match(at(50), /scale\(1\.0300\)/);
   assert.match(at(75), /scale\(1\.0650\)/);
-  // frame 99 (to-1) — не 98: с общим close-окном (Task 15 fix) insertOpacity там уже 0, и
+  // frame 99 (to-1) – не 98: с общим close-окном (Task 15 fix) insertOpacity там уже 0, и
   // FullscreenReveal/StockInsert теперь ничего не рисуют на фактически невидимом кадре.
   assert.match(at(98), /scale\(1\.0972\)/);
 });
 
-// kb необязателен в контракте (`kb?: [1.03, 1.1]`) — StockInsert подставляет дефолт сам, а не
+// kb необязателен в контракте (`kb?: [1.03, 1.1]`) – StockInsert подставляет дефолт сам, а не
 // падает на insert.kb[0], если вставка ещё не прошла compileInserts (там дефолт уже есть тоже)
 // или её собрали вручную без него.
 test('StockInsert defaults kb to [1.03, 1.1] and renders without throwing when it is absent', () => {
@@ -364,7 +364,7 @@ test('StockInsert defaults kb to [1.03, 1.1] and renders without throwing when i
   assert.match(html, /scale\(1\.0300\)/);
 });
 
-// StockInsert стоит на верхнем уровне композиции, как SpeakerLayer, а не внутри чужой Sequence —
+// StockInsert стоит на верхнем уровне композиции, как SpeakerLayer, а не внутри чужой Sequence –
 // поэтому он ждёт уже скомпилированную вставку (compileInserts) с кадрами from/to, а не секунды
 // плана. Та же ошибка, что ловит KitBox для items.
 test('StockInsert refuses a raw plan-shaped insert with seconds instead of compiled frames', () => {
@@ -399,7 +399,7 @@ test('revealProgress and insertOpacity finish the close exactly on the last draw
   }
 });
 
-// Ревью Task 16: pixel maxScroll не может быть верным — plan.js не знает натуральную высоту
+// Ревью Task 16: pixel maxScroll не может быть верным – plan.js не знает натуральную высоту
 // картинки и рисковал проскроллить в белый низ раньше конца окна. scrollShare двигает долю (0..1)
 // через objectPosition, а не пиксели: короткий скриншот просто почти не двигается, но никогда не
 // уезжает мимо своего низа.
@@ -412,7 +412,7 @@ test('scrollShare eases smoothly from 0 at from to the full share at to, through
 
 test('scrollShare shows the ease-in near the start: far below the linear share', () => {
   const kit = kitAt(0);
-  // from+5 в окне 50 кадров — линейно было бы 0.1; inOut-кривая на входе куда положе.
+  // from+5 в окне 50 кадров – линейно было бы 0.1; inOut-кривая на входе куда положе.
   assert.ok(kit.scrollShare(15, 10, 60, 1) < 0.1);
 });
 
@@ -428,7 +428,7 @@ test('ScrollShot fills the window via objectPosition (a page share, never a pixe
   const html = render(React.createElement(kitAt(35).ScrollShot, { src: 'shots/page.png', from: 10, to: 60, scroll: 1 }));
   assert.match(html, /<img src="\/static\/shots\/page\.png"/);
   assert.match(html, /object-position:50% 50\.00%/, 'frame 35 is the exact midpoint of the 10..60 window');
-  assert.doesNotMatch(html, /translateY/, 'no more pixel translateY — the old overscroll bug lived here');
+  assert.doesNotMatch(html, /translateY/, 'no more pixel translateY – the old overscroll bug lived here');
   // Пин cover-режима: скриншот обязан заполнять всё окно карточки, а не оставлять поля.
   assert.match(html, /object-fit:cover/);
   assert.match(html, /height:100%/);
@@ -443,11 +443,11 @@ test('screenshot card renders inside BrowserFrame and shows the URL', () => {
 
 test('BrowserFrame chrome scales with the composition resolution (short side / 1080), a scale prop may override it', () => {
   assert.match(render(React.createElement(kitAt(0, { width: 1080, height: 1920 }).BrowserFrame, { url: 'x' }, 'x')), /height:64px/);
-  // k = 720/1080 = 0.6667; 64 * k ≈ 42.7 — не 64px, иначе хром окна на нестандартном разрешении
+  // k = 720/1080 = 0.6667; 64 * k ≈ 42.7 – не 64px, иначе хром окна на нестандартном разрешении
   // рисуется в исходном (для 1080p) масштабе поверх реального кадра.
   assert.match(render(React.createElement(kitAt(0, { width: 720, height: 1280 }).BrowserFrame, { url: 'x' }, 'x')), /height:42\.7px/);
   // Тот же k = min(w,h)/1080 работает и на landscape: 1920x1080 (k=1) и 1280x720 (k≈0.6667) дают
-  // те же цифры, что и портретные 1080x1920/720x1280 — доказывает, что масштаб зависит от короткой
+  // те же цифры, что и портретные 1080x1920/720x1280 – доказывает, что масштаб зависит от короткой
   // стороны кадра, а не от того, что width стоит первым в паре.
   assert.match(render(React.createElement(kitAt(0, { width: 1920, height: 1080 }).BrowserFrame, { url: 'x' }, 'x')), /height:64px/);
   assert.match(render(React.createElement(kitAt(0, { width: 1280, height: 720 }).BrowserFrame, { url: 'x' }, 'x')), /height:42\.7px/);
@@ -469,14 +469,14 @@ test('BrowserFrame URL pill defaults to a sans-serif font (overridable), ellipsi
   const html = render(React.createElement(kit.BrowserFrame, { url: 'example.com/very/long/path' }, 'x'));
   assert.match(html, /font-family:sans-serif/);
   assert.match(html, /text-overflow:ellipsis/);
-  // text-overflow:ellipsis не работает на анонимном flex-элементе — только display:block реально
+  // text-overflow:ellipsis не работает на анонимном flex-элементе – только display:block реально
   // обрезает длинный URL. Проверяем именно стиль пилюли (span с текстом урла), а не всей разметки:
   // соседние div'ы BrowserFrame остаются display:flex, это ожидаемо.
   const pillMatch = /<span style="([^"]*)">example\.com\/very\/long\/path<\/span>/.exec(html);
   assert.ok(pillMatch, `pill span not found: ${html}`);
   assert.match(pillMatch[1], /display:block/);
   assert.doesNotMatch(pillMatch[1], /display:flex/);
-  // lineHeight равен той же px(36), что и height пилюли (при k=1 на 1080x1920 это 36px) — так
+  // lineHeight равен той же px(36), что и height пилюли (при k=1 на 1080x1920 это 36px) – так
   // текст остаётся вертикально отцентрован без display:flex/align-items.
   assert.match(pillMatch[1], /line-height:36px/);
   const custom = render(React.createElement(kit.BrowserFrame, { url: 'x', fontFamily: 'Georgia, serif' }, 'x'));
@@ -495,7 +495,7 @@ test('flashOpacity keeps the plan-asserted values at the default fps 25', () => 
   assert.equal(kit.flashOpacity(16, 10), 0);
 });
 
-// Отклонение от плана: frames в ShutterFlash/flashOpacity — эталонные 25fps кадры (как
+// Отклонение от плана: frames в ShutterFlash/flashOpacity – эталонные 25fps кадры (как
 // REVEAL_FRAMES у вставок), а не кадры композиции. flashOpacity(frame, at, fps, frames) сам
 // переводит их через ref25(frames, fps) внутри себя (единый смысл frames везде, компонент просто
 // пробрасывает fps из useVideoConfig), поэтому на 50 fps вспышка длится столько же по времени,
@@ -520,9 +520,9 @@ test('SfxTrack plays each kept cue at -5 dB by default and fades its tail', () =
   assert.match(html, /src="\/static\/sfx\/whoosh-in\.wav"/);
 });
 
-// Отклонение от плана: fade — не жёсткая константа в 5 кадров, а ref25(5, fps) эталонных кадров,
+// Отклонение от плана: fade – не жёсткая константа в 5 кадров, а ref25(5, fps) эталонных кадров,
 // иначе на 50fps хвост звука затухал бы вдвое быстрее по времени, чем на 25fps (5 кадров на 50fps
-// — это всего 0.1с вместо 0.2с). cueVolume принимает fps четвёртым параметром (по умолчанию 25,
+// – это всего 0.1с вместо 0.2с). cueVolume принимает fps четвёртым параметром (по умолчанию 25,
 // поэтому все проверки выше при дефолтном fps не меняются); SfxTrack сам берёт fps из
 // useVideoConfig() и передаёт его в volume-callback каждой Sequence.
 test('cueVolume fades over the same real time at fps 50: a 60-frame cue fades over its last 10 frames', () => {
@@ -535,12 +535,12 @@ test('cueVolume fades over the same real time at fps 50: a 60-frame cue fades ov
 });
 
 // Ревью code-quality к Task 17 (мутационное тестирование): remotion-stub всегда зовёт volume(0),
-// поэтому предыдущие тесты SfxTrack проверяли cueVolume только как отдельную чистую функцию —
+// поэтому предыдущие тесты SfxTrack проверяли cueVolume только как отдельную чистую функцию –
 // сам компонент мог бы молча звать её как cueVolume(cue, f) или cueVolume(cue, f, masterDb),
 // потеряв masterDb и/или fps композиции, и ни один существующий тест этого бы не заметил (обе
 // «урезанные» сигнатуры дают ровно то же значение на localFrame=0, где стаб всё и проверяет).
 // Здесь Audio подменяется так, чтобы captured[0].volume был настоящим callback-ом из SfxTrack, и
-// мы зовём его сами на разных локальных кадрах — а не полагаемся на то, что стаб вызовет его.
+// мы зовём его сами на разных локальных кадрах – а не полагаемся на то, что стаб вызовет его.
 test('SfxTrack forwards both masterDb and the composition fps into cueVolume, not just cue and frame', () => {
   const captured = [];
   const stub = { ...remotionStub({ frame: 0, fps: 50 }), Audio: (p) => { captured.push(p); return null; } };
@@ -553,9 +553,9 @@ test('SfxTrack forwards both masterDb and the composition fps into cueVolume, no
 });
 
 // Ревью code-quality к Task 17: границы уровня. cue.vol > 1 (кто-то поставил громкость плана
-// «на глаз») не должен раздувать итоговую громкость выше исходника — клэмп в [0, 1]. masterDb
+// «на глаз») не должен раздувать итоговую громкость выше исходника – клэмп в [0, 1]. masterDb
 // обязан быть конечным числом ≤ 0: null из layer.json (поле sfxMasterDb не заполнено) не должен
-// тихо стать 0 дБ — это совсем другая громкость, чем «оставить как есть»; undefined — это и есть
+// тихо стать 0 дБ – это совсем другая громкость, чем «оставить как есть»; undefined – это и есть
 // «оставить как есть», поэтому только он держит дефолт −5.
 test('cueVolume clamps cue.vol into [0,1] and rejects a masterDb that is not a finite number <= 0', () => {
   const kit = kitAt(0);
@@ -566,7 +566,7 @@ test('cueVolume clamps cue.vol into [0,1] and rejects a masterDb that is not a f
   const normal = { id: 'n', file: 'sfx/n.wav', startFrame: 0, durationFrames: 30, vol: 0.7 };
   assert.ok(Math.abs(kit.cueVolume(normal, 0, undefined) - 0.7 * 10 ** (-5 / 20)) < 1e-9, 'explicit undefined masterDb keeps the -5 default');
   // Отклонение (ревью Task 18): cueVolume и SfxTrack теперь делят одну assertMasterDb (sfx.js) с
-  // сообщением "layer.json → sfxMasterDb" — регексп проверяет именно эту (более информативную)
+  // сообщением "layer.json → sfxMasterDb" – регексп проверяет именно эту (более информативную)
   // формулировку, а не старый внутренний "cueVolume: masterDb …".
   assert.throws(() => kit.cueVolume(normal, 0, null), /sfxMasterDb/, 'null must not silently become 0 dB');
   assert.throws(() => kit.cueVolume(normal, 0, NaN), /sfxMasterDb/);
@@ -583,8 +583,8 @@ test('assertMasterDb is the single validator shared by cueVolume and SfxTrack', 
 });
 
 // Step 0 (перед Task 18): в настоящем Remotion volume() зовётся только пока Sequence конкретного
-// звука активна — испорченный layer.json → sfxMasterDb иначе всплыл бы не на кадре 0, а только
-// когда рендер дойдёт до первого звука (минуты работы впустую). cues: [] — самый строгий случай:
+// звука активна – испорченный layer.json → sfxMasterDb иначе всплыл бы не на кадре 0, а только
+// когда рендер дойдёт до первого звука (минуты работы впустую). cues: [] – самый строгий случай:
 // проверить вообще нечему, ни один cueVolume не вызовется, значит SfxTrack обязан валидировать
 // masterDb сам, а не полагаться на побочный эффект чужого вызова.
 test('SfxTrack rejects a bad sfxMasterDb immediately on render, even with no cue playing yet', () => {
@@ -603,14 +603,14 @@ test('SfxTrack rejects a bad sfxMasterDb immediately on render, even with no cue
     /layer\.json.*sfxMasterDb/,
     'a positive masterDb (boosting effects) is rejected',
   );
-  // undefined — «использовать дефолт −5 дБ», не ошибка.
+  // undefined – «использовать дефолт −5 дБ», не ошибка.
   assert.doesNotThrow(() => render(React.createElement(kit.SfxTrack, { cues: [] })));
 });
 
 test('Subtitles show the active chunk with karaoke dimming and respect hide windows', () => {
   const kit = kitAt(0);
   const chunks = [{ units: [{ t: 'Раз', s: 0, e: 0.3 }, { t: 'два', s: 0.4, e: 0.6 }], s: 0, e: 0.6, show: 1, text: 'Раз два' }];
-  // fps=25 явно — отклонение round 2: activeChunk больше не подставляет 25 сам по себе.
+  // fps=25 явно – отклонение round 2: activeChunk больше не подставляет 25 сам по себе.
   assert.equal(kit.activeChunk(chunks, 0.5, [], 25).text, 'Раз два');
   assert.equal(kit.activeChunk(chunks, 1.2, [], 25), null);
   assert.equal(kit.activeChunk(chunks, 0.5, [{ from: 0.4, to: 0.9 }], 25), null);
@@ -621,21 +621,21 @@ test('Subtitles show the active chunk with karaoke dimming and respect hide wind
   assert.match(html, /opacity:0\.45">.*два/);
 });
 
-// Отклонение от плана: манифест решает видимость субтитра по кадру (Math.round(s*fps) — как
+// Отклонение от плана: манифест решает видимость субтитра по кадру (Math.round(s*fps) – как
 // buildManifest всегда делал), а не по секундам. Раньше Subtitles сверял sec (frame/fps) с
-// chunk.s/chunk.show напрямую — на дробном s*fps это на кадр расходится с манифестом (например,
-// s=0.204 при fps=25: round(0.204*25)=5, но frame/25>=0.204 верно только с кадра 6). captionSpans —
+// chunk.s/chunk.show напрямую – на дробном s*fps это на кадр расходится с манифестом (например,
+// s=0.204 при fps=25: round(0.204*25)=5, но frame/25>=0.204 верно только с кадра 6). captionSpans –
 // общая чистая функция, которую использует и buildManifest, и сам компонент, поэтому кадр, где
 // Subtitles что-то рисует, обязан буквально совпадать с кадрами caption-* в манифесте, включая
 // вырезанное окно hide, на обоих fps.
 test('Subtitles renders on exactly the frames captionSpans marks visible, at fps 25 and 30, with a hide window cut out', () => {
-  // s=0.21 при fps=30 даёт 6.3 — дробный кадр, ключевой случай для этой проверки.
+  // s=0.21 при fps=30 даёт 6.3 – дробный кадр, ключевой случай для этой проверки.
   const chunks = [{ units: [{ t: 'Раз', s: 0.21, e: 0.5 }], s: 0.21, e: 0.5, show: 0.9, text: 'Раз' }];
   const hide = [{ from: 0.5, to: 0.7 }];
   const lane = { x: 70, y: 1398, w: 880, h: 84 };
   for (const fps of [25, 30]) {
     const kit = kitAt(0);
-    // Кадры, где по captionSpans субтитр обязан быть виден — то же durationInFrames (100000), что
+    // Кадры, где по captionSpans субтитр обязан быть виден – то же durationInFrames (100000), что
     // отдаёт remotionStub по умолчанию (kitAt его не пробрасывает), чтобы клэмп не разошёлся.
     const spans = kit.captionSpans(chunks, { hide, fps, durationInFrames: 100000 });
     const manifestFrames = new Set();
@@ -651,7 +651,7 @@ test('Subtitles renders on exactly the frames captionSpans marks visible, at fps
 // То же самое, но по полному конвейеру: слова → buildChunks → compileLayer → buildManifest, с
 // окном hide, разрезающим единственный chunk пополам. Кадры, на которых Subtitles рисует
 // data-kit-text="captions", обязаны совпасть с объединением диапазонов caption-1/caption-1b из
-// настоящего манифеста — гейт видит ровно то, что нарисовано (принцип D2), не только на
+// настоящего манифеста – гейт видит ровно то, что нарисовано (принцип D2), не только на
 // синтетических chunks выше.
 test('Subtitles frames match the real manifest caption-* ranges end to end, across a hide-window split', () => {
   const words = [
@@ -661,7 +661,7 @@ test('Subtitles frames match the real manifest caption-* ranges end to end, acro
   const hide = [{ from: 0.3, to: 0.4 }];
   for (const fps of [25, 30]) {
     const kit = kitAt(0);
-    // durationInFrames = 100000 — то же значение, что подставляет remotionStub по умолчанию для
+    // durationInFrames = 100000 – то же значение, что подставляет remotionStub по умолчанию для
     // Subtitles ниже (kitAt его не пробрасывает), иначе клэмп у buildManifest и у компонента
     // разойдётся не из-за самого кода, а из-за разных входов теста.
     const cfg = { fps, width: 1080, height: 1920, durationInFrames: 100000, words, sfxLibrary: { sounds: {} } };
@@ -684,27 +684,27 @@ test('Subtitles frames match the real manifest caption-* ranges end to end, acro
 });
 
 // Отклонение (ревью Task 18): кегль масштабируется от РАЗРЕШЕНИЯ КОМПОЗИЦИИ (k = width / (portrait
-// ? 1080 : 1920), тот же k, что captionLane использует под safe-зону), а не от высоты полосы —
+// ? 1080 : 1920), тот же k, что captionLane использует под safe-зону), а не от высоты полосы –
 // кастомная (например, высокая) полоса не должна раздувать текст, только тесная обязана его сжать
 // (captionFontSize, отдельно протестирован в motion-kit-captions.test.js). Явный fontSize остаётся
 // аварийным люком.
 test('Subtitles font size and text-shadow scale with the composition resolution, not the lane height', () => {
   const chunks = [{ units: [{ t: 'Раз', s: 0, e: 0.3 }], s: 0, e: 0.3, show: 1, text: 'Раз' }];
-  // Полоса captionLane(1080,1920) реальная — h=84, k=1: 44px, тень «0 3px 12px».
+  // Полоса captionLane(1080,1920) реальная – h=84, k=1: 44px, тень «0 3px 12px».
   const lane1080 = { x: 70, y: 1398, w: 880, h: 84 };
   const html1080 = render(React.createElement(kitAt(0, { width: 1080, height: 1920 }).Subtitles, { chunks, lane: lane1080 }));
   assert.match(html1080, /font-size:44px/);
   assert.match(html1080, /text-shadow:0 3px 12px rgba\(0,0,0,\.55\)/);
 
   // 720x1280: k=720/1080=2/3 → 44*2/3≈29.3, тень 3*2/3=2, 12*2/3=8. Полоса captionLane(720,1280).h=56
-  // (та же safe-зона, отдельно проверена в motion-kit-captions.test.js) — высотный клэмп при этом
+  // (та же safe-зона, отдельно проверена в motion-kit-captions.test.js) – высотный клэмп при этом
   // laneH её не трогает (56/(1.1+12/44)≈40.8 > 29.3).
   const lane720 = { x: 47, y: 932, w: 587, h: 56 };
   const html720 = render(React.createElement(kitAt(0, { width: 720, height: 1280 }).Subtitles, { chunks, lane: lane720 }));
   assert.match(html720, /font-size:29\.3px/);
   assert.match(html720, /text-shadow:0 2px 8px rgba\(0,0,0,\.55\)/);
 
-  // Кастомная ВЫСОКАЯ полоса на том же 1080x1920 (k=1, base=44) не должна раздуть шрифт сверх 44 —
+  // Кастомная ВЫСОКАЯ полоса на том же 1080x1920 (k=1, base=44) не должна раздуть шрифт сверх 44 –
   // captionFontSize только уменьшает, никогда не увеличивает.
   const tallLane = { x: 70, y: 100, w: 880, h: 400 };
   const htmlTall = render(React.createElement(kitAt(0, { width: 1080, height: 1920 }).Subtitles, { chunks, lane: tallLane }));
@@ -715,7 +715,7 @@ test('Subtitles font size and text-shadow scale with the composition resolution,
 });
 
 // Важно (ревью Task 18): субтитры никогда не переносятся и не обрезаются внутри полосы. В SSR-тесте
-// layout-эффект (бинарный поиск ширины) не выполняется — рендерится непорезанный размер, но
+// layout-эффект (бинарный поиск ширины) не выполняется – рендерится непорезанный размер, но
 // white-space:nowrap обязан стоять уже в этом первом (до подгонки) рендере, иначе кадр, снятый ДО
 // того как эффект успел сработать, показал бы перенос строки.
 test('captions are single-line: white-space is nowrap even before the width-fit layout effect runs', () => {
@@ -727,7 +727,7 @@ test('captions are single-line: white-space is nowrap even before the width-fit 
 });
 
 // Важно (ревью Task 18): один канон округления секунд→кадры (secToFrame, как compileInserts) и для
-// видимости chunk, и для караоке-подсветки слова — иначе первое слово могло на 1 кадр «опаздывать»
+// видимости chunk, и для караоке-подсветки слова – иначе первое слово могло на 1 кадр «опаздывать»
 // за появлением своего chunk (sec=frame/fps сравнивался с необработанным unit.s, а видимость самого
 // chunk считалась через другое округление). На САМОМ ПЕРВОМ видимом кадре chunk первое слово обязано
 // быть уже подсвечено (opacity:1), на любом fps.
@@ -743,7 +743,7 @@ test('the first word is already lit (opacity 1) on the very first frame its chun
 });
 
 // Важно (ревью Task 18): captions.hide и вставки (inserts) оба переводят секунды в кадры через
-// secToFrame — hide, заданный ТЕМИ ЖЕ секундами, что insert.from/insert.to, обязан вырезать РОВНО
+// secToFrame – hide, заданный ТЕМИ ЖЕ секундами, что insert.from/insert.to, обязан вырезать РОВНО
 // кадры этой вставки, кадр в кадр, на любом fps (иначе субтитр мог бы на миг «выглянуть» поверх
 // вставки или, наоборот, оставить в вырезе лишний кадр самой вставки без субтитра).
 test('a hide window at an insert\'s own from/to seconds cuts exactly the frames compileInserts assigns that insert', () => {
@@ -759,7 +759,7 @@ test('a hide window at an insert\'s own from/to seconds cuts exactly the frames 
 });
 
 // Minor (ревью Task 18): accentWords сравнивается через канонический normWord (words.js) с обеих
-// сторон — регистр, «ё», хвостовая пунктуация не должны мешать подсветке; мутация, убирающая accent
+// сторон – регистр, «ё», хвостовая пунктуация не должны мешать подсветке; мутация, убирающая accent
 // целиком, раньше не ловилась ни одним тестом.
 test('accentWords colours a word regardless of case, ё/е and trailing punctuation, and leaves others untouched', () => {
   const chunks = [{ units: [{ t: 'Клод,', s: 0, e: 0.2 }, { t: 'привет', s: 0.2, e: 0.4 }], s: 0, e: 0.4, show: 1, text: 'Клод, привет' }];
@@ -767,7 +767,7 @@ test('accentWords colours a word regardless of case, ё/е and trailing punctuat
   const html = render(React.createElement(kitAt(0).Subtitles, {
     chunks, lane, accent: '#ffcc00', accentWords: ['клод'],
   }));
-  // Каждое слово — отдельный лист-span (opacity, без вложенных тегов); достаём их по отдельности,
+  // Каждое слово – отдельный лист-span (opacity, без вложенных тегов); достаём их по отдельности,
   // а не строкой .*, иначе «color:… раньше в html» ложно совпало бы с любым более поздним словом.
   const unitSpans = [...html.matchAll(/<span style="([^"]*)">([^<]*)<\/span>/g)];
   assert.equal(unitSpans.length, 2);
@@ -785,8 +785,8 @@ test('FontLoader blocks rendering until fonts load', () => {
 });
 
 // Round 2: FontLoader стал гейтом (children не рисуются, пока шрифты не готовы), но в SSR/тестах
-// нет document — измерять всё равно нечего, поэтому дети должны показаться сразу же (иначе каждый
-// существующий тест, рендерящий компоненты кита в изоляции, завис бы). calls.delay остаётся 1 —
+// нет document – измерять всё равно нечего, поэтому дети должны показаться сразу же (иначе каждый
+// существующий тест, рендерящий компоненты кита в изоляции, завис бы). calls.delay остаётся 1 –
 // плановая проверка не должна была сломаться этим отклонением.
 test('FontLoader (as a gate) renders its children immediately when there is no DOM (SSR/tests)', () => {
   const calls = {};
@@ -808,14 +808,14 @@ test('loadFontFaces adds every face to fontSet and resolves once all of them loa
   await kit.loadFontFaces(faces, { FontFaceImpl: FakeFontFace, fontSet: { add: (f) => added.push(f) }, toUrl: (f) => `/static/${f}` });
   assert.equal(added.length, 2);
   assert.equal(added[0].family, 'KitOnest');
-  // Minor (ревью Task 18): url() теперь в кавычках — незаэкранированные скобки/пробелы в пути не
+  // Minor (ревью Task 18): url() теперь в кавычках – незаэкранированные скобки/пробелы в пути не
   // должны ломать CSS-значение.
   assert.equal(added[0].source, 'url("/static/fonts/Onest.ttf")');
   assert.deepEqual(added[0].descriptors, { weight: '100 900' });
   assert.deepEqual(added[1].descriptors, { weight: '400' });
 });
 
-// Minor (ревью Task 18): ошибка конкретного лица оборачивается с его family/file — иначе в логе
+// Minor (ревью Task 18): ошибка конкретного лица оборачивается с его family/file – иначе в логе
 // рендера из пяти шрифтов непонятно, какой именно не загрузился.
 test('loadFontFaces wraps a failing face\'s rejection with its family and file', async () => {
   const kit = kitAt(0);
@@ -840,7 +840,7 @@ test('loadFontFaces resolves immediately with an empty face list, without touchi
 
 // Minor (ревью Task 18): вся работа идёт внутри Promise.resolve().then(...), поэтому синхронный
 // throw из toUrl (например, staticFile на плохом пути) обязан стать отклонением промиса, а не
-// необработанным исключением из самого вызова loadFontFaces(...) — иначе .catch() в FontLoader
+// необработанным исключением из самого вызова loadFontFaces(...) – иначе .catch() в FontLoader
 // его бы не увидел и cancelRender никогда бы не вызвался.
 test('loadFontFaces turns a synchronous throw from toUrl into a rejection, not an uncaught exception', async () => {
   const kit = kitAt(0);
@@ -861,8 +861,8 @@ test('loadFontFaces turns a synchronous throw from toUrl into a rejection, not a
   await assert.rejects(() => promise, /boom/);
 });
 
-// Minor (ревью Task 18): один family дважды без явного weight — статические начертания оба
-// заявляют весь диапазон '100 900' и коллидируют в fontSet. Разные явные weight — не коллизия.
+// Minor (ревью Task 18): один family дважды без явного weight – статические начертания оба
+// заявляют весь диапазон '100 900' и коллидируют в fontSet. Разные явные weight – не коллизия.
 test('loadFontFaces rejects a repeated family with no explicit weight, but allows it with distinct weights', async () => {
   const kit = kitAt(0);
   class FakeFontFace { load() { return Promise.resolve(this); } }
@@ -890,7 +890,7 @@ test('settleOnce runs the first action and silently ignores any later ones', () 
   assert.equal(calls, 1);
 });
 
-// Round 3 (важно, ревью п.2а): суть исправления — FontFace обязана попасть в fontSet ДО того, как
+// Round 3 (важно, ревью п.2а): суть исправления – FontFace обязана попасть в fontSet ДО того, как
 // её load() успеет разрешиться, а не после. Проверяем это напрямую: load() специально не резолвим
 // (держим resolve в замыкании), но fontSet.add уже обязан был случиться к моменту, когда
 // registerFontFaces вернула управление.
@@ -906,11 +906,11 @@ test('registerFontFaces adds each FontFace to fontSet synchronously, before its 
     [{ family: 'KitOnest', file: 'fonts/Onest.ttf' }],
     { FontFaceImpl: FakeFontFace, fontSet: { add: (f) => added.push(f) }, toUrl: (f) => f },
   );
-  assert.equal(added.length, 1, 'fontSet.add must have already run — load() has not resolved yet');
+  assert.equal(added.length, 1, 'fontSet.add must have already run – load() has not resolved yet');
   assert.equal(added[0].family, 'KitOnest');
   assert.equal(registered.length, 1);
   assert.ok(registered[0].promise instanceof Promise);
-  releaseLoad(added[0]); // не блокируем — просто освобождаем висящий промис
+  releaseLoad(added[0]); // не блокируем – просто освобождаем висящий промис
 });
 
 test('registerFontFaces validates duplicates and returns [] for an empty/missing list, all synchronously', () => {
@@ -939,7 +939,7 @@ test('settleFontFaces awaits every registered load() and wraps a failure with it
 // Ревью пакета 1: регистрация идёт в инициализаторе useState (фаза рендера), поэтому каждое
 // монтирование FontLoader (ремаунт, второй FontLoader с теми же шрифтами) снова зовёт
 // registerFontFaces. Уже зарегистрированное в этом fontSet лицо (тот же family+file+weight)
-// переиспользуется: второй FontFace в document.fonts не появляется, промис загрузки — тот же.
+// переиспользуется: второй FontFace в document.fonts не появляется, промис загрузки – тот же.
 test('registerFontFaces reuses a face already registered in the same fontSet instead of adding a duplicate', async () => {
   const kit = kitAt(0);
   const added = [];
@@ -958,7 +958,7 @@ test('registerFontFaces reuses a face already registered in the same fontSet ins
   assert.equal(second[0].promise, first[0].promise, 'повторная регистрация ждёт ту же загрузку');
   await kit.settleFontFaces(second);
 
-  // Другой weight того же файла — другое начертание, а другой fontSet (другой документ) —
+  // Другой weight того же файла – другое начертание, а другой fontSet (другой документ) –
   // свой реестр: в обоих случаях лицо регистрируется заново.
   kit.registerFontFaces([{ family: 'KitMono', file: 'fonts/Mono.ttf', weight: '700' }], deps);
   assert.equal(added.length, 3);
@@ -979,7 +979,7 @@ test('FontLoader mounted twice with the same faces registers them in document.fo
   global.FontFace = FakeFontFace;
   try {
     const faces = [{ family: 'KitOnest', file: 'fonts/Onest.ttf' }];
-    // renderToStaticMarkup выполняет инициализаторы useState, но не эффекты — ровно та фаза,
+    // renderToStaticMarkup выполняет инициализаторы useState, но не эффекты – ровно та фаза,
     // в которой FontLoader регистрирует шрифты. Шрифт не загружен → гейт закрыт, детей нет.
     assert.equal(render(React.createElement(kit.FontLoader, { faces }, 'x')), '');
     assert.equal(render(React.createElement(kit.FontLoader, { faces }, 'x')), '');
@@ -991,9 +991,9 @@ test('FontLoader mounted twice with the same faces registers them in document.fo
   }
 });
 
-// Ревью пакета 1: эффект монтирования гейта — чистая функция watchFontFaces (эффекты в
+// Ревью пакета 1: эффект монтирования гейта – чистая функция watchFontFaces (эффекты в
 // renderToStaticMarkup не выполняются). Если FontLoader размонтирован раньше, чем шрифты
-// загрузились, очистка обязана отпустить delayRender-handle — иначе Remotion ждал бы его до
+// загрузились, очистка обязана отпустить delayRender-handle – иначе Remotion ждал бы его до
 // таймаута; поздняя загрузка или ошибка после размонтирования уже ничего не трогают.
 test('watchFontFaces releases the delayRender handle when the gate unmounts before the fonts load', async () => {
   const kit = kitAt(0);
@@ -1031,7 +1031,7 @@ test('watchFontFaces reports ready once the fonts load, and a later unmount does
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(events, ['ready', 'continue']);
   cleanup();
-  assert.deepEqual(events, ['ready', 'continue'], 'handle уже отпущен — повторного continueRender нет');
+  assert.deepEqual(events, ['ready', 'continue'], 'handle уже отпущен – повторного continueRender нет');
 });
 
 test('watchFontFaces passes a load failure to onError, but not after the gate has unmounted', async () => {
@@ -1049,13 +1049,13 @@ test('watchFontFaces passes a load failure to onError, but not after the gate ha
   assert.match(errors[0], /KitOnest.*a\.ttf.*network error/);
 });
 
-// Round 3 (важно, ревью п.2б): FontLoader — гейт, обязан ОБОРАЧИВАТЬ то, что ждёт шрифт, а не
+// Round 3 (важно, ревью п.2б): FontLoader – гейт, обязан ОБОРАЧИВАТЬ то, что ждёт шрифт, а не
 // стоять рядом с ним отдельным элементом (та самая ошибка использования из ревью). В браузере
-// (document существует) отсутствие children — однозначная ошибка; в Node/SSR document не
+// (document существует) отсутствие children – однозначная ошибка; в Node/SSR document не
 // существует, поэтому проверка возможна только с временно подставленным global.document.
 test('FontLoader throws a clear error when children is missing, but only when a real DOM exists', () => {
   const kit = kitAt(0);
-  assert.doesNotThrow(() => render(React.createElement(kit.FontLoader, { faces: [] })), 'SSR/tests (no document) must stay silent — many isolated component tests rely on this');
+  assert.doesNotThrow(() => render(React.createElement(kit.FontLoader, { faces: [] })), 'SSR/tests (no document) must stay silent – many isolated component tests rely on this');
   const hadDocument = Object.hasOwn(global, 'document');
   const previousDocument = global.document;
   global.document = {};

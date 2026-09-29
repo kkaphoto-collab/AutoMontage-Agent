@@ -18,7 +18,7 @@ test('compileCamera rejects a missing face, an unknown preset and a late first s
 });
 
 test('compileCamera reports a shot\'s original array index even after sorting by `at`', () => {
-  // shots[2] в исходном массиве («XL») после сортировки по at окажется на позиции 1 —
+  // shots[2] в исходном массиве («XL») после сортировки по at окажется на позиции 1 –
   // сообщение об ошибке должно называть исходный индекс 2, а не позицию после сортировки.
   assert.throws(
     () => kit.compileCamera({ face, shots: [{ at: 0, preset: 'W' }, { at: 4, preset: 'M' }, { at: 2, preset: 'XL' }] }, cfg),
@@ -93,7 +93,7 @@ test('autoShots cuts on word ends, keeps every shot within 2.2 s and alternates 
   assert.ok(shots.every((s) => s.drift === (s.preset === 'W' ? 'in' : 'out')));
 });
 
-// Длины планов между соседними точками разреза (и до endSec) — по этим длинам меряем максимум.
+// Длины планов между соседними точками разреза (и до endSec) – по этим длинам меряем максимум.
 const shotLengths = (shots, endSec) => {
   const bounds = [...shots.map((s) => s.at), endSec];
   return bounds.slice(1).map((at, i) => at - bounds[i]);
@@ -101,7 +101,7 @@ const shotLengths = (shots, endSec) => {
 
 test('autoShots cuts a short sentence-end word early when waiting for the next word would exceed 2.2 s', () => {
   // Слово «два.» стоит на границе предложения, но само по себе кончается раньше minSec (1,2 с);
-  // следующее слово «три» без разреза увело бы план до 2,45 с — дольше maxSec.
+  // следующее слово «три» без разреза увело бы план до 2,45 с – дольше maxSec.
   const words = [
     { w: 'один', t: 'один', s: 0, e: 0.5 },
     { w: 'два', t: 'два.', s: 0.6, e: 1.1 },
@@ -115,7 +115,7 @@ test('autoShots cuts a short sentence-end word early when waiting for the next w
 
 test('autoShots splits a long tail after the last word into chunks no longer than 2.2 s', () => {
   const words = [{ w: 'тест', t: 'тест', s: 0, e: 0.2 }];
-  const shots = kit.autoShots(words, { endSec: 3.2 }); // хвост после последнего слова — 3 с
+  const shots = kit.autoShots(words, { endSec: 3.2 }); // хвост после последнего слова – 3 с
   const lengths = shotLengths(shots, 3.2);
   assert.ok(lengths.every((len) => len <= 2.2 + 1e-9), `lengths ${lengths}`);
 });
@@ -160,9 +160,9 @@ test('autoShots rejects words that are not an array', () => {
 });
 
 test('autoShots rejects invalid maxSec/minSec/cycle instead of hanging or returning junk', () => {
-  // maxSec: 0 делает шаг split() делением на ноль — без этой проверки функция зацикливается
+  // maxSec: 0 делает шаг split() делением на ноль – без этой проверки функция зацикливается
   // навсегда, поэтому тест не вызывает её напрямую без guard: проверяем, что исключение бросается
-  // ДО цикла (words: [] — мгновенный возврат, если бы guard'а не было).
+  // ДО цикла (words: [] – мгновенный возврат, если бы guard'а не было).
   const words = [];
   assert.throws(() => kit.autoShots(words, { endSec: 10, maxSec: 0 }), /maxSec > 0/);
   assert.throws(() => kit.autoShots(words, { endSec: 10, maxSec: -1 }), /maxSec > 0/);
@@ -190,7 +190,7 @@ test('at 50 fps away hides the speaker after 16 frames (8 frames at 25 fps = 0.1
 });
 
 test('sway dx at 50 fps frame 2N equals dx at 25 fps frame N for the same preset', () => {
-  // preset L использует fill: true — клэмп по safe-краю кадра не применяется, sway виден напрямую.
+  // preset L использует fill: true – клэмп по safe-краю кадра не применяется, sway виден напрямую.
   const track25 = kit.compileCamera({ face, shots: [{ at: 0, preset: 'L', drift: 'none' }] }, cfg);
   const track50 = kit.compileCamera({ face, shots: [{ at: 0, preset: 'L', drift: 'none' }] }, cfg50);
   for (const n of [3, 10, 40, 90]) {
@@ -225,16 +225,16 @@ test('cameraAt does not re-simulate a released punch on every later frame (manif
   const t0 = Date.now();
   const manifest = kit.buildManifest(kit.compileLayer(plan, cfg120));
   const elapsed = Date.now() - t0;
-  assert.ok(elapsed < 1500, `manifest took ${elapsed} ms (expected < 1500 ms — a released punch must not be re-simulated every later frame)`);
+  assert.ok(elapsed < 1500, `manifest took ${elapsed} ms (expected < 1500 ms – a released punch must not be re-simulated every later frame)`);
   assert.equal(manifest.camera.s.length, durationInFrames);
 });
 
 test('skipping a released punch does not change the camera values on a short layer', () => {
   const track = kit.compileCamera({ face, shots: [{ at: 0, preset: 'W', drift: 'none' }],
     punches: [{ at: 1, until: 3, k: 1.15 }] }, cfg);
-  // Эталон — точные значения s, снятые с немасштабированного (до фикса) прохода spring() на тех
+  // Эталон – точные значения s, снятые с немасштабированного (до фикса) прохода spring() на тех
   // же кадрах: до панча, во время подъёма, в активном окне и далеко после releaseFrames (10 кадров
-  // на 25 fps после until=75 → окно активности заканчивается на кадре 85). Кадры 90/150/249 —
+  // на 25 fps после until=75 → окно активности заканчивается на кадре 85). Кадры 90/150/249 –
   // именно те, где фикс заменяет вызов spring() на константу 1, поэтому равенство здесь и
   // доказывает, что оптимизация не меняет результат.
   const expected = [1, 1, 1.1585254886649308, 1.1500000001463953, 1, 1, 1];

@@ -14,14 +14,14 @@ const TEMPLATE = path.join(ENGINE_ROOT, 'templates', 'motion-layer');
 const TEMPLATE_FILES = ['src/index.jsx', 'src/Root.jsx', 'src/plan.js', 'src/scenes.jsx', 'README.md'];
 // Шрифты, которые выбирает scenes.jsx шаблона (FONTS), и их лицензии OFL.
 const FONTS = ['Onest.ttf', 'OFL-Onest.txt', 'Oswald.ttf', 'OFL-Oswald.txt'];
-// Папка слоя свежая: копия поверх уже лежащего файла — ошибка, а не тихая перезапись.
+// Папка слоя свежая: копия поверх уже лежащего файла – ошибка, а не тихая перезапись.
 const { COPYFILE_EXCL, COPYFILE_FICLONE } = fs.constants;
-// SIGHUP — закрытое окно терминала: без обработчика процесс умер бы с недостроенной папкой.
+// SIGHUP – закрытое окно терминала: без обработчика процесс умер бы с недостроенной папкой.
 const SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'];
-const NO_VIDEO = 'в исходнике нет видеодорожки — layer new работает с видео-исходником';
+const NO_VIDEO = 'в исходнике нет видеодорожки – layer new работает с видео-исходником';
 
-// Есть ли в файле настоящая видеодорожка (обложка аудиофайла — attached_pic — не в счёт). Вызывается
-// только когда probe уже отказал, чтобы назвать причину по-русски; сбой самого ffprobe — «не знаю».
+// Есть ли в файле настоящая видеодорожка (обложка аудиофайла – attached_pic – не в счёт). Вызывается
+// только когда probe уже отказал, чтобы назвать причину по-русски; сбой самого ffprobe – «не знаю».
 function hasVideoTrack(file) {
   try {
     const { streams = [] } = JSON.parse(captureTool('ffprobe', ['-v', 'error', '-show_entries',
@@ -32,9 +32,9 @@ function hasVideoTrack(file) {
   }
 }
 
-// Всё о исходнике — до захвата папки. Повёрнутый (телефонный) исходник отказывает: его кадр хранится
-// в другой геометрии, чем показывается, и G6 с тем же probe разошёлся бы со слоем. Длина и частота —
-// probeVideo (им же G6 меряет рендер): длина по контейнеру, Math.round. Последний кадр спикера —
+// Всё о исходнике – до захвата папки. Повёрнутый (телефонный) исходник отказывает: его кадр хранится
+// в другой геометрии, чем показывается, и G6 с тем же probe разошёлся бы со слоем. Длина и частота –
+// probeVideo (им же G6 меряет рендер): длина по контейнеру, Math.round. Последний кадр спикера –
 // последний настоящий кадр видеодорожки: если звук длиннее видео, дальше SpeakerLayer держит его.
 function inspectSource(sourcePath, manifest, { probeVideoImpl, probeMediaImpl }) {
   if (manifest.source?.mediaKind === 'audio') throw new Error(NO_VIDEO);
@@ -45,9 +45,9 @@ function inspectSource(sourcePath, manifest, { probeVideoImpl, probeMediaImpl })
     if (!hasVideoTrack(sourcePath)) throw new Error(NO_VIDEO, { cause: error });
     throw error;
   }
-  if (media.mediaKind !== 'video') throw new Error('исходник — картинка, а не видео: layer new работает с видео-исходником');
+  if (media.mediaKind !== 'video') throw new Error('исходник – картинка, а не видео: layer new работает с видео-исходником');
   if (media.rotation === 90 || media.rotation === 270) {
-    throw new Error(`исходник повёрнут на ${media.rotation}° — сначала соберите мастер (automontage master --project-dir <папка> --edit edit/vNN-source.json) или перекодируйте его с поворотом в самих кадрах`);
+    throw new Error(`исходник повёрнут на ${media.rotation}° – сначала соберите мастер (automontage master --project-dir <папка> --edit edit/vNN-source.json) или перекодируйте его с поворотом в самих кадрах`);
   }
   const probe = probeVideoImpl(sourcePath);
   const durationInFrames = Math.round(probe.duration * probe.fps);
@@ -57,10 +57,10 @@ function inspectSource(sourcePath, manifest, { probeVideoImpl, probeMediaImpl })
   return { fps: probe.fps, width: probe.width, height: probe.height, durationInFrames, lastFrame };
 }
 
-// Папка слоя занимается одним mkdir без recursive (родитель — папка проекта — уже есть): из двух
+// Папка слоя занимается одним mkdir без recursive (родитель – папка проекта – уже есть): из двух
 // одновременных `layer new` её получает ровно один, второй видит EEXIST. Автоматическое имя при
 // гонке пересчитывается один раз (max+1 уже учтёт чужую папку); явное --dir другим не подменяется.
-// Имя — motion-vNN без разделителей, поэтому mkdir не выходит за папку проекта.
+// Имя – motion-vNN без разделителей, поэтому mkdir не выходит за папку проекта.
 function claimLayerDir(projectDir, requested) {
   const attempts = requested ? 1 : 2;
   for (let attempt = 1; ; attempt += 1) {
@@ -70,7 +70,7 @@ function claimLayerDir(projectDir, requested) {
       fs.mkdirSync(layerDir);
     } catch (error) {
       if (error?.code !== 'EEXIST') throw error;
-      if (attempt >= attempts) throw new Error(`папка ${name} уже существует — выберите другую через --dir`);
+      if (attempt >= attempts) throw new Error(`папка ${name} уже существует – выберите другую через --dir`);
       continue;
     }
     const { dev, ino } = fs.lstatSync(layerDir);
@@ -79,7 +79,7 @@ function claimLayerDir(projectDir, requested) {
 }
 
 // Уборка после отказа или сигнала: удаляется только папка, которую занял этот запуск (та же dev/ino),
-// вместе с тем, что он в неё успел положить. Если на её месте уже другая папка — не трогаем ничего.
+// вместе с тем, что он в неё успел положить. Если на её месте уже другая папка – не трогаем ничего.
 // Никогда не бросает (зовётся и из обработчика сигнала): 'removed' | 'gone' | 'swapped' | {error}.
 function releaseLayerDir({ layerDir, identity }) {
   try {
@@ -94,14 +94,14 @@ function releaseLayerDir({ layerDir, identity }) {
 }
 
 function releaseNote({ name }, status) {
-  if (status === 'swapped') return `папку ${name} подменили во время layer new — не удаляю её`;
+  if (status === 'swapped') return `папку ${name} подменили во время layer new – не удаляю её`;
   if (status?.error) return `не удалось убрать недостроенную папку ${name}: ${status.error.message}`;
   return null;
 }
 
 function interruptNote(signal, claim, status) {
   const cleanup = !claim ? 'папка слоя ещё не занята' : releaseNote(claim, status) || `недостроенная папка ${claim.name} удалена`;
-  return `layer new прерван сигналом ${signal} — ${cleanup}`;
+  return `layer new прерван сигналом ${signal} – ${cleanup}`;
 }
 
 function withReleaseNote(error, claim, status) {
@@ -110,12 +110,12 @@ function withReleaseNote(error, claim, status) {
 }
 
 // Ctrl+C, SIGTERM или SIGHUP, пока слой собирается: обработчик убирает занятую папку (та же проверка
-// dev/ino) и повторяет сигнал уже со стандартным действием — процесс завершается как прерванный, а не
+// dev/ino) и повторяет сигнал уже со стандартным действием – процесс завершается как прерванный, а не
 // оставляет готовый с виду слой. Сборка синхронная, поэтому сигнал доходит до обработчика на первом
 // обороте цикла событий после неё; settle() даёт этот оборот, пока обработчики ещё стоят.
 // Обработчики снимаются только после уборки: Ctrl+C приходит дважды (от терминала и копией от внешнего
 // automontage), и снятый заранее обработчик отдал бы вторую копию стандартному действию посреди rmSync.
-// Строка в stderr — до повторного сигнала: он завершает процесс сразу, и throw в run() уже никто не
+// Строка в stderr – до повторного сигнала: он завершает процесс сразу, и throw в run() уже никто не
 // напечатает. report не должен помешать уборке и сигналу, поэтому его сбой глотаем.
 function interruptGuard({ signals, kill, exit, report }) {
   const state = { claim: null, interrupted: null, released: null };
@@ -126,11 +126,11 @@ function interruptGuard({ signals, kill, exit, report }) {
     try {
       report(interruptNote(signal, state.claim, state.released));
     } catch {
-      // stderr закрыт (например, вместе с терминалом) — сигнал всё равно повторяем
+      // stderr закрыт (например, вместе с терминалом) – сигнал всё равно повторяем
     }
     stop();
     // На Windows повторить можно только SIGINT/SIGTERM/SIGKILL: SIGHUP (закрыли окно консоли) даёт
-    // ENOSYS. Уборка уже сделана — выходим с тем кодом, что дал бы сам сигнал: 128 + его номер.
+    // ENOSYS. Уборка уже сделана – выходим с тем кодом, что дал бы сам сигнал: 128 + его номер.
     try {
       kill(signal);
     } catch {
@@ -162,14 +162,14 @@ function placeholders(layerDir, { width, height, fps }, runToolImpl) {
     '-frames:v', '1', path.join(layerDir, 'public', 'shots', 'placeholder.png')], { stage: 'layer placeholder screenshot' });
 }
 
-// Всё содержимое свежей папки слоя. Любой отказ здесь — и run() убирает папку целиком.
+// Всё содержимое свежей папки слоя. Любой отказ здесь – и run() убирает папку целиком.
 function scaffold({ projectDir, manifest, sourcePath, layerDir, source, profile, libraryDir, runToolImpl, notes }) {
   fs.mkdirSync(path.join(layerDir, 'public', 'fonts'), { recursive: true });
   copyTemplate(layerDir);
   writeJson(path.join(layerDir, 'spelling.json'), {});
   writeLayerWords(projectDir, manifest, layerDir, { durationSec: source.durationInFrames / source.fps, warn: (line) => notes.push(line) });
   const speaker = path.join(layerDir, 'public', 'speaker.mp4');
-  // Размер и mtime исходника — до копии: если файл меняют во время копирования, его mtime уйдёт вперёд
+  // Размер и mtime исходника – до копии: если файл меняют во время копирования, его mtime уйдёт вперёд
   // записанного, и следующая команда пересчитает sha256, а не поверит устаревшим числам.
   const { size, mtimeMs } = fs.statSync(sourcePath);
   fs.copyFileSync(sourcePath, speaker, COPYFILE_EXCL | COPYFILE_FICLONE);
@@ -189,12 +189,12 @@ function scaffold({ projectDir, manifest, sourcePath, layerDir, source, profile,
     ...sfx.sourceRows,
     '| `stock/placeholder.mp4`, `shots/placeholder.png` | заглушки, заменить | ffmpeg lavfi | automontage layer new |', '',
   ].join('\n'));
-  // layer.json — последним: по нему папка считается собранным слоем (layer check/render/words без него
+  // layer.json – последним: по нему папка считается собранным слоем (layer check/render/words без него
   // отказывают), поэтому оборванная сборка никогда не выглядит готовой.
   writeJson(path.join(layerDir, 'layer.json'), {
     version: 1, composition: 'Layer', fps: source.fps, width: source.width, height: source.height,
     durationInFrames: source.durationInFrames,
-    // В project.json точки лица нет — стартовая точка по умолчанию, агент уточняет её в layer.json.
+    // В project.json точки лица нет – стартовая точка по умолчанию, агент уточняет её в layer.json.
     face: { x: Math.round(source.width * 0.5), y: Math.round(source.height * 0.41) },
     profile, sfxMasterDb: -5, speaker: { src: 'speaker.mp4', lastFrame: source.lastFrame },
     // Один исходник на слой: layer words и layer check сверяют с ним текущий исходник проекта
@@ -213,7 +213,7 @@ async function run(options, deps = {}) {
   if (options.dir !== undefined && !LAYER_NAME.test(options.dir)) throw new Error('--dir должен быть вида motion-v01');
   const profile = options.profile || 'avatar';
   if (!PROFILES.includes(profile)) throw new Error('--profile: avatar или live');
-  // Всё, что может отказать без записи, — до захвата папки: путь к звукам, транскрипт, исходник.
+  // Всё, что может отказать без записи, – до захвата папки: путь к звукам, транскрипт, исходник.
   const libraryDir = sfxLibraryDir(deps.env || process.env);
   transcriptPath(projectDir, manifest);
   const source = inspectSource(sourcePath, manifest, { probeVideoImpl: deps.probeVideo || probeVideo, probeMediaImpl: deps.probeMedia || probeMediaPath });

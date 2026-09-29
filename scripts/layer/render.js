@@ -1,7 +1,7 @@
-// automontage layer render — рендер слоя kit и гейты по готовому файлу: layer check (план, секунды) →
+// automontage layer render – рендер слоя kit и гейты по готовому файлу: layer check (план, секунды) →
 // ожидание свободной машины → Remotion защищённой командой → нормализация ffmpeg → G6 (длина и размер
 // к исходнику) и G7 (голос в звуке слоя) → qa/layer-<слой>-render-NN.{json,txt}.
-// Код: 0 — пройдено или только предупреждения, 1 — стоп (в том числе стоп layer check), 2 — оценить нельзя.
+// Код: 0 – пройдено или только предупреждения, 1 – стоп (в том числе стоп layer check), 2 – оценить нельзя.
 //
 // --public-dir не копируется в каждый рендер: Remotion 4.0.504 для рендера из CLI собирает временный
 // бандл (outDir null) и на macOS/Linux кладёт в него симлинк на папку public (symlinkPublicDir в
@@ -29,14 +29,14 @@ const { readLayerJson, relative, resolveLayer, sha256File } = require('./common'
 const FLAGS = { 'project-dir': 'value', layer: 'value', profile: 'value', 'no-wait': 'bool' };
 const pad = (n) => String(n).padStart(2, '0');
 
-// Номер рендера занимается атомарно: заявка — пустой layer-NN.raw.mp4, созданный с 'wx' (O_EXCL, по
+// Номер рендера занимается атомарно: заявка – пустой layer-NN.raw.mp4, созданный с 'wx' (O_EXCL, по
 // ссылке не идёт). Второй layer render того же слоя получит EEXIST и возьмёт следующий номер. Готовый
 // layer-NN.mp4 появляется раньше, чем снимается заявка, поэтому после заявки он проверяется ещё раз:
 // чужой рендер мог закончить между проверкой и заявкой. Номер с уже записанным отчётом (reportFile(n))
 // тоже занят, даже если сам слой удалили после импорта: пока жив его файл, заявка или отчёт, номер не
-// переиспользуется — на отчёт опираются layer import и барьер preview. Заявку, оставшуюся после обрыва
-// процесса, никто не снимет — её номер просто пропускается. lstat, а не existsSync: битая ссылка на
-// месте слоя — тоже занято.
+// переиспользуется – на отчёт опираются layer import и барьер preview. Заявку, оставшуюся после обрыва
+// процесса, никто не снимет – её номер просто пропускается. lstat, а не existsSync: битая ссылка на
+// месте слоя – тоже занято.
 function claimRender(rendersDir, fileSystem = fs, { reportFile = () => null } = {}) {
   const exists = (file) => Boolean(file && fileSystem.lstatSync(file, { throwIfNoEntry: false }));
   for (let n = 1; ; n += 1) {
@@ -60,9 +60,9 @@ function claimRender(rendersDir, fileSystem = fs, { reportFile = () => null } = 
   }
 }
 
-// Манифест, который только что записал layer check этого запуска, — сразу в память: за минуты рендера
+// Манифест, который только что записал layer check этого запуска, – сразу в память: за минуты рендера
 // параллельный layer check (после правки plan.js) переписал бы out/manifest.json, и G7 судил бы звук по
-// чужим окнам эффектов. sha256 — от тех же байтов, что разобраны.
+// чужим окнам эффектов. sha256 – от тех же байтов, что разобраны.
 function readCheckedManifest(projectDir, layerDir) {
   const file = path.join(layerDir, 'out', 'manifest.json');
   let bytes;
@@ -70,7 +70,7 @@ function readCheckedManifest(projectDir, layerDir) {
     bytes = fs.readFileSync(file);
   } catch (error) {
     if (error?.code !== 'ENOENT') throw error;
-    throw new Error('out/manifest.json пропал сразу после layer check (параллельный layer check этого слоя?) — запустите layer render ещё раз', { cause: error });
+    throw new Error('out/manifest.json пропал сразу после layer check (параллельный layer check этого слоя?) – запустите layer render ещё раз', { cause: error });
   }
   let manifest;
   try {
@@ -86,8 +86,8 @@ const AUDIO_RATE = 48000;
 // Remotion пишет полный диапазон (yuvj420p, color_range pc); мастер и Review ждут обычный ограниченный
 // yuv420p. Диапазон входа ffmpeg берёт из его метки: на полнодиапазонном рендере Remotion это побитно то
 // же, что in_range=full, и верно, если вход когда-нибудь окажется ограниченным. Звук эффектов сохраняется
-// (audioMode mix), но только на длину кадров: Remotion дописывает хвост AAC на 43–64 мс, правило владельца —
-// резать его до длительности кадров. aresample async/first_pts кладёт звук на таймкод с 0 (поздний старт —
+// (audioMode mix), но только на длину кадров: Remotion дописывает хвост AAC на 43–64 мс, правило владельца –
+// резать его до длительности кадров. aresample async/first_pts кладёт звук на таймкод с 0 (поздний старт –
 // тишина), apad + atrim дополняют и режут ровно до durationInFrames/fps. Режется только звук: -t или
 // -shortest обрезали бы и видео и спрятали бы слишком длинный рендер от G6. Без звуковой дорожки -af не
 // применяется.
@@ -98,8 +98,8 @@ function normalizeArgs(raw, out, samples) {
     '-c:a', 'aac', '-b:a', '192k', '-ar', String(AUDIO_RATE), out];
 }
 
-// deps: log/warn — вывод; runToolImpl — запуск Remotion и ffmpeg (подмена рендера в тестах); checkImpl —
-// layer check; busyImpl/sleep — опрос занятости и пауза ожидания.
+// deps: log/warn – вывод; runToolImpl – запуск Remotion и ffmpeg (подмена рендера в тестах); checkImpl –
+// layer check; busyImpl/sleep – опрос занятости и пауза ожидания.
 async function run(options, deps = {}) {
   const log = deps.log || console.log;
   const warn = deps.warn || console.error;
@@ -116,8 +116,8 @@ async function run(options, deps = {}) {
   let code = await runCheck();
   if (code !== 0) return code;
   if (!options['no-wait']) {
-    // Ожидание длится до 3 ч. Если оно было, план за это время могли поправить — проверяем его заново,
-    // чтобы рендер и G7 шли по одному и тому же плану. Машина свободна сразу — вторая проверка не нужна.
+    // Ожидание длится до 3 ч. Если оно было, план за это время могли поправить – проверяем его заново,
+    // чтобы рендер и G7 шли по одному и тому же плану. Машина свободна сразу – вторая проверка не нужна.
     let waited = false;
     const busyImpl = deps.busyImpl || busyRenders;
     await waitUntilFree({
@@ -130,7 +130,7 @@ async function run(options, deps = {}) {
       ...(deps.sleep ? { sleep: deps.sleep } : {}),
     });
     if (waited) {
-      log('Машина освободилась — проверяю план слоя ещё раз: за время ожидания его могли поправить');
+      log('Машина освободилась – проверяю план слоя ещё раз: за время ожидания его могли поправить');
       code = await runCheck();
       if (code !== 0) return code;
     }
@@ -163,7 +163,7 @@ async function run(options, deps = {}) {
 // Рендер под уже занятым номером: Remotion → нормализация → G6 и G7 → отчёт. Код выхода по отчёту.
 function renderClaimed({ projectDir, layerName, sourcePath, profile, profileName, held, claim, samples, reportName, command, runToolImpl, log }) {
   // С запуска Remotion любой отказ (сам рендер, нормализация, probe, декодирование, гейт, испорченный
-  // манифест) — отчёт с error и код 2, а не «layer render отменён» без отчёта.
+  // манифест) – отчёт с error и код 2, а не «layer render отменён» без отчёта.
   let gates = [];
   let error = null;
   try {
@@ -171,11 +171,11 @@ function renderClaimed({ projectDir, layerName, sourcePath, profile, profileName
     try {
       runToolImpl('ffmpeg', normalizeArgs(claim.raw, claim.out, samples), { cwd: ROOT, stage: 'layer normalize' });
     } catch (caught) {
-      fs.rmSync(claim.out, { force: true }); // недописанный слой этого номера — наш, после отказа он не нужен
+      fs.rmSync(claim.out, { force: true }); // недописанный слой этого номера – наш, после отказа он не нужен
       throw caught;
     }
     // G6 меряет видеопоток слоя, а не контейнер: звук теперь дополнен до полной длины и не должен прятать
-    // короткое видео. Размер и fps — тем же probeVideo, что у исходника и у layer new.
+    // короткое видео. Размер и fps – тем же probeVideo, что у исходника и у layer new.
     const layerMedia = probeMediaPath(claim.out, { stage: 'layer probe' });
     const layerProbe = { ...probeVideo(claim.out, { stage: 'layer probe' }), duration: layerMedia.videoDurationSec };
     const sourceProbe = probeVideo(sourcePath, { stage: 'layer source probe' });

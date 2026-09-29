@@ -19,7 +19,7 @@ test('invalid inserts are rejected', () => {
   assert.throws(() => kit.compileInserts([{ kind: 'stock', from: 2, to: 2 }], { fps: 25 }), /to должен быть больше from/);
 });
 
-// BAD CASE (ревью задачи 29): stock с cover: false компилировался как «спикер виден» — G4 пропускал
+// BAD CASE (ревью задачи 29): stock с cover: false компилировался как «спикер виден» – G4 пропускал
 // вставку в первые 2 с, а StockInsert всё равно рисовал её на весь кадр. stock/screen/scene всегда
 // полноэкранные, поэтому манифест обязан говорить cover: true; оверлеем бывает только donor.
 test('stock, screen and scene always cover the speaker: cover: false is rejected, a donor accepts both', () => {
@@ -39,18 +39,18 @@ test('stock, screen and scene always cover the speaker: cover: false is rejected
   assert.deepEqual(donors.map((i) => i.cover), [true, false, false]);
 });
 
-// BAD CASE (ревью задачи 29, п.3): 'false' — непустая строка, значит truthy — раньше молча
+// BAD CASE (ревью задачи 29, п.3): 'false' – непустая строка, значит truthy – раньше молча
 // проходила бы как cover: true (нестрогий ?? видит только null/undefined). cover обязан быть
 // настоящим boolean, когда он вообще задан; и donor, и всегда-cover вставки проверяются одинаково.
 test('compileInserts rejects a non-boolean cover (a string or a number) with one clear Russian error', () => {
   for (const cover of ['no', 'false', 0, 1, '']) {
     assert.throws(() => kit.compileInserts([{ id: 'x', kind: 'donor', from: 1, to: 3, cover }], { fps: 25 }), (error) => {
-      assert.equal(error.message, `inserts[0] (x): cover должен быть true или false — получено ${JSON.stringify(cover)}`);
+      assert.equal(error.message, `inserts[0] (x): cover должен быть true или false – получено ${JSON.stringify(cover)}`);
       return true;
     });
   }
   assert.throws(() => kit.compileInserts([{ id: 'stock-x', kind: 'stock', from: 1, to: 3, cover: 'false' }], { fps: 25 }),
-    /inserts\[0\] \(stock-x\): cover должен быть true или false — получено "false"/);
+    /inserts\[0\] \(stock-x\): cover должен быть true или false – получено "false"/);
 });
 
 test('covering inserts send the speaker away and bring it back before the insert closes', () => {
@@ -76,7 +76,7 @@ test('compileInserts rejects a malformed kb, naming the insert', () => {
 // cameraAt) на нескольких fps: спикер обязан быть резким и непрозрачным на всём close, чтобы
 // сжимающаяся обратно карточка не открывала размытое/полупрозрачное лицо (тёмное кольцо на
 // стыке); и пока в кадре ещё виден зазор карточки (открытие не докрыло экран), спикер не должен
-// успеть погаснуть — иначе в зазоре на миг будет видна пустота вместо живого (пусть и размытого)
+// успеть погаснуть – иначе в зазоре на миг будет видна пустота вместо живого (пусть и размытого)
 // спикера.
 test('the speaker is fully back before the close starts and never goes dark while a reveal gap is still visible', () => {
   for (const fps of [24, 25, 30, 50, 60]) {
@@ -107,7 +107,7 @@ test('the speaker is fully back before the close starts and never goes dark whil
     }
     assert.ok(sawClose, `fps ${fps}: expected the close phase to actually run for this insert`);
 
-    // Step 0 fix: тот же pipeline на вставке ровно минимальной длины (close + exit + 1 кадр) —
+    // Step 0 fix: тот же pipeline на вставке ровно минимальной длины (close + exit + 1 кадр) –
     // здесь away-окно вырождается в 1 кадр (см. тест «never inverts from/to»), и это самый тесный
     // случай для возврата спикера в фокус. С closeStart и до конца вставки спикер обязан быть уже
     // резким и непрозрачным на каждом кадре.
@@ -127,7 +127,7 @@ test('the speaker is fully back before the close starts and never goes dark whil
   }
 });
 
-// Граничные случаи сверх плана: пустой список вставок не должен падать (нет вставок в ролике —
+// Граничные случаи сверх плана: пустой список вставок не должен падать (нет вставок в ролике –
 // обычный случай для роликов без стока), и awaysFromInserts должен молча пропускать вставки
 // короче окна возврата, а не уходить в отрицательный диапазон.
 test('an empty insert list compiles and produces no away windows', () => {
@@ -138,7 +138,7 @@ test('an empty insert list compiles and produces no away windows', () => {
 test('a covering insert at the minimum cover length never inverts from/to in its away window', () => {
   // Новый минимум = close + exit + 1 кадр (ревью code-quality к Task 16): ровно на минимуме
   // away.to = to − close − exit уже честно равен insert.from + 1 САМ ПО СЕБЕ, без обращения к
-  // Math.max — гарантия «away-окно никогда не вырождается в ноль» теперь буквально верна, а не
+  // Math.max – гарантия «away-окно никогда не вырождается в ноль» теперь буквально верна, а не
   // держится на подстраховке. Math.max в awaysFromInserts остаётся только для вставок, собранных
   // в обход compileInserts.
   const minFrames = kit.ref25(kit.CLOSE_FRAMES, 25) + kit.ref25(kit.CAMERA_DEFAULTS.away.exitFrames, 25) + 1;
@@ -149,16 +149,16 @@ test('a covering insert at the minimum cover length never inverts from/to in its
 
 test('compileInserts rejects a cover insert shorter than the return-before-close minimum, naming the insert and the minimum in frames and seconds', () => {
   // Литеральные секунды, а не то же выражение (ceilToHundredths), что использует сам
-  // compileInserts — иначе тест мог бы повторить ошибку формулы и не заметить её. Оба числа
+  // compileInserts – иначе тест мог бы повторить ошибку формулы и не заметить её. Оба числа
   // проверены отдельно: minFrames/fps даёт ровно 0.68 при fps 25 (17 кадров) и 0.66 при fps 50
   // (33 кадра), без скрытого округления вверх.
   const MIN_SEC = { 25: 0.68, 50: 0.66 };
   for (const fps of [25, 50]) {
     const minFrames = kit.ref25(kit.CLOSE_FRAMES, fps) + kit.ref25(kit.CAMERA_DEFAULTS.away.exitFrames, fps) + 1;
     const minSec = MIN_SEC[fps];
-    // Ровно минимум — проходит.
+    // Ровно минимум – проходит.
     assert.doesNotThrow(() => kit.compileInserts([{ kind: 'stock', from: 0, to: minFrames / fps }], { fps }));
-    // На один кадр короче — падает с понятной причиной, минимумом в кадрах и в секундах.
+    // На один кадр короче – падает с понятной причиной, минимумом в кадрах и в секундах.
     const oneFrameShort = (minFrames - 1) / fps;
     assert.throws(
       () => kit.compileInserts([{ kind: 'stock', from: 0, to: oneFrameShort }], { fps }),
@@ -170,7 +170,7 @@ test('compileInserts rejects a cover insert shorter than the return-before-close
 
 test('a cover insert shortened by the composition end says so in the short-cover error', () => {
   // from=100f (4с), durationInFrames=110 → «сырой» to (10с=250f) обрезается до 110, оставляя
-  // всего 10 кадров — короче минимума (17 при fps 25). Сообщение обязано отдельно объяснить, что
+  // всего 10 кадров – короче минимума (17 при fps 25). Сообщение обязано отдельно объяснить, что
   // причина в конце ролика, а не в том, что автор plan.js написал слишком короткую вставку.
   assert.throws(
     () => kit.compileInserts([{ kind: 'stock', from: 4, to: 10 }], { fps: 25, durationInFrames: 110 }),
@@ -179,7 +179,7 @@ test('a cover insert shortened by the composition end says so in the short-cover
 });
 
 test('a non-covering (donor) insert is not subject to the cover-length minimum', () => {
-  // donor: cover=false по умолчанию — вставка короче ref25(CLOSE_FRAMES)+ref25(exitFrames) не
+  // donor: cover=false по умолчанию – вставка короче ref25(CLOSE_FRAMES)+ref25(exitFrames) не
   // должна отклоняться, потому что она не отправляет спикера в away и не обязана его возвращать.
   assert.doesNotThrow(() => kit.compileInserts([{ kind: 'donor', from: 0, to: 0.1 }], { fps: 25 }));
 });
@@ -203,12 +203,12 @@ test('an insert starting at or after the composition end is rejected', () => {
   assert.throws(
     () => kit.compileInserts([{ kind: 'stock', from: 20, to: 24 }], { fps: 25, durationInFrames: 500 }),
     /начинается после конца ролика/,
-    'from ровно на конце ролика — тоже поздно, ролик заканчивается на durationInFrames',
+    'from ровно на конце ролика – тоже поздно, ролик заканчивается на durationInFrames',
   );
 });
 
 test('compileInserts keeps its old unclamped behaviour when durationInFrames is omitted', () => {
-  // Task 8 вызывает compileInserts(inserts, { fps }) без durationInFrames — эти вызовы не должны
+  // Task 8 вызывает compileInserts(inserts, { fps }) без durationInFrames – эти вызовы не должны
   // ломаться или начать обрезать to, иначе существующие тесты и places, которые ещё не знают
   // длительность композиции, перестанут работать.
   const [insert] = kit.compileInserts([{ kind: 'stock', from: 2, to: 100 }], { fps: 25 });
@@ -223,7 +223,7 @@ test('the close fade (insertOpacity) is already moving one frame after closeWind
 });
 
 // Более сильная версия проверки общего close-окна: не просто «оба сдвинулись», а буквально равны
-// на каждом кадре, где revealProgress уже полностью открылся (frame >= from + reveal) — там его
+// на каждом кадре, где revealProgress уже полностью открылся (frame >= from + reveal) – там его
 // множитель prog(...reveal) строго равен 1, так что revealProgress вырождается в тот же самый
 // (1 - closeProg), что и insertOpacity, на нескольких fps сразу.
 test('revealProgress and insertOpacity are exactly equal once the reveal is fully open, at every fps', () => {

@@ -30,15 +30,15 @@ test('public CLI advertises multi-take commands and routes takes to its own scri
   assert.match(takesHelp.stdout, /usage: automontage takes add\|pack/);
 });
 
-// Step 0 задачи 33: на Windows у Node нет настоящих POSIX-сигналов — child.kill(signal) там делает
+// Step 0 задачи 33: на Windows у Node нет настоящих POSIX-сигналов – child.kill(signal) там делает
 // TerminateProcess, то есть убивает ребёнка мимо его собственной уборки (например, layer new удаляет
 // недостроенную папку по SIGINT). Консольное событие и так доходит до ребёнка напрямую через общую
-// консольную группу, поэтому на win32 внешний процесс не должен слать сигнал сам — только дождаться
+// консольную группу, поэтому на win32 внешний процесс не должен слать сигнал сам – только дождаться
 // и передать дальше настоящий код выхода ребёнка.
 test('runForwardingSignals never force-kills the child on win32; on other platforms it forwards the signal; either way the child\'s real exit code passes through, and a bare kill-by-signal exit falls back to the table', () => {
   for (const platform of ['darwin', 'linux', 'win32']) {
     for (const signal of Object.keys(SIGNAL_FORWARDING.layer.signalExitCodes)) {
-      // 1) Код возврата ребёнка — целое число вне таблицы (2 нет ни у SIGINT:130, ни у SIGTERM:143,
+      // 1) Код возврата ребёнка – целое число вне таблицы (2 нет ни у SIGINT:130, ни у SIGTERM:143,
       // ни у SIGHUP:129): мутант, который вместо реального code просто возвращает signalExitCodes[signal],
       // здесь не совпадёт со 143/130/129 случайно, как совпал бы при коде 143 и сигнале SIGTERM.
       {
@@ -62,7 +62,7 @@ test('runForwardingSignals never force-kills the child on win32; on other platfo
         }
       }
       // 2) Ребёнка убило самим сигналом без явного кода (code=null, signal='SIGTERM', как отдаёт Node,
-      // когда сигнал дошёл до процесса без собственного обработчика) — код берём из таблицы signalExitCodes.
+      // когда сигнал дошёл до процесса без собственного обработчика) – код берём из таблицы signalExitCodes.
       {
         const child = new EventEmitter();
         child.kill = () => {};

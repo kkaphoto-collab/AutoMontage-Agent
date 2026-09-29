@@ -14,7 +14,7 @@ const hasFfmpeg = toolAvailable('ffmpeg') && toolAvailable('ffprobe');
 const cli = path.resolve(__dirname, '../scripts/cli.js');
 const STATIC_PLAN = "export default function buildPlan({ face }) { return { camera: { face, shots: [{ at: 0, preset: 'W', drift: 'none' }] }, items: [] }; }\n";
 
-// Вывод команды — в массив, а не в консоль теста.
+// Вывод команды – в массив, а не в консоль теста.
 function quiet() {
   const out = [];
   return { out, deps: { log: (line) => out.push(String(line)) } };
@@ -45,7 +45,7 @@ test('the fresh template passes every stop gate and writes manifest and report',
   assert.equal(await runCheck({}, deps), 0);
   const manifestFile = path.join(layerDir, 'out', 'manifest.json');
   assert.ok(fs.existsSync(manifestFile));
-  // Манифест на диске — ровно то, что собрал kit из plan.js, записанный целиком (temp + rename).
+  // Манифест на диске – ровно то, что собрал kit из plan.js, записанный целиком (temp + rename).
   assert.deepEqual(JSON.parse(fs.readFileSync(manifestFile, 'utf8')), JSON.parse(JSON.stringify(buildLayerManifest(layerDir))));
   assert.deepEqual(fs.readdirSync(path.join(layerDir, 'out')), ['manifest.json']);
   const json = report();
@@ -106,7 +106,7 @@ test('BAD CASE: a plan.js that imports node:fs is refused at the boundary with e
   assert.match(report().error, /src\/plan\.js импортирует «node:fs»/);
 });
 
-test('BAD CASE: the project source changed after layer new — exit 2, the layer is not judged', { skip: !hasFfmpeg }, async (t) => {
+test('BAD CASE: the project source changed after layer new – exit 2, the layer is not judged', { skip: !hasFfmpeg }, async (t) => {
   const { layerDir, workspace, runCheck, report } = await scaffold(t);
   fs.appendFileSync(workspace.sourcePath, Buffer.from([0]));
   assert.equal(await runCheck(), 2);
@@ -132,7 +132,7 @@ test('a corrupted manifest and a thrown non-Error both become an error report wi
   assert.equal(await runCheck({}, { ...quiet().deps, buildLayerManifest: truncated }), 2);
   assert.match(report().error, /манифест повреждён/);
   assert.equal(report().summary.status, 'error');
-  // Испорченный манифест уже записан — отчёт называет, какой именно файл не прошёл проверку формы.
+  // Испорченный манифест уже записан – отчёт называет, какой именно файл не прошёл проверку формы.
   assert.deepEqual(report().inputs.map((input) => input.path), ['motion-v01/out/manifest.json']);
   assert.equal(await runCheck({}, { ...quiet().deps, buildLayerManifest: () => { throw 'строка вместо Error'; } }), 2);
   assert.equal(report().error, 'строка вместо Error');
@@ -145,16 +145,16 @@ test('a real plan.js that throws undefined or a string gives a readable error re
   const { runCheck, report, writePlan } = await scaffold(t);
   writePlan('export default function buildPlan() {\n  throw undefined;\n}\n');
   assert.equal(await runCheck(), 2);
-  assert.match(report().error, /^слой motion-v01: src\/plan\.js упал при построении плана — undefined/);
+  assert.match(report().error, /^слой motion-v01: src\/plan\.js упал при построении плана – undefined/);
   writePlan("export default function buildPlan() {\n  throw 'строка';\n}\n");
   assert.equal(await runCheck(), 2);
-  assert.match(report().error, /^слой motion-v01: src\/plan\.js упал при построении плана — строка/);
-  // Геттер в объекте плана бросает уже при компиляции — мимо обёртки compilePlan вокруг buildPlan,
+  assert.match(report().error, /^слой motion-v01: src\/plan\.js упал при построении плана – строка/);
+  // Геттер в объекте плана бросает уже при компиляции – мимо обёртки compilePlan вокруг buildPlan,
   // поэтому текст другой: не «упал при построении», а «бросил … при компиляции».
   writePlan("export default function buildPlan() {\n  return { get camera() { throw null; }, items: [] };\n}\n");
   assert.equal(await runCheck(), 2);
   assert.equal(report().error, 'слой motion-v01: src/plan.js бросил null при компиляции плана');
-  // Брошенный не-Error объект со своим строковым message (не instanceof Error) — используем этот
+  // Брошенный не-Error объект со своим строковым message (не instanceof Error) – используем этот
   // текст напрямую, а не невнятное «бросил [object Object] при компиляции плана».
   writePlan("export default function buildPlan() {\n  return { get camera() { throw { message: 'кастомная причина' }; }, items: [] };\n}\n");
   assert.equal(await runCheck(), 2);
@@ -187,7 +187,7 @@ test('a G1 waiver on a layer where G1 passes exits 0 and is reported as not need
   const json = report();
   assert.equal(json.gates.find((g) => g.id === 'G1').status, 'pass');
   assert.deepEqual(json.unusedWaivers, [{ gate: 'G1', reason: 'длинный план экрана' }]);
-  assert.match(reportText(), /^ℹ️ исключение G1 не понадобилось: длинный план экрана — уберите его из plan\.js$/m);
+  assert.match(reportText(), /^ℹ️ исключение G1 не понадобилось: длинный план экрана – уберите его из plan\.js$/m);
   assert.doesNotMatch(reportText(), /даёт только предупреждение/);
 });
 
@@ -208,7 +208,7 @@ test('two waivers, one used: G1 softens a real stop, the G4 waiver is the only u
   assert.equal(json.gates.find((g) => g.id === 'G1').status, 'waived');
   assert.equal(json.gates.find((g) => g.id === 'G4').status, 'pass');
   assert.deepEqual(json.unusedWaivers, [{ gate: 'G4', reason: 'уход в хуке' }]);
-  assert.match(reportText(), /^ℹ️ исключение G4 не понадобилось: уход в хуке — уберите его из plan\.js$/m);
+  assert.match(reportText(), /^ℹ️ исключение G4 не понадобилось: уход в хуке – уберите его из plan\.js$/m);
   assert.doesNotMatch(reportText(), /исключение G1 не понадобилось/);
 });
 
@@ -220,7 +220,7 @@ test('a G1 waiver on a layer where G1 only warns is unused: a waiver lifts a sto
   const json = report();
   assert.equal(json.gates.find((g) => g.id === 'G1').status, 'warn');
   assert.deepEqual(json.unusedWaivers, [{ gate: 'G1', reason: 'длинные планы' }]);
-  assert.match(reportText(), /^ℹ️ исключение G1 не понадобилось: длинные планы — уберите его из plan\.js\n {3}→ G1 даёт только предупреждение — исключение снимает лишь стоп$/m);
+  assert.match(reportText(), /^ℹ️ исключение G1 не понадобилось: длинные планы – уберите его из plan\.js\n {3}→ G1 даёт только предупреждение – исключение снимает лишь стоп$/m);
 });
 
 // Короткий сток замирает на последнем кадре до конца вставки: layer check меряет клип ffprobe и предупреждает.
@@ -240,7 +240,7 @@ test('a stock clip of 1 s on a 2 s insert warns in G10 with a hint to re-fetch i
   assert.equal(gate.status, 'warn');
   const span = gate.spans.find((s) => /сток/.test(s.note));
   assert.ok(span, JSON.stringify(gate));
-  assert.equal(span.note, 'сток stock/placeholder.mp4 короче вставки stock-1 на 1 с — последний кадр замрёт');
+  assert.equal(span.note, 'сток stock/placeholder.mp4 короче вставки stock-1 на 1 с – последний кадр замрёт');
   assert.ok(Math.abs(span.fromSec - 3.6) < 0.05 && Math.abs(span.toSec - 5.6) < 0.05, JSON.stringify(span));
   assert.match(gate.hint, /automontage layer stock --insert stock-1/);
   assert.match(reportText(), /сток stock\/placeholder\.mp4 короче вставки stock-1/);
@@ -252,7 +252,7 @@ test('a missing stock file warns in G10 instead of failing the check', { skip: !
   assert.equal(await runCheck(), 0);
   const gate = g10(report());
   assert.equal(gate.status, 'warn');
-  assert.ok(gate.spans.some((s) => s.note === 'нет public/stock/placeholder.mp4 — вставка stock-1 останется пустой'), JSON.stringify(gate));
+  assert.ok(gate.spans.some((s) => s.note === 'нет public/stock/placeholder.mp4 – вставка stock-1 останется пустой'), JSON.stringify(gate));
 });
 
 test('G10 forgives one frame: a 49-frame clip on a 50-frame insert is fine, 48 frames warn', { skip: !hasFfmpeg }, async (t) => {
@@ -269,14 +269,14 @@ test('G10 forgives one frame: a 49-frame clip on a 50-frame insert is fine, 48 f
   assert.ok(!g10(report()).spans.some((s) => /сток/.test(s.note)), JSON.stringify(g10(report())));
   frames(48);
   assert.equal(await runCheck(), 0);
-  assert.deepEqual(g10(report()).spans.map((s) => s.note), ['сток stock/placeholder.mp4 короче вставки stock-1 на 0,1 с — последний кадр замрёт']);
+  assert.deepEqual(g10(report()).spans.map((s) => s.note), ['сток stock/placeholder.mp4 короче вставки stock-1 на 0,1 с – последний кадр замрёт']);
 });
 
 test('a stock file that is not a video warns in G10 instead of breaking the check', { skip: !hasFfmpeg }, async (t) => {
   const { layerDir, runCheck, report } = await scaffold(t);
   fs.writeFileSync(path.join(layerDir, 'public', 'stock', 'placeholder.mp4'), 'не видео');
   assert.equal(await runCheck(), 0);
-  assert.deepEqual(g10(report()).spans.map((s) => s.note), ['public/stock/placeholder.mp4 не читается как видео — вставка stock-1 останется пустой']);
+  assert.deepEqual(g10(report()).spans.map((s) => s.note), ['public/stock/placeholder.mp4 не читается как видео – вставка stock-1 останется пустой']);
 });
 
 test('a short stock turns a passing G10 into a warning; a src outside public/ is not probed', { skip: !hasFfmpeg }, async (t) => {
@@ -290,10 +290,10 @@ test('a short stock turns a passing G10 into a warning; a src outside public/ is
   writePlan(plan('stock/half.mp4'));
   assert.equal(await runCheck(), 0);
   assert.equal(g10(report()).status, 'warn');
-  assert.deepEqual(g10(report()).spans.map((s) => s.note), ['сток stock/half.mp4 короче вставки s2 на 0,5 с — последний кадр замрёт']);
+  assert.deepEqual(g10(report()).spans.map((s) => s.note), ['сток stock/half.mp4 короче вставки s2 на 0,5 с – последний кадр замрёт']);
   writePlan(plan('../layer.json'));
   assert.equal(await runCheck(), 0);
-  assert.deepEqual(g10(report()).spans.map((s) => s.note), ['src ../layer.json вставки s2 — вне public/ слоя']);
+  assert.deepEqual(g10(report()).spans.map((s) => s.note), ['src ../layer.json вставки s2 – вне public/ слоя']);
 });
 
 test('the real CLI shows the src/plan.js line of an exception thrown by buildPlan and exits 2', { skip: !hasFfmpeg }, async (t) => {
@@ -337,9 +337,9 @@ async function waitFor(predicate, message, timeoutMs = 12_000) {
   assert.fail(message);
 }
 
-// SIGINT/SIGTERM/SIGHUP — те же коды, что scripts/cli.js даёт публичной команде layer (Step 0 задачи
+// SIGINT/SIGTERM/SIGHUP – те же коды, что scripts/cli.js даёт публичной команде layer (Step 0 задачи
 // 33); закрытие терминала (SIGHUP) не должно оставлять ребёнка scripts/layer/cli.js висеть так же,
-// как явный Ctrl+C или kill. Цикл — по образцу tests/review-cli.test.js.
+// как явный Ctrl+C или kill. Цикл – по образцу tests/review-cli.test.js.
 const LAYER_SIGNAL_EXIT_CODES = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 };
 
 test('signals to the public automontage CLI stop its layer child too and exit with the right code', {

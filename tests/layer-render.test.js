@@ -17,10 +17,10 @@ const STATIC_PLAN = "export default function buildPlan({ face }) { return { came
 
 // Подмена Remotion: ролик lavfi нужной длины и fps в полном диапазоне с теми же метками, что у настоящего
 // Remotion 4.0.504 (yuvj420p, color_range pc, colorspace bt470bg).
-// audio — lavfi-строка со своей длиной d, функция, которая строит её уже во время «рендера» (манифест слоя к
-// этому моменту записан), или null — ролик без звуковой дорожки. Без -shortest: звук может быть длиннее
-// видео — настоящий Remotion дописывает хвост AAC на 43–64 мс. after — что сделать после записи файла.
-// Остальная цепочка (нормализация ffmpeg, probe, PCM, гейты, отчёт) — настоящая.
+// audio – lavfi-строка со своей длиной d, функция, которая строит её уже во время «рендера» (манифест слоя к
+// этому моменту записан), или null – ролик без звуковой дорожки. Без -shortest: звук может быть длиннее
+// видео – настоящий Remotion дописывает хвост AAC на 43–64 мс. after – что сделать после записи файла.
+// Остальная цепочка (нормализация ffmpeg, probe, PCM, гейты, отчёт) – настоящая.
 function fakeRemotion(seconds, audio, { after, fps = 25 } = {}) {
   const calls = [];
   const runToolImpl = (command, args, options) => {
@@ -58,14 +58,14 @@ function editManifest(projectDir, edit) {
   edit(m);
   fs.writeFileSync(manifestPath(projectDir), JSON.stringify(m));
 }
-// Звук настоящего слоя kit — только эффекты: писк внутри окна каждого оставленного звука манифеста.
+// Звук настоящего слоя kit – только эффекты: писк внутри окна каждого оставленного звука манифеста.
 function effectsOf(projectDir, seconds) {
   const m = JSON.parse(fs.readFileSync(manifestPath(projectDir), 'utf8'));
   assert.ok(m.cues.kept.length > 0, 'у шаблона с библиотекой звуков есть эффекты');
   const beeps = m.cues.kept.map((c) => `0.8*sin(2*PI*1000*t)*between(t,${c.startFrame / m.fps},${(c.startFrame + c.durationFrames) / m.fps - 1e-6})`);
   return `aevalsrc='${beeps.join('+')}':s=48000:d=${seconds}`;
 }
-// Голос исходника makeLayerProject на −18 дБ — утечка аватара в звук слоя.
+// Голос исходника makeLayerProject на −18 дБ – утечка аватара в звук слоя.
 const LEAK = "aevalsrc='0.05*sin(2*PI*220*t)*gt(sin(2*PI*1.3*t),0)':s=48000:d=6";
 
 function videoStream(file) {
@@ -79,7 +79,7 @@ function streams(file) {
   const [video, audio] = ['video', 'audio'].map((kind) => probe.streams.find((st) => st.codec_type === kind));
   return { video, audio, container: Number(probe.format.duration) };
 }
-// Самая тёмная яркость первого кадра: у testsrc2 есть чёрное, в полном диапазоне это 0, в ограниченном — 16.
+// Самая тёмная яркость первого кадра: у testsrc2 есть чёрное, в полном диапазоне это 0, в ограниченном – 16.
 function minLuma(file) {
   const out = execFileSync('ffmpeg', ['-v', 'error', '-i', file, '-vf', 'signalstats,metadata=print:key=lavfi.signalstats.YMIN:file=-',
     '-frames:v', '1', '-f', 'null', '-'], { encoding: 'utf8' });
@@ -116,7 +116,7 @@ test('a good layer renders, normalises to limited-range yuv420p and passes G6 an
 });
 
 // Оркестратор, п.1: манифест читается сразу после layer check этого запуска и держится в памяти. Параллельный
-// layer check после правки plan.js переписал бы out/manifest.json за минуты рендера — G7 не должен судить по
+// layer check после правки plan.js переписал бы out/manifest.json за минуты рендера – G7 не должен судить по
 // чужим окнам эффектов. Здесь «чужой» манифест без единого звука: по нему все писки были бы «вне эффектов».
 test('G7 judges by the manifest of this run\'s layer check, not by one rewritten during the render', { skip: !hasFfmpeg }, async (t) => {
   const { projectDir, run, report } = await scaffold(t);
@@ -124,10 +124,10 @@ test('G7 judges by the manifest of this run\'s layer check, not by one rewritten
   assert.equal(await run({ runToolImpl: fake.runToolImpl }), 0);
   const json = report();
   assert.deepEqual(json.gates.map((g) => [g.id, g.status]), [['G6', 'pass'], ['G7', 'pass']]);
-  assert.notEqual(json.inputs[2].sha256, hashFile(manifestPath(projectDir)), 'в отчёте — sha256 манифеста, по которому судили');
+  assert.notEqual(json.inputs[2].sha256, hashFile(manifestPath(projectDir)), 'в отчёте – sha256 манифеста, по которому судили');
 });
 
-// Ревью с настоящим Remotion 4.0.504: звук AAC в рендере на 43–64 мс длиннее видео, нормализация его сохраняла —
+// Ревью с настоящим Remotion 4.0.504: звук AAC в рендере на 43–64 мс длиннее видео, нормализация его сохраняла –
 // G6 мерил контейнер и ложно останавливал слой на 29,97/30/50/60 fps. Правило владельца: хвост AAC режется до
 // длительности кадров. Теперь звук обрезается (и дополняется тишиной) ровно до durationInFrames/fps.
 test('the Remotion AAC tail (+60 ms) is trimmed to the frames: video, audio and container are 6,0 s, G6 passes at 60 fps', { skip: !hasFfmpeg }, async (t) => {
@@ -140,7 +140,7 @@ test('the Remotion AAC tail (+60 ms) is trimmed to the frames: video, audio and 
   assert.equal(container, 6);
 });
 
-// Мутант «убрали apad»: звук исходника (5,5 с) короче видео (6 с) — нормализация дополняет его тишиной
+// Мутант «убрали apad»: звук исходника (5,5 с) короче видео (6 с) – нормализация дополняет его тишиной
 // ровно до длительности кадров, а не оставляет коротким внутри контейнера полной длины.
 test('normalisation pads audio shorter than the video with silence to the full length', { skip: !hasFfmpeg }, async (t) => {
   const { layerDir, run } = await scaffold(t);
@@ -150,7 +150,7 @@ test('normalisation pads audio shorter than the video with silence to the full l
 });
 
 // Мутант «убрали first_pts=0»: звук исходника начинается на 0,1 с позже видео (буфер энкодера, как у
-// настоящего Remotion) — нормализация кладёт его на 0 и обрезает ровно по длине кадров, а не оставляет
+// настоящего Remotion) – нормализация кладёт его на 0 и обрезает ровно по длине кадров, а не оставляет
 // сдвиг и лишний хвост.
 test('normalisation starts audio that begins late at 0 and ends exactly at the video length', { skip: !hasFfmpeg }, async (t) => {
   const { layerDir, run } = await scaffold(t);
@@ -198,7 +198,7 @@ test('BAD CASE: the avatar voice in the layer audio is stopped by G7 through the
 });
 
 // Манифест, который держит рендер, испорчен (кто-то переписал его между layer check и чтением): G7 бросает
-// «манифест повреждён» уже после рендера — отчёт с error и код 2, sha256 слоя и исходника в inputs всё равно.
+// «манифест повреждён» уже после рендера – отчёт с error и код 2, sha256 слоя и исходника в inputs всё равно.
 test('a broken manifest found after the render gives an error report with exit 2 and the file hashes', { skip: !hasFfmpeg }, async (t) => {
   const { projectDir, layerDir, run, report, sourcePath } = await scaffold(t);
   const checkImpl = async (options, deps) => {
@@ -220,7 +220,7 @@ test('a broken manifest found after the render gives an error report with exit 2
   ]);
 });
 
-// Сбой самого Remotion — тоже «оценить нельзя» с отчётом: слоя нет, но исходник и манифест записаны, заявка
+// Сбой самого Remotion – тоже «оценить нельзя» с отчётом: слоя нет, но исходник и манифест записаны, заявка
 // на номер снята.
 test('a crashed Remotion render gives an error report and releases the render number', { skip: !hasFfmpeg }, async (t) => {
   const { layerDir, run, report } = await scaffold(t);
@@ -262,8 +262,8 @@ test('a failing layer check blocks the render before Remotion starts', { skip: !
   assert.ok(!fs.existsSync(path.join(projectDir, 'qa', 'layer-motion-v01-render-01.json')));
 });
 
-// Оркестратор, п.3: слой без звуковой дорожки — layerEnv null (G7 предупреждает), исходник без звука —
-// sourceEnv null (судит один сигнал A — звук вне эффектов).
+// Оркестратор, п.3: слой без звуковой дорожки – layerEnv null (G7 предупреждает), исходник без звука –
+// sourceEnv null (судит один сигнал A – звук вне эффектов).
 test('a layer without an audio track warns in G7; a source without audio is judged by the effects windows alone', { skip: !hasFfmpeg }, async (t) => {
   const silentLayer = await scaffold(t);
   assert.equal(await silentLayer.run({ runToolImpl: fakeRemotion(6, null).runToolImpl }), 0);
@@ -279,7 +279,7 @@ test('a layer without an audio track warns in G7; a source without audio is judg
 });
 
 // Оркестратор, п.2: номер рендера занимается атомарно. Чужая заявка layer-01.raw.mp4 (второй layer render
-// того же слоя ещё идёт) — этот рендер берёт layer-02 и не трогает чужой файл.
+// того же слоя ещё идёт) – этот рендер берёт layer-02 и не трогает чужой файл.
 test('a render number claimed by another run is skipped: the render goes to layer-02', { skip: !hasFfmpeg }, async (t) => {
   const { projectDir, layerDir, run, report } = await scaffold(t);
   fs.mkdirSync(path.join(layerDir, 'renders'));
@@ -293,7 +293,7 @@ test('a render number claimed by another run is skipped: the render goes to laye
 });
 
 // Номера рендеров не переиспользуются: на отчёт layer-motion-v01-render-01.json опираются layer import и барьер
-// preview (по sha256 слоя). Слой layer-01.mp4 импортировали и удалили — следующий рендер берёт layer-02 и не
+// preview (по sha256 слоя). Слой layer-01.mp4 импортировали и удалили – следующий рендер берёт layer-02 и не
 // перезаписывает отчёт 01.
 test('a render number whose qa report still exists is never reused, even after its layer file is deleted', { skip: !hasFfmpeg }, async (t) => {
   const { projectDir, layerDir, run, report } = await scaffold(t);
@@ -343,7 +343,7 @@ test('claimRender takes the first free number atomically and skips finished and 
   assert.equal(first.n, 3);
   assert.equal(first.raw, path.join(dir, 'layer-03.raw.mp4'));
   assert.equal(first.out, path.join(dir, 'layer-03.mp4'));
-  // Второй запуск, пока первый держит заявку, — следующий номер, а не тот же.
+  // Второй запуск, пока первый держит заявку, – следующий номер, а не тот же.
   assert.equal(render.claimRender(dir).n, 4);
   first.release();
   assert.equal(render.claimRender(dir).n, 3);
@@ -370,7 +370,7 @@ test('claimRender re-checks the finished file after claiming and moves on if ano
 
 // Отклонение от плана: после ожидания свободной машины layer check запускается ещё раз. Ожидание длится до
 // 3 ч; план, поправленный за это время, рендерится уже новым, и G7 должен судить по его манифесту, а не по
-// манифесту проверки трёхчасовой давности. Без ожидания — одна проверка.
+// манифесту проверки трёхчасовой давности. Без ожидания – одна проверка.
 test('a plan edited while waiting for a free machine is checked again before the render', { skip: !hasFfmpeg }, async (t) => {
   const { layerDir, run } = await scaffold(t);
   let checks = 0;
@@ -389,7 +389,7 @@ test('without waiting (the machine is already free) layer check runs once', { sk
   let checks = 0;
   const checkImpl = (options, deps) => { checks += 1; return check.run(options, deps); };
   const fake = fakeRemotion(6, () => effectsOf(projectDir, 6));
-  const sleep = async () => { throw new Error('машина свободна — ждать нечего'); };
+  const sleep = async () => { throw new Error('машина свободна – ждать нечего'); };
   assert.equal(await run({ runToolImpl: fake.runToolImpl, checkImpl, busyImpl: () => [], sleep }, { 'no-wait': false }), 0);
   assert.equal(checks, 1);
   assert.equal(fake.calls.length, 1);

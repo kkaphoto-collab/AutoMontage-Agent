@@ -11,7 +11,7 @@ const { hashFile } = require('../scripts/pult/files');
 const newLayer = require('../scripts/layer/new');
 const stock = require('../scripts/layer/stock');
 
-// Сеть в тестах не трогаем: поиск (createProvider) и скачивание (request) — подмены; root: null — не читать
+// Сеть в тестах не трогаем: поиск (createProvider) и скачивание (request) – подмены; root: null – не читать
 // .env движка (на машине разработчика в нём может лежать настоящий PEXELS_API_KEY).
 const hasFfmpeg = toolAvailable('ffmpeg') && toolAvailable('ffprobe');
 const KEY = 'not-a-real-key';
@@ -52,7 +52,7 @@ test('without PEXELS_API_KEY the command explains that stock search is optional'
     (error) => {
       assert.match(error.message, /PEXELS_API_KEY не задан/);
       assert.match(error.message, /необязател/);
-      // Как обойтись без ключа: свой клип в public/stock/ и строка источника в SOURCE.md, длина — по вставке.
+      // Как обойтись без ключа: свой клип в public/stock/ и строка источника в SOURCE.md, длина – по вставке.
       assert.match(error.message, /public\/stock\//);
       assert.match(error.message, /SOURCE\.md/);
       assert.match(error.message, /не короче 2 с/);
@@ -82,7 +82,7 @@ test('a picked Pexels clip is cropped to the layer, muted and recorded with its 
     } };
   assert.equal(await runStock({ 'query-original': 'люди за ноутбуком', sec: '2' }, extra), 0);
   assert.equal(providerConfig.apiKey, KEY);
-  // Рендишн — самый маленький, что покрывает кадр слоя, а не UHD.
+  // Рендишн – самый маленький, что покрывает кадр слоя, а не UHD.
   assert.deepEqual(providerConfig.preferSize, { width: 540, height: 960 });
   const probe = probeVideo(clip);
   assert.deepEqual([probe.width, probe.height, probe.fps], [540, 960, 25]);
@@ -90,7 +90,7 @@ test('a picked Pexels clip is cropped to the layer, muted and recorded with its 
   assert.equal(audioStreams(clip), '', 'в клипе нет звуковой дорожки');
   const source = sourceMd();
   assert.match(source, /^\| `stock\/pexels-12345\.mp4` \| \[Pexels License\]\(https:\/\/www\.pexels\.com\/license\/\), \[Автор\]\(https:\/\/www\.pexels\.com\/@a\) \| https:\/\/www\.pexels\.com\/video\/12345\/; запрос «люди за ноутбуком» \(people laptop, portrait\); получено 2026-01-01T00:00:00\.000Z; 0–2 с из 8 с \| [a-f0-9]{64} \|$/m);
-  assert.ok(source.includes(hashFile(clip)), 'sha256 — от готового клипа в public/stock');
+  assert.ok(source.includes(hashFile(clip)), 'sha256 – от готового клипа в public/stock');
   // Строка не шире шапки: GFM молча отбросил бы лишнюю ячейку.
   const table = source.split('\n').filter((line) => line.startsWith('|'));
   const width = cells(table[0]).length;
@@ -179,7 +179,7 @@ test('SECURITY: provider and download failures never echo the key', { skip: !has
     assert.ok(!error.message.includes(KEY));
     return true;
   });
-  // Ключ с пробелами или управляющими символами — отказ без его значения.
+  // Ключ с пробелами или управляющими символами – отказ без его значения.
   await assert.rejects(runStock({}, { env: { PEXELS_API_KEY: `${KEY} bad` } }), (error) => {
     assert.match(error.message, /PEXELS_API_KEY/);
     assert.ok(!error.message.includes(KEY));
@@ -209,7 +209,7 @@ test('--insert on a 60-frame window at 30000/1001 fps asks for 2,1 s and yields 
   t.after(() => { delete process.env.AUTOMONTAGE_SFX_DIR; });
   await newLayer.run({ 'project-dir': project.projectDir }, { log: () => {}, warn: () => {} });
   const layerDir = path.join(project.projectDir, 'motion-v01');
-  // 3,003 с и 5,005 с — ровно кадры 90 и 150: окно 60 кадров = 2,002 с → вверх до 2,1 с.
+  // 3,003 с и 5,005 с – ровно кадры 90 и 150: окно 60 кадров = 2,002 с → вверх до 2,1 с.
   fs.writeFileSync(path.join(layerDir, 'src', 'plan.js'), "export default function buildPlan({ face }) { return { camera: { face, shots: [{ at: 0, preset: 'W', drift: 'none' }] }, items: [], "
     + "inserts: [{ id: 'odd', kind: 'stock', from: 3.003, to: 5.005, src: 'stock/placeholder.mp4' }] }; }\n");
   const downloaded = path.join(project.root, 'download.mp4');
@@ -298,7 +298,7 @@ test('a short key is not mistaken for a leak in the provenance row', { skip: !ha
 });
 
 test('layer code does not depend on Review code', () => {
-  // scripts/layer/* — общий движок; scripts/review/* — только браузерный Review. Слой проверяет
+  // scripts/layer/* – общий движок; scripts/review/* – только браузерный Review. Слой проверяет
   // provenance напрямую через scripts/broll/provenance, а не через scripts/review/broll-discovery.
   const source = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'layer', 'stock.js'), 'utf8');
   assert.doesNotMatch(source, /require\(['"]\.\.\/review\//);
@@ -309,7 +309,7 @@ test('control and format characters of the query never reach SOURCE.md', { skip:
   assert.equal(await runStock({ sec: '1', 'query-original': 'люди\u202e за\tноутбуком | ok' }), 0);
   const row = sourceMd().split('\n').find((line) => line.includes('pexels-12345'));
   assert.doesNotMatch(row, /[\u202e\t]/u);
-  // Таб — граница слов, а не мусор: он становится пробелом, а не пропадает («за ноутбуком»,
+  // Таб – граница слов, а не мусор: он становится пробелом, а не пропадает («за ноутбуком»,
   // а не слитное «заноутбуком»).
   assert.match(row, /«люди за ноутбуком \\\| ok»/);
 });

@@ -3,10 +3,10 @@ const assert = require('node:assert/strict');
 const { busyRenders, waitUntilFree } = require('../scripts/layer/busy');
 const { remotionLayerRenderCommand } = require('../scripts/build-commands');
 
-// Имитирует настоящий ps: первый вызов — снимок ВСЕХ pid/ppid/comm (`-A -o pid=,ppid=,comm=`), второй —
+// Имитирует настоящий ps: первый вызов – снимок ВСЕХ pid/ppid/comm (`-A -o pid=,ppid=,comm=`), второй –
 // пакетный запрос командных строк только запрошенных pid (`-o pid=,command= -p <список>`). Как и
 // настоящий ps на этой машине, пропавший между двумя снимками pid просто не попадает во вторую выборку
-// (не бросает) — если конкретному тесту нужен именно бросок (гонка), он подменяет psImpl сам.
+// (не бросает) – если конкретному тесту нужен именно бросок (гонка), он подменяет psImpl сам.
 function fakePs(table) {
   const byPid = new Map(table.map((p) => [p.pid, p]));
   return (args) => {
@@ -31,9 +31,9 @@ test('only real node render processes count as busy, not shell wrappers holding 
 });
 
 // knowledge/render-queue-pgrep-deadlock.md: до фактического запуска Remotion (после layer check и
-// waitUntilFree) «layer render» — это просто ждущий node-процесс, неотличимый по командной строке от
+// waitUntilFree) «layer render» – это просто ждущий node-процесс, неотличимый по командной строке от
 // другого такого же ждущего процесса. Если бы busyRenders считал такой процесс «занятостью», два
-// одновременно запущенных `automontage layer render` увидели бы друг друга занятыми и ждали бы вечно —
+// одновременно запущенных `automontage layer render` увидели бы друг друга занятыми и ждали бы вечно –
 // та же взаимная блокировка, что была с `pgrep -f "remotion render"`, только на этом модуле.
 test('two waiting `layer render` invocations never see each other as busy (that would deadlock forever)', () => {
   const table = [
@@ -45,7 +45,7 @@ test('two waiting `layer render` invocations never see each other as busy (that 
   ];
   assert.deepEqual(busyRenders({ psImpl: fakePs(table), selfPids: [20, 21] }), []);
   assert.deepEqual(busyRenders({ psImpl: fakePs(table), selfPids: [22, 23] }), []);
-  // Настоящий Remotion-рендер слоя (после ожидания) всё равно ловится — это не дыра в детекции,
+  // Настоящий Remotion-рендер слоя (после ожидания) всё равно ловится – это не дыра в детекции,
   // а только отсутствие маркера у самого ожидания.
   const rendering = [...table, {
     pid: 24, ppid: 23, comm: 'node', command: 'node /repo/node_modules/@remotion/cli/remotion-cli.js --env-file=x render /a/motion-v01/src/index.jsx Layer out.mp4',
@@ -53,28 +53,28 @@ test('two waiting `layer render` invocations never see each other as busy (that 
   assert.deepEqual(busyRenders({ psImpl: fakePs(rendering), selfPids: [22, 23] }).map((p) => p.pid), [24]);
 });
 
-// Важный фикс код-ревью: selfPids раньше был статичным [pid, ppid] — если между automontage и слоем
+// Важный фикс код-ревью: selfPids раньше был статичным [pid, ppid] – если между automontage и слоем
 // стоит ещё один узел-обёртка (например `codex exec "…cli.js preview…"` как дед процесса), его текст в
 // argv совпадал бы с маркером, и layer render ждал бы собственного деда 3 часа (воспроизведено в ревью).
 // Теперь по умолчанию (без явного selfPids) busyRenders сам строит цепочку предков от process.pid до 1
 // по единственному снимку ps -A и исключает КАЖДОГО предка, а не только прямого родителя.
-test('without an explicit selfPids, busyRenders walks every ancestor up to 1 — a grandparent that merely mentions a marker in its own argv is never "busy"', () => {
+test('without an explicit selfPids, busyRenders walks every ancestor up to 1 – a grandparent that merely mentions a marker in its own argv is never "busy"', () => {
   const grandparent = 424242;
   const table = [
     { pid: 1, ppid: 0, comm: 'launchd', command: '/sbin/launchd' },
-    // Дед — узел-обёртка вида «codex exec "<промпт>"», текст промпта случайно содержит маркер.
+    // Дед – узел-обёртка вида «codex exec "<промпт>"», текст промпта случайно содержит маркер.
     { pid: grandparent, ppid: 1, comm: 'node', command: 'node codex-companion.mjs task "Смонтируй: node scripts/cli.js preview --project-dir p"' },
     { pid: process.ppid, ppid: grandparent, comm: 'node', command: 'node some-wrapper.js' },
     { pid: process.pid, ppid: process.ppid, comm: 'node', command: 'node scripts/layer/cli.js render --project-dir p' },
-    // Посторонний, по-настоящему занятый процесс — не предок, должен остаться занятым.
+    // Посторонний, по-настоящему занятый процесс – не предок, должен остаться занятым.
     { pid: 555, ppid: 1, comm: 'node', command: 'node scripts/cli.js preview --project-dir other' },
   ];
-  const busy = busyRenders({ psImpl: fakePs(table) }); // selfPids не передан — считается по цепочке предков
+  const busy = busyRenders({ psImpl: fakePs(table) }); // selfPids не передан – считается по цепочке предков
   assert.deepEqual(busy.map((p) => p.pid), [555]);
 });
 
 // Явный selfPids (как в тестах выше) по-прежнему работает даже когда «свой» процесс сам держит
-// маркерный текст — раньше был бы риск считать себя же занятым, если бы фильтр исключения потерялся.
+// маркерный текст – раньше был бы риск считать себя же занятым, если бы фильтр исключения потерялся.
 test('an explicit selfPids excludes a process even if its own command line carries a marker', () => {
   const table = [
     { pid: 1, ppid: 0, comm: 'launchd', command: '/sbin/launchd' },
@@ -84,7 +84,7 @@ test('an explicit selfPids excludes a process even if its own command line carri
   assert.deepEqual(busyRenders({ psImpl: fakePs(table), selfPids: [] }).map((p) => p.pid), [30]);
 });
 
-// path.basename(comm) === 'node' — точное совпадение, а не подстрока: comm вроде «node_repl» не node,
+// path.basename(comm) === 'node' – точное совпадение, а не подстрока: comm вроде «node_repl» не node,
 // даже если полная командная строка рядом содержит маркерный текст.
 test('a comm that only contains "node" as a substring (e.g. node_repl) is not treated as a node process', () => {
   const table = [
@@ -106,8 +106,8 @@ test('repeated whitespace in the command line is normalised before matching mark
   assert.equal(busy[0].command, 'node scripts/cli.js preview --project-dir p');
 });
 
-// Процесс пропал между первым снимком и пакетным запросом команд (гонка) — этот раунд просто без
-// результата, а не падение всего вызова (следующий опрос — ещё через 30 с).
+// Процесс пропал между первым снимком и пакетным запросом команд (гонка) – этот раунд просто без
+// результата, а не падение всего вызова (следующий опрос – ещё через 30 с).
 test('a pid that vanishes between the two ps calls is skipped, not thrown', () => {
   const table = [
     { pid: 1, ppid: 0, comm: 'launchd', command: '/sbin/launchd' },
@@ -125,15 +125,15 @@ test('waitUntilFree polls until the machine is free and times out with the block
   const logs = [];
   await waitUntilFree({ busyImpl: () => (calls++ < 2 ? [{ pid: 1, command: 'render' }] : []), sleep: async () => {}, log: (m) => logs.push(m) });
   assert.equal(calls, 3);
-  // Тот же pid оба раза занятости — лог печатается один раз (при смене занятого pid), не на каждый опрос.
+  // Тот же pid оба раза занятости – лог печатается один раз (при смене занятого pid), не на каждый опрос.
   assert.equal(logs.length, 1);
   let t = 0;
   await assert.rejects(waitUntilFree({ busyImpl: () => [{ pid: 1, command: 'node render' }], sleep: async () => { t += 60_000; }, now: () => t, timeoutMs: 120_000, log: () => {} }),
-    /машина занята дольше 2 мин: render$/u); // в тексте — хвост команды без исполняемого файла
+    /машина занята дольше 2 мин: render$/u); // в тексте – хвост команды без исполняемого файла
 });
 
-// Ревью: лог не должен повторяться на каждый 30-секундный опрос, если занят тот же самый pid — только
-// когда занятость сменилась на другой процесс. Плюс «полезный хвост» команды — без исполняемого файла.
+// Ревью: лог не должен повторяться на каждый 30-секундный опрос, если занят тот же самый pid – только
+// когда занятость сменилась на другой процесс. Плюс «полезный хвост» команды – без исполняемого файла.
 test('waitUntilFree logs only when the blocking pid changes, showing the command tail without the executable', async () => {
   const sequence = [
     { pid: 42, command: 'node /opt/render/scripts/preview.js --project-dir p' },
@@ -154,7 +154,7 @@ test('waitUntilFree logs only when the blocking pid changes, showing the command
   ]);
 });
 
-// По умолчанию (без переданного pollMs) sleep должен получать именно 30000, а не быть проигнорирован —
+// По умолчанию (без переданного pollMs) sleep должен получать именно 30000, а не быть проигнорирован –
 // mutant, зовущий sleep(0), тестами выше не ловится, потому что фейковый sleep не смотрит на аргумент.
 test('waitUntilFree calls sleep with the real pollMs (30000 by default)', async () => {
   let calls = 0;
@@ -167,7 +167,7 @@ test('waitUntilFree calls sleep with the real pollMs (30000 by default)', async 
   assert.deepEqual(sleeps, [30_000]);
 });
 
-// Порог таймаута — «>=», не «>»: рендер должен остановиться РОВНО на границе, без лишнего опроса.
+// Порог таймаута – «>=», не «>»: рендер должен остановиться РОВНО на границе, без лишнего опроса.
 test('waitUntilFree times out exactly at the timeout boundary (>=), not one poll later', async () => {
   let calls = 0;
   const sleeps = [];
@@ -182,7 +182,7 @@ test('waitUntilFree times out exactly at the timeout boundary (>=), not one poll
   assert.equal(calls, 3);
 });
 
-// На Windows нет `ps` — ни wmic, ни tasklist не подключаем ради этого; проверка занятости там просто
+// На Windows нет `ps` – ни wmic, ни tasklist не подключаем ради этого; проверка занятости там просто
 // не работает, и рендер стартует сразу с одной предупреждающей строкой.
 test('on win32 there is no ps: busyRenders returns nothing and waitUntilFree logs one line and starts immediately', async () => {
   assert.deepEqual(busyRenders({
@@ -197,11 +197,11 @@ test('on win32 there is no ps: busyRenders returns nothing and waitUntilFree log
     busyImpl: () => { throw new Error('на Windows busyImpl вызываться не должен'); },
     sleep: async () => { throw new Error('на Windows sleep вызываться не должен'); },
   });
-  assert.deepEqual(logs, ['проверка занятости машины недоступна на Windows — рендер начнётся сразу']);
+  assert.deepEqual(logs, ['проверка занятости машины недоступна на Windows – рендер начнётся сразу']);
 });
 
-// Не только Windows: если самой команды `ps` нет вовсе (ENOENT — редкий, но настоящий случай на POSIX
-// в урезанном окружении), ведём себя так же — одна строка и старт без ожидания, а не падение.
+// Не только Windows: если самой команды `ps` нет вовсе (ENOENT – редкий, но настоящий случай на POSIX
+// в урезанном окружении), ведём себя так же – одна строка и старт без ожидания, а не падение.
 test('no ps binary at all (ENOENT) is treated like win32: one warning line, then the render proceeds', async () => {
   const enoent = Object.assign(new Error('spawnSync ps ENOENT'), { code: 'ENOENT' });
   assert.throws(() => busyRenders({ psImpl: () => { throw enoent; } }), (error) => error.code === 'ENOENT');
@@ -210,9 +210,9 @@ test('no ps binary at all (ENOENT) is treated like win32: one warning line, then
   await waitUntilFree({
     busyImpl: () => { throw enoent; },
     log: (m) => logs.push(m),
-    sleep: async () => { throw new Error('без ps не должны ждать — сразу старт'); },
+    sleep: async () => { throw new Error('без ps не должны ждать – сразу старт'); },
   });
-  assert.deepEqual(logs, ['проверка занятости недоступна: нет команды ps — рендер начнётся сразу']);
+  assert.deepEqual(logs, ['проверка занятости недоступна: нет команды ps – рендер начнётся сразу']);
 });
 
 test('layer render command keeps the empty env-file first and never needs props', () => {
@@ -224,14 +224,14 @@ test('layer render command keeps the empty env-file first and never needs props'
 });
 
 // POSIX-only дым-тест: настоящий busyRenders против настоящей таблицы процессов этой машины не должен
-// падать — на Windows ps нет вовсе, там достаточно уже проверенной ветки platform === 'win32'.
+// падать – на Windows ps нет вовсе, там достаточно уже проверенной ветки platform === 'win32'.
 test('the real busyRenders() runs against this machine\'s actual process table without throwing', { skip: process.platform === 'win32' }, () => {
   const result = busyRenders();
   assert.ok(Array.isArray(result));
 });
 
 // REMOTION_CLI анкорится на «@remotion/cli/<файл>» или «/.bin/remotion», затем необязательные флаги
-// (--foo), затем именно «render» на границе слова — не «studio»/«still»/«preview» (алиасы v4), не
+// (--foo), затем именно «render» на границе слова – не «studio»/«still»/«preview» (алиасы v4), не
 // «…/render-farm/…» (не начинается с якоря) и не «…-render-01.png» (после render нет пробела/конца).
 test('REMOTION_CLI is anchored: catches .bin/remotion with flags before render, ignores render-farm paths and file names', () => {
   const table = [
@@ -247,8 +247,8 @@ test('REMOTION_CLI is anchored: catches .bin/remotion with flags before render, 
 });
 
 // Remotion Studio v4 понимает «preview» как алиас «studio» (просто открывает интерактивный браузер,
-// ничего не рендерит) — голый маркер 'cli.js preview' совпал бы с «remotion-cli.js preview» тоже,
-// ложно считая Studio занятостью. Маркер сузили до 'scripts/cli.js preview' — только наша обёртка.
+// ничего не рендерит) – голый маркер 'cli.js preview' совпал бы с «remotion-cli.js preview» тоже,
+// ложно считая Studio занятостью. Маркер сузили до 'scripts/cli.js preview' – только наша обёртка.
 test('Remotion Studio\'s own "preview" subcommand (remotion-cli.js preview, v4 alias of studio) is never mistaken for automontage\'s own cli.js preview', () => {
   const table = [
     { pid: 1, ppid: 0, comm: 'launchd', command: '/sbin/launchd' },
@@ -257,7 +257,7 @@ test('Remotion Studio\'s own "preview" subcommand (remotion-cli.js preview, v4 a
   assert.deepEqual(busyRenders({ psImpl: fakePs(table), selfPids: [] }), []);
 });
 
-// «remotion render» без пути (глобальный `npm i -g @remotion/cli`, бинарь по имени в PATH) — маркер
+// «remotion render» без пути (глобальный `npm i -g @remotion/cli`, бинарь по имени в PATH) – маркер
 // подстрокой, отдельно от анкорённого REMOTION_CLI (у него нет ни «@remotion/cli/», ни «/.bin/remotion»).
 test('a global "remotion render" binary invocation (no @remotion/cli or .bin path) is still caught by the plain marker', () => {
   const table = [
@@ -267,7 +267,7 @@ test('a global "remotion render" binary invocation (no @remotion/cli or .bin pat
   assert.deepEqual(busyRenders({ psImpl: fakePs(table), selfPids: [] }).map((p) => p.pid), [80]);
 });
 
-// Review Workbench (npm run preview / кнопка preview) и motion-сборка — реальные рабочие процессы,
+// Review Workbench (npm run preview / кнопка preview) и motion-сборка – реальные рабочие процессы,
 // не текст CLI-обёртки. --template больше не проверяется отдельно: любой такой запуск в конце концов
 // доходит до дочернего scripts/build.js, который уже сам ловится маркером выше.
 test('scripts/preview.js and scripts/motion/build.js workers count as busy', () => {
@@ -283,7 +283,7 @@ test('scripts/preview.js and scripts/motion/build.js workers count as busy', () 
 
 // Ревью Task 33: движок из папки с пробелом в пути («…/my projects/AutoMontage-Agent/…»). Группа флагов
 // `(?:\s+--\S+)*` обрывалась внутри `--env-file=…/my projects/…`, и настоящий рендер слоя не считался
-// занятостью. Теперь после якоря — любые токены, затем «render» отдельным словом.
+// занятостью. Теперь после якоря – любые токены, затем «render» отдельным словом.
 test('REMOTION_CLI catches the engine Remotion render from a checkout path with a space', () => {
   const engine = '/work/my projects/AutoMontage-Agent';
   const table = [
@@ -299,7 +299,7 @@ test('REMOTION_CLI catches the engine Remotion render from a checkout path with 
 });
 
 // Ревью Task 33: busyRenders отдаёт ПОЛНУЮ командную строку (по ней можно разобраться, что именно
-// идёт); укорачивается только то, что видит человек — лог ожидания и текст таймаута.
+// идёт); укорачивается только то, что видит человек – лог ожидания и текст таймаута.
 test('busyRenders keeps the full command; waitUntilFree shows only the last 160 chars of its tail', async () => {
   const longPath = `/very/long/${'deep/'.repeat(60)}project`;
   const command = `node ${longPath}/node_modules/@remotion/cli/remotion-cli.js --env-file=x render src/index.jsx Layer out.mp4`;
@@ -320,7 +320,7 @@ test('busyRenders keeps the full command; waitUntilFree shows only the last 160 
 });
 
 // Ревью Task 33: только ENOENT (нет самой команды ps) означает «проверить нельзя, стартуем». Любая
-// другая ошибка опроса — не «свободно»: рендер не должен стартовать вслепую поверх чужого рендера.
+// другая ошибка опроса – не «свободно»: рендер не должен стартовать вслепую поверх чужого рендера.
 test('a non-ENOENT error from busyImpl rejects waitUntilFree instead of treating the machine as free', async () => {
   const denied = Object.assign(new Error('ps: operation not permitted'), { code: 'EPERM' });
   await assert.rejects(waitUntilFree({
@@ -330,7 +330,7 @@ test('a non-ENOENT error from busyImpl rejects waitUntilFree instead of treating
   }), (error) => error === denied);
 });
 
-// automontage master (scripts/project/build-master.js) — полное перекодирование исходника ffmpeg:
+// automontage master (scripts/project/build-master.js) – полное перекодирование исходника ffmpeg:
 // такой же тяжёлый процесс, как рендер, его нельзя накрывать ещё одним.
 test('scripts/project/build-master.js (full-length re-encode of the master) counts as busy', () => {
   const table = [

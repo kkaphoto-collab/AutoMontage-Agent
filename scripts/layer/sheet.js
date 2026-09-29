@@ -1,6 +1,6 @@
-// automontage layer sheet — контакт-лист текущего preview (миниатюры с рамкой safe-зоны), узкие
-// полоски кадров вокруг правок пульта и гейт G12 «пустые кадры» (доля краевых пикселей —
-// scripts/qa/empty-frame-gate.js). Команда только показывает и предупреждает — стоп она не ставит
+// automontage layer sheet – контакт-лист текущего preview (миниатюры с рамкой safe-зоны), узкие
+// полоски кадров вокруг правок пульта и гейт G12 «пустые кадры» (доля краевых пикселей –
+// scripts/qa/empty-frame-gate.js). Команда только показывает и предупреждает – стоп она не ставит
 // (не в GATE_COMMANDS scripts/layer/cli.js), qa-отчёт не пишет.
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -18,23 +18,23 @@ const { projectFrom } = require('./common');
 const FLAGS = { 'project-dir': 'value' };
 const QUIET = ['-hide_banner', '-loglevel', 'error', '-y'];
 
-// Середины 16 равных отрезков ролика: sheetTimes(16) в тесте — это sheetTimes(duration = 16).
+// Середины 16 равных отрезков ролика: sheetTimes(16) в тесте – это sheetTimes(duration = 16).
 const sheetTimes = (duration, n = 16) => Array.from({ length: n }, (_, i) => Number((((i + 0.5) * duration) / n).toFixed(3)));
 
 // ffmpeg понимает -ss только как обычную десятичную запись: String(1e-7) печатает экспоненциальную
-// форму («1e-7»), которую он отказывается разбирать. Math.max(0, …) — защита от -0 и микроскопических
+// форму («1e-7»), которую он отказывается разбирать. Math.max(0, …) – защита от -0 и микроскопических
 // отрицательных остатков после вычитания. toFixed(3) сам по себе округляет к БЛИЖАЙШЕЙ миллисекунде,
-// то есть примерно в половине случаев — вверх: lastFrameSec вроде 3,9666667 с он превратил бы в
-// «3.967», уже позже настоящего последнего кадра — тот же самый отказ декодера, который мы чиним
+// то есть примерно в половине случаев – вверх: lastFrameSec вроде 3,9666667 с он превратил бы в
+// «3.967», уже позже настоящего последнего кадра – тот же самый отказ декодера, который мы чиним
 // этим же зажимом. Поэтому сначала округляем вниз (Math.floor) до миллисекунды и только потом
 // печатаем: секунды на выходе никогда не позже запрошенных.
 const formatSeconds = (t) => (Math.floor(Math.max(0, t) * 1000) / 1000).toFixed(3);
 
-// Ширина миниатюры: у портретного кадра — сама ширина 270 px; у альбомного длинная сторона (тоже
-// ширина) должна остаться читаемой, около 480 px — иначе 16:9 давал бы миниатюры вдвое ниже нужного.
+// Ширина миниатюры: у портретного кадра – сама ширина 270 px; у альбомного длинная сторона (тоже
+// ширина) должна остаться читаемой, около 480 px – иначе 16:9 давал бы миниатюры вдвое ниже нужного.
 const thumbWidth = (width, height) => (height > width ? 270 : 480);
 
-// Ширина миниатюры, коэффициент масштаба к ней и прямоугольник safe-зоны в её координатах — то, что
+// Ширина миниатюры, коэффициент масштаба к ней и прямоугольник safe-зоны в её координатах – то, что
 // нужно и для рисования рамки на миниатюрах, и тестам, чтобы посчитать тот же ожидаемый прямоугольник.
 function thumbBox(width, height) {
   const w = thumbWidth(width, height);
@@ -44,7 +44,7 @@ function thumbBox(width, height) {
 }
 
 // PGM (P5) из stdout ffmpeg: текстовый заголовок «P5\n<width> <height>\n<maxval>\n», затем ровно
-// width*height байт серого. Формат сам несёт свои размеры — не нужно гадать, во что именно scale=…:-2
+// width*height байт серого. Формат сам несёт свои размеры – не нужно гадать, во что именно scale=…:-2
 // округлил высоту.
 function parsePgm(buffer) {
   let pos = 0;
@@ -59,8 +59,8 @@ function parsePgm(buffer) {
   if (token() !== 'P5') return null;
   const width = Number(token());
   const height = Number(token());
-  token(); // maxval — не нужен для ч/б без нормировки (0–255 стандартно для 8-битного gray)
-  pos += 1; // единственный пробел после maxval по спецификации PGM, дальше — сразу бинарные байты
+  token(); // maxval – не нужен для ч/б без нормировки (0–255 стандартно для 8-битного gray)
+  pos += 1; // единственный пробел после maxval по спецификации PGM, дальше – сразу бинарные байты
   if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) return null;
   const pixels = buffer.subarray(pos, pos + width * height);
   return pixels.length === width * height ? { width, height, pixels } : null;
@@ -68,9 +68,9 @@ function parsePgm(buffer) {
 
 // Доля пикселей уменьшенного (EDGE_WIDTH px по ширине) ч/б кадра, у которых сосед справа или снизу
 // отличается по яркости больше чем на EDGE_THRESHOLD уровней. Ровный фон, плавная виньетка или
-// градиент, сглаженный шум после сильного уменьшения — везде эта доля около нуля, это и есть «пусто»
-// для G12; читаемый текст или тестовая сетка дают заметную долю даже мелким шрифтом. null — кадр не
-// удалось декодировать (не значит «пусто» само по себе, но и не «всё хорошо» — решает emptyFrameGate).
+// градиент, сглаженный шум после сильного уменьшения – везде эта доля около нуля, это и есть «пусто»
+// для G12; читаемый текст или тестовая сетка дают заметную долю даже мелким шрифтом. null – кадр не
+// удалось декодировать (не значит «пусто» само по себе, но и не «всё хорошо» – решает emptyFrameGate).
 function frameEdgeShare(videoPath, timeSec) {
   const result = spawnSync('ffmpeg', [...QUIET, '-ss', formatSeconds(timeSec), '-i', videoPath, '-frames:v', '1',
     '-vf', `scale=${EDGE_WIDTH}:-2,format=gray`, '-f', 'image2pipe', '-vcodec', 'pgm', '-'],
@@ -93,27 +93,27 @@ function frameEdgeShare(videoPath, timeSec) {
 }
 
 // Кадр с рамкой safe-зоны. Вызывающий код обязан заранее свести timeSec к [0, lastFrameSec]
-// (см. buildSheet) — если ffmpeg всё равно не отдал ни одного кадра, это уже не «запросили время
+// (см. buildSheet) – если ffmpeg всё равно не отдал ни одного кадра, это уже не «запросили время
 // за пределами ролика», а настоящий отказ декодера (повреждённый фрагмент, неподдерживаемый кодек).
 function thumb(videoPath, timeSec, out, box, thumbW, stage) {
   const drawbox = `drawbox=x=${box.x}:y=${box.y}:w=${box.w}:h=${box.h}:color=magenta@0.9:t=2`;
   runTool('ffmpeg', [...QUIET, '-ss', formatSeconds(timeSec), '-i', videoPath, '-frames:v', '1', '-vf', `scale=${thumbW}:-2,${drawbox}`, out], { stage });
   if (!fs.statSync(out, { throwIfNoEntry: false })?.size) {
-    throw new Error(`${stage}: не удалось получить кадр на ${timeSec.toFixed(2)} с — файл повреждён или кодек не читается`);
+    throw new Error(`${stage}: не удалось получить кадр на ${timeSec.toFixed(2)} с – файл повреждён или кодек не читается`);
   }
 }
 
 // Контакт-лист 4×4 с рамкой safe-зоны, полоски кадров вокруг секунд правок пульта и G12 «пустые
-// кадры». comments — [{id, timeSec}] уже в системе координат videoPath (секунды от начала файла).
+// кадры». comments – [{id, timeSec}] уже в системе координат videoPath (секунды от начала файла).
 // id идёт прямо в имя файла: чужой или подменённый comments.json не должен вывести запись за
 // пределы qa/, поэтому принимаем только канонический вид c-<до 40 букв/цифр/дефисов> (COMMENT_ID
-// из scripts/pult/comments — в нём нет ни `/`, ни `..`); остальные пропускаем с предупреждением,
+// из scripts/pult/comments – в нём нет ни `/`, ни `..`); остальные пропускаем с предупреждением,
 // а не роняем всю команду из-за одной записи.
 function buildSheet({ videoPath, width, height, duration, fps, outDir, name, comments = [], log = console.warn }) {
   const { thumbW, box } = thumbBox(width, height);
   // Последний реально существующий кадр видео-дорожки: -ss ровно на длительности или за ней ffmpeg
   // молча не отдаёт ничего, даже если сам процесс завершился кодом 0. К этому приводят десятые доли
-  // секунды рассинхрона звука и видео, низкий fps, однокадровый ролик — секунды всегда зажаты сюда.
+  // секунды рассинхрона звука и видео, низкий fps, однокадровый ролик – секунды всегда зажаты сюда.
   const lastFrameSec = Math.max(0, duration - 1 / fps);
   const clampSeek = (t) => Math.min(Math.max(0, t), lastFrameSec);
   // Суффикс pid+random: два параллельных запуска `layer sheet` по одному и тому же preview (то же
@@ -157,19 +157,19 @@ async function run(options, deps = {}) {
   const log = deps.log || console.log;
   const { projectDir, manifest } = projectFrom(options);
   const current = manifest.currentPreview;
-  if (!current) throw new Error('в проекте нет текущего preview — сначала соберите preview');
+  if (!current) throw new Error('в проекте нет текущего preview – сначала соберите preview');
   const videoPath = resolveProjectPath(projectDir, current.filePath, { label: 'currentPreview.filePath', mustExist: true, type: 'file' });
-  // Длительность и геометрия — по самой видео-дорожке (probeMediaPath), а не по контейнеру: если
+  // Длительность и геометрия – по самой видео-дорожке (probeMediaPath), а не по контейнеру: если
   // звук preview длиннее видео на десятые доли секунды, длительность контейнера завысила бы конец
   // ролика, и последний семпл или полоска правки просили бы кадр, которого в видео уже нет.
   const probe = probeMediaPath(videoPath, { stage: 'layer sheet probe' });
   // Правки пульта пишут timeSec как currentTime плеера, то есть уже в секундах ОТ НАЧАЛА того самого
-  // файла, что играл браузер (scripts/pult/status.js: video.path === preview.filePath) — сдвигать на
+  // файла, что играл браузер (scripts/pult/status.js: video.path === preview.filePath) – сдвигать на
   // currentPreview.fromSec не нужно и неверно для preview-фрагмента. Комментарий к другому видео,
   // к более старой версии того же файла на диске (sha256 не совпадает) или со временем за пределами
-  // длины КОНТЕЙНЕРА (или отрицательным) — не про этот ролик, отбрасываем совсем. Комментарий между
+  // длины КОНТЕЙНЕРА (или отрицательным) – не про этот ролик, отбрасываем совсем. Комментарий между
   // концом видео-дорожки и концом контейнера (тот же рассинхрон звука и видео, из-за которого играет
-  // фраза «правка на самом конце») — не мимо, buildSheet сам сведёт его секунды к lastFrameSec.
+  // фраза «правка на самом конце») – не мимо, buildSheet сам сведёт его секунды к lastFrameSec.
   const upperBoundSec = probe.containerDurationSec ?? probe.durationSec;
   const comments = readComments(projectDir)
     .filter((comment) => comment.status === 'new' && comment.video.path === current.filePath

@@ -33,7 +33,7 @@ function parseMixOptions(args) {
   return options;
 }
 
-// stem: 'music' — только музыка после того же sidechain, без смешивания с голосом: по ней G8
+// stem: 'music' – только музыка после того же sidechain, без смешивания с голосом: по ней G8
 // (scripts/qa/mix-gates.js) меряет баланс голоса и музыки. Обычный граф от stem не зависит.
 function buildMusicFilter(options, { stem = null } = {}) {
   if (stem !== null && stem !== 'music') throw new Error(`buildMusicFilter: stem может быть только 'music', получено «${stem}»`);
@@ -61,7 +61,7 @@ function buildMusicFilter(options, { stem = null } = {}) {
   ].join(';');
 }
 
-// Входы микса: 0 — видео с голосом, 1 — музыка по кругу. Их же берёт замер G8, чтобы музыка в
+// Входы микса: 0 – видео с голосом, 1 – музыка по кругу. Их же берёт замер G8, чтобы музыка в
 // замере была той же, что в preview.
 function mixMusicInputArgs(video, music) {
   return ['-i', hostPath(video), '-stream_loop', '-1', '-i', hostPath(music)];

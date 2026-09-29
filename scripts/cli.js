@@ -86,9 +86,9 @@ function help() {
 // Команды с собственной уборкой по сигналу: сигнал внешнему automontage передаётся ребёнку, внешний
 // процесс ждёт его выхода и отдаёт его код (в том числе 2 у layer check/render). execFileSync так не
 // умеет: убитый внешний процесс оставлял ребёнка доделывать работу (layer new дособирал слой).
-// review — локальная проверка проекта; layer — motion-слой из деталей motion-kit и его проверки.
+// review – локальная проверка проекта; layer – motion-слой из деталей motion-kit и его проверки.
 // Аргументы обеих не попадают в build.js.
-// SIGHUP — закрытое окно терминала: без него осиротевший review-сервер и недостроенный layer new
+// SIGHUP – закрытое окно терминала: без него осиротевший review-сервер и недостроенный layer new
 // остаются висеть. layer new и review/cli.js убирают за собой на SIGHUP так же, как на SIGTERM.
 const SIGNAL_FORWARDING = {
   review: { script: ['review', 'cli.js'], signalExitCodes: { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 } },
@@ -106,9 +106,9 @@ function runForwardingSignals({ script, signalExitCodes }, args, {
     { stdio: 'inherit', cwd: process.cwd(), shell: false },
   );
   // На Windows нет настоящих POSIX-сигналов: консольное событие (Ctrl+C/Ctrl+Break) и так доходит до
-  // ребёнка напрямую через общую консольную группу. Дополнительный child.kill(signal) там — это
+  // ребёнка напрямую через общую консольную группу. Дополнительный child.kill(signal) там – это
   // TerminateProcess, то есть жёсткое убийство поверх уже идущей уборки ребёнка (например, layer new
-  // удаляет недостроенную папку по своему SIGINT) — снаружи только ждём его настоящий код выхода.
+  // удаляет недостроенную папку по своему SIGINT) – снаружи только ждём его настоящий код выхода.
   const forwardToChild = platform !== 'win32';
   let forwardedSignal = null;
   let settled = false;
@@ -132,8 +132,8 @@ function runForwardingSignals({ script, signalExitCodes }, args, {
       try {
         child.kill(signal);
       } catch {
-        // Сюда попадаем только на POSIX (forwardToChild уже false и выход выше — на Windows). Сам сигнал
-        // по какой-то причине не ушёл (например, ребёнок уже завершается) — гасим его понятным SIGTERM.
+        // Сюда попадаем только на POSIX (forwardToChild уже false и выход выше – на Windows). Сам сигнал
+        // по какой-то причине не ушёл (например, ребёнок уже завершается) – гасим его понятным SIGTERM.
         child.kill('SIGTERM');
       }
     };

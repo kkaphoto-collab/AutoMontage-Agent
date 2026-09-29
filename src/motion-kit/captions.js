@@ -5,7 +5,7 @@ const END = /[.!?…]$/u;
 const COMMA = /[,;:]$/u;
 
 // 1–4 слова, до 20 знаков, разрыв на паузе, конце фразы и запятой (если в куске уже 2+ слова);
-// кусок короче minDur приклеивается к следующему. show — до какого момента кусок на экране.
+// кусок короче minDur приклеивается к следующему. show – до какого момента кусок на экране.
 export function buildChunks(words, { maxWords = 4, maxChars = 20, hardGap = 0.3, minDur = 0.45, hold = 0.4 } = {}) {
   const chunks = [];
   let current = null;
@@ -26,9 +26,9 @@ export function buildChunks(words, { maxWords = 4, maxChars = 20, hardGap = 0.3,
   }
   if (current) chunks.push(current);
   // Слов может собраться сколько угодно (пауза короче hardGap не рвёт цепочку короче minDur),
-  // а полоса субтитров — одна строка с overflow hidden: без потолка текст молча обрежется, и
+  // а полоса субтитров – одна строка с overflow hidden: без потолка текст молча обрежется, и
   // гейт G5 не увидит переполнение. Поэтому слияние отменяется, если результат вышел бы за
-  // maxWords+1 слов или maxChars+8 знаков — короткий кусок в этом случае остаётся отдельным.
+  // maxWords+1 слов или maxChars+8 знаков – короткий кусок в этом случае остаётся отдельным.
   const charsOf = (units) => units.reduce((n, u) => n + u.t.length, 0) + units.length - 1;
   for (let i = 0; i < chunks.length - 1; i += 1) {
     const merged = [...chunks[i].units, ...chunks[i + 1].units];
@@ -46,32 +46,32 @@ export function buildChunks(words, { maxWords = 4, maxChars = 20, hardGap = 0.3,
   }));
 }
 
-// Кадры видимости субтитра в композиции — общее правило и для рендера (Subtitles), и для
-// манифеста (buildManifest): гейт обязан видеть ровно то, что нарисовано. secToFrame — тот же
+// Кадры видимости субтитра в композиции – общее правило и для рендера (Subtitles), и для
+// манифеста (buildManifest): гейт обязан видеть ровно то, что нарисовано. secToFrame – тот же
 // перевод секунд в кадры, что compileItems/compileInserts используют для всех остальных границ
 // плана, поэтому окно hide, заданное теми же секундами, что и вставка (insert.from/to), вырезает
 // ровно её кадры (проверено тестом рядом с compileInserts). until клэмпится под durationInFrames.
-// fps/durationInFrames — обязательные числа не просто по контракту, а потому что раньше их
+// fps/durationInFrames – обязательные числа не просто по контракту, а потому что раньше их
 // отсутствие (например, опечатка в позиционном вызове) молча давало NaN-границы и captionSpans
-// тихо возвращал пустой список без единой ошибки — Subtitles или buildManifest просто «теряли»
-// субтитры без всякой подсказки почему. durationInFrames: Infinity — легальное значение (см.
+// тихо возвращал пустой список без единой ошибки – Subtitles или buildManifest просто «теряли»
+// субтитры без всякой подсказки почему. durationInFrames: Infinity – легальное значение (см.
 // activeChunk ниже, которому длина ролика не важна), поэтому разрешён явно.
 export function captionSpans(chunks, { hide = [], fps, durationInFrames } = {}) {
   if (!(Number.isFinite(fps) && fps > 0)) {
-    throw new Error(`captionSpans: fps должен быть положительным конечным числом — получено ${String(fps)}`);
+    throw new Error(`captionSpans: fps должен быть положительным конечным числом – получено ${String(fps)}`);
   }
   if (!(Number.isFinite(durationInFrames) || durationInFrames === Infinity)) {
-    throw new Error(`captionSpans: durationInFrames должен быть конечным числом или Infinity — получено ${String(durationInFrames)}`);
+    throw new Error(`captionSpans: durationInFrames должен быть конечным числом или Infinity – получено ${String(durationInFrames)}`);
   }
   const hideFrames = hide
     .map((h) => [secToFrame(h.from, fps), secToFrame(h.to, fps)])
     .filter(([from, to]) => to > from);
   // Сырые [from, until) каждого chunk, ещё без вырезания hide. buildChunks независимо округляет
-  // e+hold через toFixed(3), а s следующего chunk — нет: на некоторых fps и долях секунды это может
+  // e+hold через toFixed(3), а s следующего chunk – нет: на некоторых fps и долях секунды это может
   // дать until чуть больше следующего from (например: chunk0.e=0.4506, chunk1.s=0.4596 при
-  // fps=25 — show после toFixed(3) становится 0.46, secToFrame(0.46,25)=12, а secToFrame(0.4596,25)
-  // всё ещё 11 — 1 кадр перекрытия). Обрезаем текущий until следующим from, чтобы два chunk никогда
-  // не претендовали на один и тот же кадр — иначе Subtitles.find() и манифест могли бы разойтись
+  // fps=25 – show после toFixed(3) становится 0.46, secToFrame(0.46,25)=12, а secToFrame(0.4596,25)
+  // всё ещё 11 – 1 кадр перекрытия). Обрезаем текущий until следующим from, чтобы два chunk никогда
+  // не претендовали на один и тот же кадр – иначе Subtitles.find() и манифест могли бы разойтись
   // в том, какой из двух текстов «на самом деле» показан на этом кадре.
   const raw = chunks.map((chunk) => ({
     from: secToFrame(chunk.s, fps),
@@ -98,14 +98,14 @@ export function captionSpans(chunks, { hide = [], fps, durationInFrames } = {}) 
   return spans;
 }
 
-// Секундная развёртка для plan.js и внешних вызовов (миллиметраж режиссуры) — тот же кадр, что
+// Секундная развёртка для plan.js и внешних вызовов (миллиметраж режиссуры) – тот же кадр, что
 // видит captionSpans, только на входе секунды. durationInFrames вызывающему не важен: activeChunk
 // смотрит только на границы самих chunks/hide, а не на длину ролика, поэтому клэмп отключён
-// (Infinity). fps обязателен (без дефолта 25) — молчаливый дефолт уже один раз маскировал разницу
+// (Infinity). fps обязателен (без дефолта 25) – молчаливый дефолт уже один раз маскировал разницу
 // между «забыли передать fps» и «явно хотели 25».
 export function activeChunk(chunks, sec, hide = [], fps) {
   if (!(Number.isFinite(fps) && fps > 0)) {
-    throw new Error(`activeChunk: fps должен быть положительным конечным числом — получено ${String(fps)}`);
+    throw new Error(`activeChunk: fps должен быть положительным конечным числом – получено ${String(fps)}`);
   }
   const frame = secToFrame(sec, fps);
   const span = captionSpans(chunks, { hide, fps, durationInFrames: Infinity }).find((s) => frame >= s.from && frame < s.until);
@@ -113,21 +113,21 @@ export function activeChunk(chunks, sec, hide = [], fps) {
 }
 
 const LINE_HEIGHT = 1.1;
-// Доля кегля, которую тень добавляет под строкой (см. shadowBlur = size*12/44 в Subtitles.jsx) —
+// Доля кегля, которую тень добавляет под строкой (см. shadowBlur = size*12/44 в Subtitles.jsx) –
 // запас, чтобы overflow:hidden узкой полосы не обрезал нижний край тени.
 const SHADOW_RATIO = 12 / 44;
 
 // Клэмп кегля под высоту полосы: строка (lineHeight×size) плюс запас под тень не должны вылезать
-// за lane.h. Только сокращает — высокая кастомная полоса не должна раздувать субтитры сверх base
+// за lane.h. Только сокращает – высокая кастомная полоса не должна раздувать субтитры сверх base
 // (кегль от разрешения композиции, см. Subtitles.jsx), только тесная полоса обязана его сжать.
 export function captionFontSize({ base, laneH }) {
   const maxByHeight = laneH / (LINE_HEIGHT + SHADOW_RATIO);
   return Math.min(base, maxByHeight);
 }
 
-// Один шаг бинарного поиска ширины — та же схема, что инлайн использует TextBox из
+// Один шаг бинарного поиска ширины – та же схема, что инлайн использует TextBox из
 // src/motion/parts.jsx (if (fits) low = mid; else high = mid;), вынесенная в чистую функцию: сам
-// поиск измеряет DOM (scrollWidth), а сужение границ — нет, поэтому тестируется без браузера.
+// поиск измеряет DOM (scrollWidth), а сужение границ – нет, поэтому тестируется без браузера.
 export function narrowFitBounds({ low, high, fits }) {
   const mid = (low + high) / 2;
   return fits ? { low: mid, high } : { low, high: mid };
@@ -135,18 +135,18 @@ export function narrowFitBounds({ low, high, fits }) {
 
 export const round1 = (value) => Math.round(value * 10) / 10;
 
-// Стратегия подгонки ширины по инпутам (base, available, text) — НИКОГДА по кадру или по тому,
-// какой DOM остался от предыдущего замера: measure — единственная impure зависимость (реальный
+// Стратегия подгонки ширины по инпутам (base, available, text) – НИКОГДА по кадру или по тому,
+// какой DOM остался от предыдущего замера: measure – единственная impure зависимость (реальный
 // scrollWidth в Subtitles.jsx или фейк в тестах), поэтому вся логика решения тестируется без
-// браузера. base уже влезает → возвращаем его без единого лишнего измерения — это тот же размер,
+// браузера. base уже влезает → возвращаем его без единого лишнего измерения – это тот же размер,
 // что рисует SSR-рендер без layout-эффекта, поэтому подгоняющаяся ширина не меняет то, что уже и
-// так помещалось. Иначе бинарный поиск от floor (60% base) до base; если даже floor не влезает —
+// так помещалось. Иначе бинарный поиск от floor (60% base) до base; если даже floor не влезает –
 // явная ошибка с текстом chunk, а не молчаливое обрезание или перенос строки.
 export function fitCaptionWidth({ base, available, text, measure }) {
   if (measure(base) <= available) return base;
   const floor = round1(base * 0.6);
   if (measure(floor) > available) {
-    throw new Error(`субтитр «${text}» не помещается в полосу даже на 60% кегля (${floor}px) — сократите фразу в plan.js или расширьте lane`);
+    throw new Error(`субтитр «${text}» не помещается в полосу даже на 60% кегля (${floor}px) – сократите фразу в plan.js или расширьте lane`);
   }
   let low = floor;
   let high = base;

@@ -1,20 +1,20 @@
 // Маленький проект движка для тестов команд `automontage layer`: исходник lavfi 540×960/25 fps с
-// голосоподобным звуком и транскрипт (слово каждые 0,5 с, первое — «Привет,»).
-// 540×960 — половина рабочего кадра: анимации kit заданы в пикселях кадра 1080×1920 и в совсем
+// голосоподобным звуком и транскрипт (слово каждые 0,5 с, первое – «Привет,»).
+// 540×960 – половина рабочего кадра: анимации kit заданы в пикселях кадра 1080×1920 и в совсем
 // крошечном кадре честно вылетали бы за safe-зону.
 //
 //   const { root, projectDir, workspace, sfxDir } = makeLayerProject(t, { seconds = 6, size = '540x960' });
 //
-// Необязательные особые исходники (по умолчанию — обычный 25 fps, звук той же длины, без поворота):
-// fps (число или '30000/1001'), audioSeconds (звук длиннее видео), rotation (90/270 — телефонный
+// Необязательные особые исходники (по умолчанию – обычный 25 fps, звук той же длины, без поворота):
+// fps (число или '30000/1001'), audioSeconds (звук длиннее видео), rotation (90/270 – телефонный
 // .mov с матрицей поворота: кадр хранится size, показывается повёрнутым), audio: false (исходник
 // без звуковой дорожки).
 //
-// root       — временная папка теста (удаляется в t.after), в ней source.mp4 и projects/kit-fixture;
-// projectDir — папка проекта с project.json, input/source.mp4 и transcript/words.json;
-// sfxDir     — уже созданная ПУСТАЯ папка библиотеки звуков <projectDir>/no-library. Тест ставит
+// root       – временная папка теста (удаляется в t.after), в ней source.mp4 и projects/kit-fixture;
+// projectDir – папка проекта с project.json, input/source.mp4 и transcript/words.json;
+// sfxDir     – уже созданная ПУСТАЯ папка библиотеки звуков <projectDir>/no-library. Тест ставит
 //              process.env.AUTOMONTAGE_SFX_DIR = sfxDir (и убирает в t.after): явная переменная на
-//              несуществующую папку — ошибка sfxLibraryDir, а без переменной layer new взял бы
+//              несуществующую папку – ошибка sfxLibraryDir, а без переменной layer new взял бы
 //              настоящую локальную библиотеку машины.
 // Геометрия исходника задаётся только здесь (size); фальшивые рендеры слоя берут ту же 540×960.
 const fs = require('node:fs');
@@ -47,8 +47,8 @@ function makeLayerProject(t, { seconds = 6, size = '540x960', fps = 25, audioSec
   return { root, projectDir, workspace, sfxDir };
 }
 
-// Фикстура локальной библиотеки звуков: короткие lavfi-звуки, роль — по имени файла (pop, whoosh, shutter).
-// Тест ставит process.env.AUTOMONTAGE_SFX_DIR = makeSfxLibrary(root) — тогда у шаблона слоя есть звуки
+// Фикстура локальной библиотеки звуков: короткие lavfi-звуки, роль – по имени файла (pop, whoosh, shutter).
+// Тест ставит process.env.AUTOMONTAGE_SFX_DIR = makeSfxLibrary(root) – тогда у шаблона слоя есть звуки
 // (pop титула, затвор скриншота, whoosh стока) и в манифесте появляются cues.kept.
 function makeSfxLibrary(root) {
   const dir = path.join(root, 'sfx-library');

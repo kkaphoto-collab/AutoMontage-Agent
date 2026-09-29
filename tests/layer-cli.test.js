@@ -29,7 +29,7 @@ function makeProjectFixture(t) {
   return { dir, projectDir: workspace.dir };
 }
 
-// Фейковая подкоманда для тестов роутера: поведение управляется флагом --mode, а не process.env —
+// Фейковая подкоманда для тестов роутера: поведение управляется флагом --mode, а не process.env –
 // так параллельные тесты не делят глобальное состояние. Файл живёт во временной папке и требуется
 // по абсолютному пути через commands-override main(), а не подменой Module._resolveFilename.
 function makeFakeCommand(t) {
@@ -101,18 +101,18 @@ test('parseArgs rejects --flag=value with a hint, but keeps a leading-dash value
 
 test('parseArgs checks the key before = first: unknown key, bool flag and an empty value get their own message', () => {
   const flags = { 'project-dir': 'value', wait: 'bool' };
-  // Неизвестный ключ — та же ошибка, что без =, а не совет «пишите --nope 1».
+  // Неизвестный ключ – та же ошибка, что без =, а не совет «пишите --nope 1».
   assert.throws(() => parseArgs(['--nope=1'], flags), (error) => {
     assert.equal(error.message, 'неизвестный флаг --nope');
     return true;
   });
-  // Булев флаг значения не принимает вовсе — совет «пишите --wait 1» был бы неверным.
+  // Булев флаг значения не принимает вовсе – совет «пишите --wait 1» был бы неверным.
   assert.throws(() => parseArgs(['--wait=1'], flags), (error) => {
     assert.equal(error.message, 'флаг --wait не принимает значения');
     return true;
   });
   assert.throws(() => parseArgs(['--wait='], flags), /флаг --wait не принимает значения/);
-  // Пустое значение после = — подсказка без двойного пробела.
+  // Пустое значение после = – подсказка без двойного пробела.
   assert.throws(() => parseArgs(['--project-dir='], flags), (error) => {
     assert.equal(error.message, 'пишите --project-dir <значение> (без =)');
     assert.doesNotMatch(error.message, / {2}/);
@@ -158,11 +158,11 @@ test('main() does not take a -h value for help, but a standalone --help still wi
   const original = console.log;
   console.log = (...args) => outputs.push(args.join(' '));
   try {
-    // «-h» — значение --title: подкоманда получает заголовок, помощь не печатается.
+    // «-h» – значение --title: подкоманда получает заголовок, помощь не печатается.
     assert.equal(await main(['brief', '--title', '-h'], { commands: { brief: file } }), 0);
     assert.deepEqual(require(file).seen, { title: '-h' });
     assert.equal(outputs.length, 0);
-    // После булева флага -h стоит на месте флага — это помощь.
+    // После булева флага -h стоит на месте флага – это помощь.
     assert.equal(await main(['brief', '--wait', '-h'], { commands: { brief: file } }), 0);
     assert.equal(await main(['brief', '--title', 'T', '--help'], { commands: { brief: file } }), 0);
   } finally {
@@ -205,7 +205,7 @@ test('the real CLI promotes a gate-command router failure to exit 2 through scri
     assert.equal(result.status, 2, result.stderr);
     assert.match(result.stderr, new RegExp(`❌ layer ${command} отменён`));
   }
-  // У остальных команд отчёта нет, поэтому любой отказ роутера — код 1, а не 2.
+  // У остальных команд отчёта нет, поэтому любой отказ роутера – код 1, а не 2.
   const other = run('layer', 'import', '--bogus');
   assert.equal(other.status, 1, other.stderr);
   assert.match(other.stderr, /❌ layer import отменён: неизвестный флаг --bogus/);
@@ -219,7 +219,7 @@ test('sha256File streams the file in chunks and matches crypto over its bytes', 
   fs.writeFileSync(file, bytes);
   const expected = crypto.createHash('sha256').update(bytes).digest('hex');
   assert.equal(sha256File(file), expected);
-  // Потоковое чтение кусками — это hashFile пульта, а не своя копия, читающая файл целиком.
+  // Потоковое чтение кусками – это hashFile пульта, а не своя копия, читающая файл целиком.
   assert.equal(sha256File, hashFile);
 });
 
@@ -284,12 +284,12 @@ test('readLayerJson validates sfxMasterDb the same way SfxTrack does, and reject
 
 test('readLayerJson explains a layer folder left without layer.json (a killed layer new) instead of a raw ENOENT', (t) => {
   const { projectDir } = makeProjectFixture(t);
-  // SIGKILL посреди layer new: папка и часть файлов есть, layer.json (он пишется последним) — нет.
+  // SIGKILL посреди layer new: папка и часть файлов есть, layer.json (он пишется последним) – нет.
   const layerDir = path.join(projectDir, 'motion-v02');
   fs.mkdirSync(path.join(layerDir, 'src'), { recursive: true });
   fs.writeFileSync(path.join(layerDir, 'src', 'plan.js'), '// недостроено\n');
   assert.throws(() => readLayerJson(layerDir), (error) => {
-    assert.equal(error.message, 'motion-v02 собран не до конца (нет layer.json) — удалите папку или создайте новый слой: '
+    assert.equal(error.message, 'motion-v02 собран не до конца (нет layer.json) – удалите папку или создайте новый слой: '
       + `automontage layer new --project-dir "${projectDir}"`);
     assert.doesNotMatch(error.message, /ENOENT/);
     assert.ok(!error.message.includes(path.join(layerDir, 'layer.json')), 'нет абсолютного пути к layer.json');
@@ -309,7 +309,7 @@ test('resolveLayer accepts a real layer directory and rejects names failing the 
   assert.throws(() => resolveLayer({ 'project-dir': projectDir, layer: 'foo' }), /--layer должен быть вида motion-v01/);
   assert.throws(() => resolveLayer({ 'project-dir': projectDir, layer: 'motion-v1' }), /--layer должен быть вида motion-v01/);
   // Путь вида «../x» не совпадает с motion-vNN и отклоняется раньше, чем дошёл бы до файловой
-  // системы — вторая линия защиты (resolveProjectPath) не вызывается вовсе.
+  // системы – вторая линия защиты (resolveProjectPath) не вызывается вовсе.
   assert.throws(() => resolveLayer({ 'project-dir': projectDir, layer: '../x' }), /--layer должен быть вида motion-v01/);
   assert.throws(() => resolveLayer({ 'project-dir': projectDir, layer: '../motion-v01' }), /--layer должен быть вида motion-v01/);
 });
@@ -320,7 +320,7 @@ test('resolveLayer gives a friendly message for a missing layer and wraps other 
   assert.throws(
     () => resolveLayer({ 'project-dir': projectDir, layer: 'motion-v99' }),
     (error) => {
-      assert.match(error.message, /папка слоя motion-v99 не найдена — создайте: automontage layer new/);
+      assert.match(error.message, /папка слоя motion-v99 не найдена – создайте: automontage layer new/);
       // Подсказка готова к копированию: настоящая папка проекта в кавычках (пути с пробелами), а не <p>.
       assert.ok(error.message.endsWith(`--project-dir "${projectDir}"`), error.message);
       assert.doesNotMatch(error.message, /<p>/);
@@ -342,7 +342,7 @@ test('resolveLayer gives a friendly message for a missing layer and wraps other 
     /--layer motion-v01: layer escapes through a symbolic link/,
   );
 
-  // resolveProjectPath не делает исключения для симлинка, указывающего ВНУТРЬ проекта — тоже отказ.
+  // resolveProjectPath не делает исключения для симлинка, указывающего ВНУТРЬ проекта – тоже отказ.
   fs.mkdirSync(path.join(projectDir, 'real'));
   fs.symlinkSync(path.join(projectDir, 'real'), path.join(projectDir, 'motion-v02'));
   assert.throws(
@@ -359,7 +359,7 @@ test('nextLayerName is the highest existing number + 1 and never reuses one, eve
   fs.mkdirSync(path.join(dir, 'motion-v01'));
   assert.equal(nextLayerName(dir), 'motion-v02');
   fs.mkdirSync(path.join(dir, 'motion-v03'));
-  // v02 занят, v03 тоже — следующий номер идёт после максимума, а не в дыру: старые qa-отчёты и
+  // v02 занят, v03 тоже – следующий номер идёт после максимума, а не в дыру: старые qa-отчёты и
   // pult-card.json могут ссылаться на уже использованные имена, их нельзя выдать повторно.
   assert.equal(nextLayerName(dir), 'motion-v04');
 

@@ -2,22 +2,22 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 // Round 2 (ревью minor 4/regression): настоящий Remotion-рендер с concurrency>1 обнаружил, что
-// подгонка ширины субтитров была недетерминирована между «вкладками» рендера — какой кадр браузер
+// подгонка ширины субтитров была недетерминирована между «вкладками» рендера – какой кадр браузер
 // откроет первым, недетерминировано, и Subtitles мог измерить текст ДО того, как FontLoader успел
 // догрузить шрифт. Юнит-тесты на renderToStaticMarkup не могут это поймать: layout-эффекты (и
-// document.fonts) там вообще не выполняются (см. tests/helpers/remotion-stub.js). Эти тесты — как
+// document.fonts) там вообще не выполняются (см. tests/helpers/remotion-stub.js). Эти тесты – как
 // последний тест в tests/motion-render.test.js: настоящий бандл + настоящий headless Chromium,
 // пропускаются по умолчанию и включаются только явным флагом (`npm test` их не трогает).
 //
-// Round 3 (ревью, важно): исходная версия этого теста проходила и на добаговом коде — субтитр был
+// Round 3 (ревью, важно): исходная версия этого теста проходила и на добаговом коде – субтитр был
 // виден С ПЕРВОГО кадра, поэтому у любой «вкладки» рендера самый первый кадр уже требовал замера, и
-// ВСЕ вкладки попадали в одну и ту же (пусть и неверную) гонку одинаково — расхождения между кадрами
+// ВСЕ вкладки попадали в одну и ту же (пусть и неверную) гонку одинаково – расхождения между кадрами
 // не возникало. К тому же у ЗАГЛАВНОЙ фразы фолбэк-шрифт шире Onest, поэтому даже неверный замер не
-// обрезался. Теперь: (1) chunk начинается на кадре 2 (0.08с), а не 0 — часть вкладок (round-robin по
+// обрезался. Теперь: (1) chunk начинается на кадре 2 (0.08с), а не 0 – часть вкладок (round-robin по
 // concurrency) успевают отрендерить свой первый кадр ДО начала chunk и получают его позже (на «тёплом»
-// кадре), другие упираются в chunk сразу на своём первом кадре («холодный старт») — расхождение между
-// ними и было бы видно; (2) второй вариант — строчная фраза на fontSize 60, где фолбэк-шрифт УЖЕ Onest
-// (при неверном раннем замере код решил бы, что 60px влезает, и НЕ обрезал бы — но настоящий Onest
+// кадре), другие упираются в chunk сразу на своём первом кадре («холодный старт») – расхождение между
+// ними и было бы видно; (2) второй вариант – строчная фраза на fontSize 60, где фолбэк-шрифт УЖЕ Onest
+// (при неверном раннем замере код решил бы, что 60px влезает, и НЕ обрезал бы – но настоящий Onest
 // шире, и обрезка стала бы видна); (3) проверяем не только «одинаковость», но и АБСОЛЮТНУЮ
 // правильность: независимый эталонный бинарный поиск на клоне с гарантированно загруженным Onest
 // должен дать то же число, что показал реальный рендер.
@@ -31,14 +31,14 @@ const FONTS = [{ family: 'KitOnest', file: 'fonts/Onest.ttf' }];
 const TEXT = ${JSON.stringify(text)};
 const FONT_SIZE = ${fontSize === undefined ? 'undefined' : fontSize};
 const units = (s) => TEXT.split(' ').map((t, i) => ({ t, s: s + i * 0.1, e: s + i * 0.1 + 0.1 }));
-// chunk начинается на 0.08с (кадр 2 при fps=25) — НЕ на кадре 0, см. комментарий round 3 выше.
+// chunk начинается на 0.08с (кадр 2 при fps=25) – НЕ на кадре 0, см. комментарий round 3 выше.
 const CHUNKS = [{ units: units(0.08), s: 0.08, e: 0.08 + 0.4, show: 10, text: TEXT }];
 const LANE = { x: 70, y: 1398, w: 880, h: 84 };
 const BASE = FONT_SIZE ?? 44; // width=1080 => k=1, тот же расчёт, что делает сам Subtitles
 const onestLoaded = () => [...document.fonts].some((f) => f.family.replace(/"/g, '') === 'KitOnest' && f.status === 'loaded');
 
 // Независимый эталон: своя копия бинарного поиска (не импортирует fitCaptionWidth) на скрытом
-// клоне с уже загруженным Onest — если реальный рендер сверяется сам с собой, это не проверка;
+// клоне с уже загруженным Onest – если реальный рендер сверяется сам с собой, это не проверка;
 // сверяем с ЗАНОВО посчитанным числом.
 function referenceFit() {
   const shadowBlur = BASE * (12 / 44);
@@ -68,9 +68,9 @@ function Probe() {
   useLayoutEffect(() => {
     const handle = delayRender('probe');
     // Опрашиваем, пока не появится сама коробка субтитров И Onest не отчитается статусом "loaded"
-    // (гейт FontLoader может ещё не открыться на первом кадре, который эта вкладка рендерит) —
+    // (гейт FontLoader может ещё не открыться на первом кадре, который эта вкладка рендерит) –
     // иначе Probe снял бы состояние ДО того, как реальный скриншот вообще случится, и увидел бы
-    // гонку, которой в самом сохранённом кадре нет. После этого — два requestAnimationFrame: React
+    // гонку, которой в самом сохранённом кадре нет. После этого – два requestAnimationFrame: React
     // обязан успеть закоммитить пост-подгоночное состояние (Subtitles применяет фактический размер
     // синхронной DOM-мутацией по завершении своего async-эффекта, но сам этот эффект и его await
     // резолвятся отдельным тиком от layout-эффекта Probe).
@@ -148,9 +148,9 @@ async function renderFixture(t, { text, fontSize, motionKitDir } = {}) {
   const composition = await selectComposition({ serveUrl, id: 'Layer', puppeteerInstance: browser });
   const outputDir = path.join(work, 'frames');
   fs.mkdirSync(outputDir, { recursive: true });
-  // concurrency>1 — то самое условие ревью (несколько «вкладок» рендерят разные кадры параллельно;
-  // какой кадр каждая вкладка откроет первой — фиксированное round-robin распределение Remotion, но
-  // ПОРЯДОК готовности шрифта относительно этого распределения — нет).
+  // concurrency>1 – то самое условие ревью (несколько «вкладок» рендерят разные кадры параллельно;
+  // какой кадр каждая вкладка откроет первой – фиксированное round-robin распределение Remotion, но
+  // ПОРЯДОК готовности шрифта относительно этого распределения – нет).
   await renderFrames({
     serveUrl, composition, outputDir, imageFormat: 'jpeg', inputProps: {},
     puppeteerInstance: browser, concurrency: 4, onBrowserLog,
@@ -163,7 +163,7 @@ async function renderFixture(t, { text, fontSize, motionKitDir } = {}) {
 // correctness (совпадает с независимым эталоном) и отсутствие обрезки.
 function assertVariant(probes, label) {
   assert.equal(probes.length, 40, `${label}: ожидали ровно один PROBE-лог на кадр (0..39), получили ${probes.length}`);
-  // Кадры 0 и 1 — до начала chunk (s=0.08=кадр 2) — субтитра там нет по плану, это не гонка.
+  // Кадры 0 и 1 – до начала chunk (s=0.08=кадр 2) – субтитра там нет по плану, это не гонка.
   const withCaption = probes.filter((p) => p.frame >= 2);
   const missing = withCaption.filter((p) => p.fontSize === null);
   assert.deepEqual(missing, [], `${label}: на этих кадрах (>=2) субтитр так и не появился за отведённое время опроса: ${JSON.stringify(missing)}`);
@@ -172,7 +172,7 @@ function assertVariant(probes, label) {
   assert.equal(sizes.size, 1, `${label}: fontSize обязан быть одинаковым на каждом кадре одного chunk, получили: ${JSON.stringify([...sizes])} (полные данные: ${JSON.stringify(withCaption)})`);
 
   for (const p of withCaption) {
-    assert.ok(p.scrollWidth <= p.clientWidth + 1, `${label} frame ${p.frame}: текст обрезан — scrollWidth=${p.scrollWidth} > clientWidth=${p.clientWidth} (fontSize=${p.fontSize})`);
+    assert.ok(p.scrollWidth <= p.clientWidth + 1, `${label} frame ${p.frame}: текст обрезан – scrollWidth=${p.scrollWidth} > clientWidth=${p.clientWidth} (fontSize=${p.fontSize})`);
     const actual = parseFloat(p.fontSize);
     // Эталон ищет тем же бинарным поиском; разница только в round1 эталона (шаг поиска 0,25 →
     // до 0,05 px), поэтому допуск 0,1 px: заметно другой кегль значит замер другим шрифтом.
@@ -184,8 +184,8 @@ function assertVariant(probes, label) {
 test('Subtitles reports the same, correct fontSize on every frame of a wide all-caps caption, and never clips, across a real concurrent Remotion render', {
   skip: process.env.AUTOMONTAGE_TEST_MOTION_RENDER !== '1', timeout: 180_000,
 }, async (t) => {
-  // Тот же класс текста, что и в измерениях ревью — «28 caps worst». Только шрифт, уже отслеженный
-  // в ASSETS.md (public/fonts/Onest.ttf) — новых бинарников не добавляем.
+  // Тот же класс текста, что и в измерениях ревью – «28 caps worst». Только шрифт, уже отслеженный
+  // в ASSETS.md (public/fonts/Onest.ttf) – новых бинарников не добавляем.
   const probes = await renderFixture(t, { text: 'ШИРОКОМАСШТАБНЫЕ ЖЖЁНЫЕ МЫШИ' });
   assertVariant(probes, 'caps');
 });
@@ -193,17 +193,17 @@ test('Subtitles reports the same, correct fontSize on every frame of a wide all-
 test('Subtitles reports the same, correct fontSize on every frame of a lowercase fontSize:60 caption, and never clips', {
   skip: process.env.AUTOMONTAGE_TEST_MOTION_RENDER !== '1', timeout: 180_000,
 }, async (t) => {
-  // Строчная фраза при явном fontSize:60 — «сильная» фикстура ревью: фолбэк-шрифт здесь УЖЕ Onest,
-  // поэтому неверный ранний замер решил бы «влезает, 60px», не сжимая — и обрезка стала бы видна,
+  // Строчная фраза при явном fontSize:60 – «сильная» фикстура ревью: фолбэк-шрифт здесь УЖЕ Onest,
+  // поэтому неверный ранний замер решил бы «влезает, 60px», не сжимая – и обрезка стала бы видна,
   // как только настоящий (более широкий для этого текста) Onest реально нарисовался бы.
   const probes = await renderFixture(t, { text: 'и вот оно автоматизированное', fontSize: 60 });
   assertVariant(probes, 'lowercase-60');
 });
 
-// Round 3 (важно, ревью п.2б): FontLoader рядом с Subtitles (а не оборачивающий его) — та самая
+// Round 3 (важно, ревью п.2б): FontLoader рядом с Subtitles (а не оборачивающий его) – та самая
 // ошибка использования из ревью, которая раньше молча возвращала гонку. Теперь FontLoader без
-// children в браузере бросает явную ошибку — проверяем это в НАСТОЯЩЕМ Remotion-рендере (юнит-тест
-// на throw — отдельно, в tests/motion-kit-components.test.js, с фейковым document).
+// children в браузере бросает явную ошибку – проверяем это в НАСТОЯЩЕМ Remotion-рендере (юнит-тест
+// на throw – отдельно, в tests/motion-kit-components.test.js, с фейковым document).
 test('using FontLoader as a sibling of Subtitles (not wrapping it) fails the real render loudly instead of racing silently', {
   skip: process.env.AUTOMONTAGE_TEST_MOTION_RENDER !== '1', timeout: 180_000,
 }, async (t) => {

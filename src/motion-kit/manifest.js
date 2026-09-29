@@ -7,7 +7,7 @@ const r3 = (value) => Math.round(value * 1000) / 1000;
 // Сериализуемый снимок слоя: камера и габариты текста по кадрам, вставки, звуки, хук, исключения.
 export function buildManifest(compiled) {
   const { fps, width, height, durationInFrames } = compiled;
-  // base — с ревью пакета 2 задачи 22: масштаб пресета с дрейфом ДО панчей и ДО клэмпа maxScale,
+  // base – с ревью пакета 2 задачи 22: масштаб пресета с дрейфом ДО панчей и ДО клэмпа maxScale,
   // читает G3 (scripts/qa/timeline-gates.js), чтобы отличить пресет крупнее предела от панча,
   // упёршегося в потолок.
   const camera = { s: [], requested: [], base: [], dx: [], dy: [], blur: [], opacity: [] };
@@ -31,9 +31,9 @@ export function buildManifest(compiled) {
   });
   if (compiled.captions) {
     const { lane, chunks, hide } = compiled.captions;
-    // Один источник видимости с Subtitles (captionSpans) — гейт видит ровно те кадры, где рендер
+    // Один источник видимости с Subtitles (captionSpans) – гейт видит ровно те кадры, где рендер
     // рисует текст. Окно hide может разрезать chunk на несколько span: первому достаётся
-    // caption-<n>, следующим — caption-<n>b, caption-<n>c… (детерминированная схема, id остаются
+    // caption-<n>, следующим – caption-<n>b, caption-<n>c… (детерминированная схема, id остаются
     // уникальными и стабильными между запусками).
     const staticBox = [r3(lane.x), r3(lane.y), r3(lane.x + lane.w), r3(lane.y + lane.h)];
     let lastIndex = null;
@@ -50,12 +50,12 @@ export function buildManifest(compiled) {
     maxScale: compiled.camera.maxScale,
     camera,
     texts,
-    // cover и src — с Task 22: G4 читает cover (закрыта ли вставкой сцена под ней), Task 38 читает
+    // cover и src – с Task 22: G4 читает cover (закрыта ли вставкой сцена под ней), Task 38 читает
     // src в предупреждении о коротком стоковом файле.
     inserts: compiled.inserts.map((insert) => ({ id: insert.id, kind: insert.kind, from: insert.from, to: insert.to, cover: insert.cover, src: insert.src })),
     cues: {
       // durationFrames (Task 25 review): kit уже считает его в src/motion-kit/sfx.js, но манифест
-      // раньше его не отдавал — G7 (Task 26) без него не может построить окно [startFrame,
+      // раньше его не отдавал – G7 (Task 26) без него не может построить окно [startFrame,
       // startFrame+durationFrames) для audibleOutside и вынужден был бы гадать длину эффекта
       // по одному hitFrame.
       kept: compiled.cues.kept.map((cue) => ({
@@ -63,7 +63,7 @@ export function buildManifest(compiled) {
         durationFrames: cue.durationFrames, notable: cue.notable, bed: cue.bed,
       })),
       // name/hitFrame/notable (Task 24 review): G9 (scripts/qa/timeline-gates.js) предупреждает,
-      // когда kit реально убрал ЗАМЕТНЫЙ звук из-за тесноты — kept-пары после thinCues физически не
+      // когда kit реально убрал ЗАМЕТНЫЙ звук из-за тесноты – kept-пары после thinCues физически не
       // могут конфликтовать друг с другом, поэтому настоящий сигнал тесноты живёт именно здесь.
       dropped: compiled.cues.dropped.map((entry) => ({
         id: entry.cue.id, name: entry.cue.name, hitFrame: entry.cue.hitFrame, notable: entry.cue.notable,

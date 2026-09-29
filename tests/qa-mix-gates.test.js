@@ -1,4 +1,4 @@
-// Задача 27: G8 «Голос и музыка» — разрыв громкости (LU, K-взвешивание BS.1770) между голосом после
+// Задача 27: G8 «Голос и музыка» – разрыв громкости (LU, K-взвешивание BS.1770) между голосом после
 // finish.js и музыкой после того же sidechain, что в mix-music.js; только на участках речи.
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -85,7 +85,7 @@ test('the music stem is measured with the same ffmpeg inputs as the preview musi
   const inputs = (args) => args.slice(args.indexOf('-i'), args.indexOf('-filter_complex'));
   const output = ['-ac', '2', '-ar', '48000', '-f', 'f32le', '-acodec', 'pcm_f32le', '-'];
   const stem = calls.find((call) => call.args.includes('-filter_complex')).args;
-  // Входы и их опции (порядок, -stream_loop, абсолютные пути) — один в один; граф — stem без
+  // Входы и их опции (порядок, -stream_loop, абсолютные пути) – один в один; граф – stem без
   // изменений, к которому дописано только K-взвешивание на 48 кГц во float.
   assert.deepEqual(inputs(stem), inputs(production));
   assert.equal(stem[stem.indexOf('-filter_complex') + 1],
@@ -99,7 +99,7 @@ test('the music stem is measured with the same ffmpeg inputs as the preview musi
   assert.ok(calls.every((call) => call.command === 'ffmpeg'));
 });
 
-// Интегральная громкость ebur128 (I, LUFS) ровного стерео-сигнала — эталон ffmpeg для сравнения.
+// Интегральная громкость ebur128 (I, LUFS) ровного стерео-сигнала – эталон ffmpeg для сравнения.
 function ebur128(inputArgs, filter) {
   const result = spawnSync('ffmpeg', ['-hide_banner', '-nostats', ...inputArgs, ...filter, '-f', 'null', '-'], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
@@ -109,7 +109,7 @@ function ebur128(inputArgs, filter) {
 const lufsOf = (powers) => -0.691 + 10 * Math.log10(powers.reduce((sum, p) => sum + p, 0) / powers.length);
 
 // Точные коэффициенты BS.1770 для 48 кГц. Приближение highshelf+highpass (RBJ) расходится с ebur128
-// до 0,46 LU у полки 1,7 кГц — тест это ловит.
+// до 0,46 LU у полки 1,7 кГц – тест это ловит.
 test('K weighting reproduces ffmpeg ebur128 across the band', { skip: !hasFfmpeg }, () => {
   for (const frequency of [40, 1000, 1682, 8000]) {
     const input = ['-f', 'lavfi', '-i', `sine=frequency=${frequency}:sample_rate=48000:duration=4,pan=stereo|c0=c0|c1=c0`];
@@ -119,7 +119,7 @@ test('K weighting reproduces ffmpeg ebur128 across the band', { skip: !hasFfmpeg
   }
 });
 
-// Главное обещание замера: музыка в нём — ровно то, что микс preview прибавляет к голосу, с ducking
+// Главное обещание замера: музыка в нём – ровно то, что микс preview прибавляет к голосу, с ducking
 // и зацикленной музыкой. Настоящая команда mix-music, только звук без потерь (PCM в MOV вместо AAC),
 // чтобы сравнить по сэмплам: микс = голос + музыка замера (K-взвешивание линейно).
 test('the measured music is exactly what the preview mix adds to the voice', { skip: !hasFfmpeg }, (t) => {
@@ -165,7 +165,7 @@ test('measureVoiceMusic refuses missing music options, a bad duration and an emp
     assert.throws(() => measureVoiceMusic({ ...base, durationSec }), /measureVoiceMusic: durationSec/);
   }
   assert.throws(() => measureVoiceMusic({ ...base, windows: null }), /measureVoiceMusic: windows/);
-  // Пустой PCM — это «ffmpeg ничего не отдал», а не «музыки нет»: иначе замер тихо пропустил бы G8.
+  // Пустой PCM – это «ffmpeg ничего не отдал», а не «музыки нет»: иначе замер тихо пропустил бы G8.
   const empty = () => ({ status: 0, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) });
   assert.throws(() => measureVoiceMusic({ ...base, spawnImpl: empty }), /нет звука голоса/);
   const noMusic = (command, args) => (args.includes('-filter_complex') ? empty() : spawnSpy().spawnImpl(command, args));
@@ -180,7 +180,7 @@ test('speech windows merge close words, drop blips and follow the preview range'
   assert.deepEqual(speechWindows([{ s: 0.2, e: 1 }], { fromSec: 0.5, toSec: 3 }), [{ s: 0, e: 0.5 }]);
   // Пауза ровно 0,25 с сливает слова, хотя 0,55 − 0,3 в двоичной арифметике чуть больше 0,25.
   assert.deepEqual(speechWindows([{ s: 0, e: 0.3 }, { s: 0.55, e: 0.7 }]), [{ s: 0, e: 0.7 }]);
-  // Окно ровно 0,3 с остаётся (2,4 − 2,1 в двоичной арифметике чуть меньше 0,3), 0,29 с — нет.
+  // Окно ровно 0,3 с остаётся (2,4 − 2,1 в двоичной арифметике чуть меньше 0,3), 0,29 с – нет.
   assert.deepEqual(speechWindows([{ s: 2.1, e: 2.4 }]), [{ s: 2.1, e: 2.4 }]);
   assert.deepEqual(speechWindows([{ s: 2.1, e: 2.39 }]), []);
 });
@@ -210,13 +210,13 @@ test('the loudness gap is the power ratio over whole speech-window blocks', () =
   const edges = loudnessGap(voice, music, [{ s: 0.93, e: 1.07 }]);
   assert.equal(edges.blocks, 2);
   assert.ok(Math.abs(edges.gapLu - 10 * Math.log10(2e-2 / 1.1e-3)) < 1e-9);
-  // Граница блока с шумом плавающей точки (0,1 + 0,2 и 1,4 − 0,1 чуть в стороне от 0,3 и 1,3) — всё
+  // Граница блока с шумом плавающей точки (0,1 + 0,2 и 1,4 − 0,1 чуть в стороне от 0,3 и 1,3) – всё
   // равно граница блока.
   assert.equal(loudnessGap(voice, music, [{ s: 0.1 + 0.2, e: 1.4 - 0.1 }]).blocks, 20);
   // Блоки считаются только там, где есть обе дорожки.
   assert.equal(loudnessGap(voice, music.subarray(0, 30), [{ s: 0, e: 2 }]).blocks, 30);
   assert.equal(loudnessGap(voice.subarray(0, 25), music, [{ s: 0, e: 2 }]).blocks, 25);
-  // Без окон и за концом дорожки — нет речи; цифровая тишина музыки — Infinity.
+  // Без окон и за концом дорожки – нет речи; цифровая тишина музыки – Infinity.
   assert.equal(loudnessGap(voice, music, []), null);
   assert.equal(loudnessGap(voice, music, [{ s: 5, e: 6 }]), null);
   const silent = loudnessGap(voice, new Float64Array(40), [{ s: 0, e: 2 }]);
@@ -227,7 +227,7 @@ test('the loudness gap is the power ratio over whole speech-window blocks', () =
   }
 });
 
-// Голос и музыка оба в цифровой тишине: сначала вердикт про голос — без голоса разрыв не значит ничего,
+// Голос и музыка оба в цифровой тишине: сначала вердикт про голос – без голоса разрыв не значит ничего,
 // а «музыки под речью нет» отправило бы чинить музыку.
 test('silent voice and silent music read as a silent voice, not as missing music', () => {
   const zeros = new Float64Array(40);
@@ -239,7 +239,7 @@ test('silent voice and silent music read as a silent voice, not as missing music
   assert.equal(g.status, 'fail');
   assert.equal(g.value, 'голос не звучит');
   assert.doesNotMatch(g.hint, /музык/);
-  // Замер, собранный не нашим loudnessGap, с тихим голосом и gapLu Infinity — тоже вердикт про голос.
+  // Замер, собранный не нашим loudnessGap, с тихим голосом и gapLu Infinity – тоже вердикт про голос.
   assert.equal(gateVoiceMusic({ gapLu: Infinity, voiceLufs: -Infinity, musicLufs: -Infinity, blocks: 40 }, avatar).value,
     'голос не звучит');
 });
@@ -269,10 +269,10 @@ test('G8 statuses follow the profile corridor and speak in LU with commas', () =
   assert.equal(good.unit, 'LU');
   assert.equal(good.threshold, '7,5–13,5 LU, стоп < 3 или > 18,5');
   assert.equal(good.hint, 'музыка на 10,5 LU тише голоса');
-  assert.equal(at(2).hint, 'музыка на 2 LU тише голоса: слишком громко под речью — уменьшите music.gainDb примерно на 8,5 дБ (цель 10,5 LU)');
-  assert.equal(at(-3.26).hint, 'музыка на 3,3 LU громче голоса: слишком громко под речью — уменьшите music.gainDb примерно на 13,8 дБ (цель 10,5 LU)');
+  assert.equal(at(2).hint, 'музыка на 2 LU тише голоса: слишком громко под речью – уменьшите music.gainDb примерно на 8,5 дБ (цель 10,5 LU)');
+  assert.equal(at(-3.26).hint, 'музыка на 3,3 LU громче голоса: слишком громко под речью – уменьшите music.gainDb примерно на 13,8 дБ (цель 10,5 LU)');
   assert.equal(at(0.01).hint.split(':')[0], 'музыка вровень с голосом');
-  assert.equal(at(16).hint, 'музыка на 16 LU тише голоса: музыку почти не слышно — увеличьте music.gainDb примерно на 5,5 дБ (цель 10,5 LU)');
+  assert.equal(at(16).hint, 'музыка на 16 LU тише голоса: музыку почти не слышно – увеличьте music.gainDb примерно на 5,5 дБ (цель 10,5 LU)');
   const none = gateVoiceMusic({ gapLu: Infinity, voiceLufs: -14, musicLufs: -Infinity, blocks: 100 }, profile);
   assert.equal(none.status, 'fail');
   assert.equal(none.value, 'музыки под речью нет');
@@ -285,34 +285,34 @@ test('G8 statuses follow the profile corridor and speak in LU with commas', () =
   assert.equal(noSpeech.status, 'skipped');
   assert.match(noSpeech.hint, /нет речи/);
   assert.match(gateVoiceMusic(null, profile, { hasMusic: false }).hint, /нет музыки/);
-  // Замер старой формы ({ median }) — ошибка вызова, а не тихий pass.
+  // Замер старой формы ({ median }) – ошибка вызова, а не тихий pass.
   assert.throws(() => gateVoiceMusic({ median: 0.5, blocks: 100 }, profile), /gapLu/);
 });
 
 // Схема brief ограничивает music.gainDb диапазоном −60…0 дБ: совет не выводит за край, а когда края
-// не хватает — предлагает трек громче/тише или мягче/сильнее ducking.
+// не хватает – предлагает трек громче/тише или мягче/сильнее ducking.
 test('G8 advice never pushes music.gainDb outside −60…0 dB', () => {
   const profile = { ...avatar, voiceMusic: { stopLow: 3, warnLow: 7.5, target: 10.5, warnHigh: 13.5, stopHigh: 18.5 } };
   const at = (gapLu, gainDb) => gateVoiceMusic({ gapLu, voiceLufs: -14, musicLufs: -14 - gapLu, blocks: 100 }, profile,
     { gainDb }).hint;
-  // Запаса хватает — совет прежний.
-  assert.equal(at(16, -22), 'музыка на 16 LU тише голоса: музыку почти не слышно — увеличьте music.gainDb примерно на 5,5 дБ (цель 10,5 LU)');
-  assert.equal(at(2, -20), 'музыка на 2 LU тише голоса: слишком громко под речью — уменьшите music.gainDb примерно на 8,5 дБ (цель 10,5 LU)');
-  // Ровно до края — ещё обычный совет.
+  // Запаса хватает – совет прежний.
+  assert.equal(at(16, -22), 'музыка на 16 LU тише голоса: музыку почти не слышно – увеличьте music.gainDb примерно на 5,5 дБ (цель 10,5 LU)');
+  assert.equal(at(2, -20), 'музыка на 2 LU тише голоса: слишком громко под речью – уменьшите music.gainDb примерно на 8,5 дБ (цель 10,5 LU)');
+  // Ровно до края – ещё обычный совет.
   assert.match(at(16, -5.5), /увеличьте music\.gainDb примерно на 5,5 дБ/);
   assert.match(at(2, -51.5), /уменьшите music\.gainDb примерно на 8,5 дБ/);
   // Край не даёт всего шага: до края и что делать дальше.
-  assert.equal(at(16, -2), 'музыка на 16 LU тише голоса: музыку почти не слышно — увеличьте music.gainDb до 0 дБ (выше схема не даёт); '
-    + 'не хватит ещё ~3,5 дБ — возьмите трек громче или ослабьте ducking: выше ducking.thresholdDb или меньше ducking.ratio (цель 10,5 LU)');
-  assert.equal(at(2, -55), 'музыка на 2 LU тише голоса: слишком громко под речью — уменьшите music.gainDb до −60 дБ (ниже схема не даёт); '
-    + 'не хватит ещё ~3,5 дБ — возьмите трек тише или усильте ducking: ниже ducking.thresholdDb или больше ducking.ratio (цель 10,5 LU)');
-  // Уже на краю — только трек и ducking.
-  assert.equal(at(16, 0), 'музыка на 16 LU тише голоса: музыку почти не слышно — music.gainDb уже 0 дБ (максимум схемы): '
+  assert.equal(at(16, -2), 'музыка на 16 LU тише голоса: музыку почти не слышно – увеличьте music.gainDb до 0 дБ (выше схема не даёт); '
+    + 'не хватит ещё ~3,5 дБ – возьмите трек громче или ослабьте ducking: выше ducking.thresholdDb или меньше ducking.ratio (цель 10,5 LU)');
+  assert.equal(at(2, -55), 'музыка на 2 LU тише голоса: слишком громко под речью – уменьшите music.gainDb до −60 дБ (ниже схема не даёт); '
+    + 'не хватит ещё ~3,5 дБ – возьмите трек тише или усильте ducking: ниже ducking.thresholdDb или больше ducking.ratio (цель 10,5 LU)');
+  // Уже на краю – только трек и ducking.
+  assert.equal(at(16, 0), 'музыка на 16 LU тише голоса: музыку почти не слышно – music.gainDb уже 0 дБ (максимум схемы): '
     + 'возьмите трек громче или ослабьте ducking: выше ducking.thresholdDb или меньше ducking.ratio (цель 10,5 LU)');
-  assert.equal(at(2, -60), 'музыка на 2 LU тише голоса: слишком громко под речью — music.gainDb уже −60 дБ (минимум схемы): '
+  assert.equal(at(2, -60), 'музыка на 2 LU тише голоса: слишком громко под речью – music.gainDb уже −60 дБ (минимум схемы): '
     + 'возьмите трек тише или усильте ducking: ниже ducking.thresholdDb или больше ducking.ratio (цель 10,5 LU)');
   for (const hint of [at(16, -2), at(16, 0)]) assert.doesNotMatch(hint, /до [1-9]/);
-  // В коридоре gainDb не нужен и не мешает; сломанное значение — ошибка вызова.
+  // В коридоре gainDb не нужен и не мешает; сломанное значение – ошибка вызова.
   assert.equal(at(10.5, 0), 'музыка на 10,5 LU тише голоса');
   for (const gainDb of [NaN, Infinity, '−16']) assert.throws(() => at(16, gainDb), /gateVoiceMusic: gainDb/);
 });
@@ -384,7 +384,7 @@ test('inaudible music (gain −60) under ducking stops as barely audible, never 
 });
 
 // Моно-голос микс играет как его стерео-копию (aformat: −3 дБ на канал), и замер должен слышать
-// то же самое. finish.js и так отдаёт стерео — это страховка на случай моно-голоса.
+// то же самое. finish.js и так отдаёт стерео – это страховка на случай моно-голоса.
 test('a mono voice measures like the stereo copy the mix actually plays', { skip: !hasFfmpeg }, (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-mix-channels-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

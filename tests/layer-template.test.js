@@ -26,10 +26,10 @@ test('template imports only the kit, never another reel or an absolute path', ()
   for (const part of ['SpeakerLayer', 'StockInsert', 'FullscreenReveal', 'KitBox', 'ShutterFlash', 'Subtitles', 'SfxTrack', 'FontLoader']) {
     assert.match(root, new RegExp(`<${part}`));
   }
-  // FontLoader — гейт: оборачивает весь слой, а не стоит рядом пустым элементом.
+  // FontLoader – гейт: оборачивает весь слой, а не стоит рядом пустым элементом.
   assert.match(root, /<FontLoader faces=\{FONTS\}>[\s\S]*<SpeakerLayer[\s\S]*<Subtitles[\s\S]*<\/FontLoader>/);
   assert.doesNotMatch(root, /<FontLoader[^>]*\/>/);
-  // Шрифты выбирает scenes.jsx (ревью Task 30, п.7): Root.jsx — чистая инфраструктура, без своего
+  // Шрифты выбирает scenes.jsx (ревью Task 30, п.7): Root.jsx – чистая инфраструктура, без своего
   // хардкода семьи шрифта или прямого пути к файлу шрифта.
   assert.doesNotMatch(root, /KitOnest|KitOswald|fonts\//);
   // Одна точка сборки с Node-манифестом layer check (Task 19).
@@ -45,7 +45,7 @@ test('template imports only the kit, never another reel or an absolute path', ()
 
 // --- Смоук: шаблон, скопированный в папку слоя, собирается гейтом и рендерится ---
 
-// Маленькая библиотека звуков: имена как в настоящей библиотеке, роль — отдельным полем (вспышка
+// Маленькая библиотека звуков: имена как в настоящей библиотеке, роль – отдельным полем (вспышка
 // обязана искать затвор по роли, а не по имени). Файлы для SSR не нужны.
 const SFX_LIBRARY = {
   sounds: {
@@ -83,8 +83,8 @@ function makeLayer(t, { width = 1080, height = 1920, fps = 25, seconds = 8 } = {
   return { layerDir, layer };
 }
 
-// Файл слоя через тот же esbuild-загрузчик, что тесты kit; React — из движка (слой лежит во временной
-// папке без своих node_modules), remotion — подмена на заданном кадре.
+// Файл слоя через тот же esbuild-загрузчик, что тесты kit; React – из движка (слой лежит во временной
+// папке без своих node_modules), remotion – подмена на заданном кадре.
 function loadLayerFile(layerDir, file, remotion) {
   return loadEsm(path.relative(ROOT, path.join(layerDir, file)), {
     stubs: { remotion, react: React, 'react/jsx-runtime': require('react/jsx-runtime') },
@@ -164,7 +164,7 @@ test('manifests at 540×960, 1080×1920 and 1920×1080 scale the geometry with k
     assert.equal(byId.G5, 'pass', `${width}×${height}: ${gates.find((g) => g.id === 'G5').spans.map((s) => s.note).join('; ')}`);
     assert.deepEqual(gates.filter((g) => g.status === 'fail').map((g) => g.id), [], `${width}×${height}`);
   }
-  // Карточки в середине жизни: половинный кадр — половинный box (сдвиги жизни kit заданы в px и в
+  // Карточки в середине жизни: половинный кадр – половинный box (сдвиги жизни kit заданы в px и в
   // сравнении не участвуют, поэтому сверяем левый и правый край и ширину).
   const frame = 30;
   for (const id of ['title', 'screenshot']) {
@@ -173,7 +173,7 @@ test('manifests at 540×960, 1080×1920 and 1920×1080 scale the geometry with k
     const half = textAt(manifests['540x960'], id, at);
     assert.ok(Math.abs(half[0] - full[0] / 2) <= 1 && Math.abs(half[2] - full[2] / 2) <= 1, `${id}: ${half} vs ${full}`);
   }
-  // 1920×1080: короткая сторона та же 1080 — box того же размера, по центру своей safe-зоны.
+  // 1920×1080: короткая сторона та же 1080 – box того же размера, по центру своей safe-зоны.
   const wide = manifests['1920x1080'];
   const safe = safeRect(1920, 1080);
   for (const [id, at] of [['title', frame], ['screenshot', 90]]) {
@@ -217,9 +217,9 @@ test('Root renders speaker, title, screenshot card, shutter flash, stock insert,
   assert.match(start, /<video src="\/static\/speaker\.mp4"/);
   assert.match(start, /data-kit-text="captions"/);
   assert.match(start, /Привет,/);
-  // Субтитры — шрифтом слоя, а не sans-serif по умолчанию.
+  // Субтитры – шрифтом слоя, а не sans-serif по умолчанию.
   assert.match(start, /data-kit-text="captions"[^>]*><span style="font-family:KitOnest/);
-  assert.equal(audios(start), 3, 'звуковая дорожка — все оставшиеся звуки');
+  assert.equal(audios(start), 3, 'звуковая дорожка – все оставшиеся звуки');
   assert.doesNotMatch(start, /data-kit-text="title"/);
 
   const title = renderRoot(layerDir, layer, 30);
@@ -235,12 +235,12 @@ test('Root renders speaker, title, screenshot card, shutter flash, stock insert,
   assert.match(shot, /data-kit-text="screenshot"/);
   assert.match(shot, /<img src="\/static\/shots\/placeholder\.png"/);
   assert.match(shot, /example\.com/);
-  // Скриншот прокручивается после входа карточки: до окна прокрутки — верх страницы, в середине — ниже.
+  // Скриншот прокручивается после входа карточки: до окна прокрутки – верх страницы, в середине – ниже.
   const scrolled = (html) => Number(/object-position:50% ([\d.]+)%/.exec(html)[1]);
   assert.equal(scrolled(renderRoot(layerDir, layer, card.from + 2)), 0);
   assert.ok(scrolled(shot) > 10 && scrolled(shot) < 90, `прокрутка в середине карточки ${scrolled(shot)} %`);
 
-  // Вспышка — на ударе оставшегося звука затвора, после входа карточки (mask — 8 эталонных кадров).
+  // Вспышка – на ударе оставшегося звука затвора, после входа карточки (mask – 8 эталонных кадров).
   assert.ok(shutter.hitFrame >= card.from + 8, `затвор ${shutter.hitFrame}, карточка с ${card.from}`);
   const flash = renderRoot(layerDir, layer, shutter.hitFrame);
   assert.match(flash, /background:#ffffff;opacity:0\.6/);
@@ -280,7 +280,7 @@ test('InsertContent draws a cover screen as a browser window inside the safe zon
   assert.match(screen, /<img src="\/static\/shots\/page\.png"/);
   const scene = render(React.createElement(InsertContent, { insert: insert({ kind: 'scene' }) }));
   assert.match(scene, /background-color:#0c1018/);
-  // Донор без cover — оверлей поверх спикера: заливка на весь кадр закрыла бы спикера на весь ролик.
+  // Донор без cover – оверлей поверх спикера: заливка на весь кадр закрыла бы спикера на весь ролик.
   assert.equal(render(React.createElement(InsertContent, { insert: insert({ kind: 'donor', cover: false, src: 'donor/clip.mp4' }) })), '');
 });
 
@@ -327,11 +327,11 @@ test('a screen insert an agent adds to plan.js hides captions and is drawn throu
   assert.doesNotMatch(inside, /data-kit-text="captions"/);
 });
 
-// Решение D6/README: donor-вставка рисуется muted (см. InsertContent) — реальный звук, который
+// Решение D6/README: donor-вставка рисуется muted (см. InsertContent) – реальный звук, который
 // слышит зритель, остаётся голосом СПИКЕРА в общем миксе слоя, донор его не перебивает. Субтитры
-// поэтому не прячутся под cover-донором — в отличие от screen/scene/stock (пункт выше), где вставка
+// поэтому не прячутся под cover-донором – в отличие от screen/scene/stock (пункт выше), где вставка
 // и есть весь кадр и разговор физически визуально закрыт.
-test('a cover donor an agent adds to plan.js keeps captions visible over it — the voice keeps going', (t) => {
+test('a cover donor an agent adds to plan.js keeps captions visible over it – the voice keeps going', (t) => {
   const { layerDir, layer } = makeLayer(t);
   patchPlan(layerDir, 'const inserts = [];',
     "const inserts = [{ id: 'donor-1', kind: 'donor', cover: true, from: 1, to: 2, src: 'donor/clip.mp4' }];");
@@ -340,11 +340,11 @@ test('a cover donor an agent adds to plan.js keeps captions visible over it — 
   assert.deepEqual([donor.from, donor.to, donor.cover], [25, 50, true]);
   const inside = renderRoot(layerDir, layer, donor.from + 10);
   assert.match(inside, /data-kit-bleed="donor-1"/);
-  assert.match(inside, /data-kit-text="captions"/, 'голос донора продолжается — субтитры обязаны остаться поверх него');
+  assert.match(inside, /data-kit-text="captions"/, 'голос донора продолжается – субтитры обязаны остаться поверх него');
 });
 
-// Ревью Task 30, п.7: CAPTION_FONT — опечатка в scenes.jsx (имя семьи не из FONTS) не должна тихо
-// уйти в Subtitles как несуществующий шрифт — FontLoader тогда никогда не догрузит его и никогда
+// Ревью Task 30, п.7: CAPTION_FONT – опечатка в scenes.jsx (имя семьи не из FONTS) не должна тихо
+// уйти в Subtitles как несуществующий шрифт – FontLoader тогда никогда не догрузит его и никогда
 // не снимет delayRender, и рендер слоя просто зависнет без единой явной причины.
 test('Root.jsx refuses to build the layer if CAPTION_FONT names a family missing from FONTS', (t) => {
   const { layerDir, layer } = makeLayer(t);
@@ -352,7 +352,7 @@ test('Root.jsx refuses to build the layer if CAPTION_FONT names a family missing
   assert.throws(() => renderRoot(layerDir, layer, 0), /CAPTION_FONT/);
 });
 
-test('BAD CASE: a stock insert with cover: false cannot slip past G4 — the layer does not compile', (t) => {
+test('BAD CASE: a stock insert with cover: false cannot slip past G4 – the layer does not compile', (t) => {
   const { layerDir } = makeLayer(t);
   patchPlan(layerDir, "kind: 'stock',", "kind: 'stock', cover: false,");
   assert.throws(() => buildLayerManifest(layerDir), /вставка stock всегда закрывает спикера: cover: false допустим только для donor/);

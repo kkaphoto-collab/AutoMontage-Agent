@@ -42,8 +42,8 @@ function renderedLayer(projectDir, { n = 1, frequency = 900 } = {}) {
 }
 
 // Отчёт layer render той же формы, что пишет scripts/layer/render.js: гейты G6 и G7, слой первым (role
-// 'layer'), затем исходник и манифест; с error гейтов нет. status — итог G6: 'pass' | 'warn' | 'fail'.
-// edit — ручная правка готового отчёта (подделки для проверок согласованности).
+// 'layer'), затем исходник и манифест; с error гейтов нет. status – итог G6: 'pass' | 'warn' | 'fail'.
+// edit – ручная правка готового отчёта (подделки для проверок согласованности).
 function renderReport(projectDir, {
   n = 1, layerSha, sourceSha = 's'.repeat(64), status = 'pass', error = null, createdAt = '2026-09-28T10:00:00.000Z', edit = (report) => report,
 }) {
@@ -60,7 +60,7 @@ function renderReport(projectDir, {
 }
 
 // Проект с отрендеренным слоем motion-v01/renders/layer-01.mp4. report(options) пишет его отчёт layer
-// render для текущего исходника проекта; checked: false — без отчёта. run(file, deps) — layer import.
+// render для текущего исходника проекта; checked: false – без отчёта. run(file, deps) – layer import.
 function layerProject(t, { checked = true } = {}) {
   const project = makeLayerProject(t, { seconds: 2 });
   const sourcePath = path.join(project.projectDir, project.workspace.manifest.source.localPath);
@@ -184,7 +184,7 @@ test('regression: a layer rendered for an earlier source is refused after the so
     '-f', 'lavfi', '-i', 'sine=frequency=300:duration=2', '-shortest', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-c:a', 'aac', replacement]);
   fs.renameSync(replacement, p.sourcePath);
   // Перерендер того же слоя всегда упал бы на assertLayerSource: подсказка ведёт к новому слою.
-  await assert.rejects(p.run(), (error) => /слой собран для другого исходника .*— создайте новый слой: automontage layer new --project-dir ".+" → layer render → layer import/.test(error.message)
+  await assert.rejects(p.run(), (error) => /слой собран для другого исходника .*– создайте новый слой: automontage layer new --project-dir ".+" → layer render → layer import/.test(error.message)
     && !/--layer motion-v01/.test(error.message));
   p.report({ edit: (report) => ({ ...report, inputs: report.inputs.filter((input) => input.role !== 'source') }) });
   await assert.rejects(p.run(), /qa\/layer-motion-v01-render-01\.json: в отчёте нет sha256 исходника/);
@@ -194,7 +194,7 @@ test('regression: a layer rendered for an earlier source is refused after the so
 test('a report that disagrees with its kind, layer or gates is refused with the report named', { skip: !hasFfmpeg }, async (t) => {
   const p = layerProject(t, { checked: false });
   p.report({ edit: (report) => ({ ...report, kind: 'layer-check' }) });
-  await assert.rejects(p.run(), /qa\/layer-motion-v01-render-01\.json — не отчёт layer render \(kind «layer-check»\)/);
+  await assert.rejects(p.run(), /qa\/layer-motion-v01-render-01\.json – не отчёт layer render \(kind «layer-check»\)/);
   p.report({ edit: (report) => ({ ...report, layer: 'motion-v07' }) });
   await assert.rejects(p.run(), /qa\/layer-motion-v01-render-01\.json: отчёт о слое motion-v07, а файл из motion-v01/);
   // Итог «pass», вписанный руками поверх проваленного гейта.
@@ -216,7 +216,7 @@ test('import refuses files outside the project, links, non-regular files and cop
   fs.copyFileSync(file, outside);
   await assert.rejects(run(outside), /вне проекта/);
   await assert.rejects(run(path.join(projectDir, 'motion-v01', 'renders')), /не обычный файл/);
-  // Байт-в-байт копия внутри проекта: отчёт проверял другой путь — импортируется только сам рендер.
+  // Байт-в-байт копия внутри проекта: отчёт проверял другой путь – импортируется только сам рендер.
   for (const copy of [path.join(projectDir, 'motion-v09', 'renders', 'layer-01.mp4'), path.join(projectDir, 'motion-v01', 'renders', 'layer-07.mp4')]) {
     fs.mkdirSync(path.dirname(copy), { recursive: true });
     fs.copyFileSync(file, copy);
@@ -237,15 +237,15 @@ test('qa/, its reports and the registry are checked before anything is imported'
   fs.mkdirSync(path.join(qa, 'layer-motion-v04-render-02.json'));
   await assert.rejects(p.run(), /qa\/layer-motion-v04-render-02\.json: это не файл отчёта/);
   fs.rmdirSync(path.join(qa, 'layer-motion-v04-render-02.json'));
-  // projects/ не в Git — восстанавливать неоткуда: реестр удаляют и импортируют слои заново.
-  const broken = /qa\/layer-imports\.json повреждён .*— удалите qa\/layer-imports\.json и импортируйте слои заново/;
+  // projects/ не в Git – восстанавливать неоткуда: реестр удаляют и импортируют слои заново.
+  const broken = /qa\/layer-imports\.json повреждён .*– удалите qa\/layer-imports\.json и импортируйте слои заново/;
   for (const text of ['{', '{"version":1}']) {
     fs.writeFileSync(registryPath(p.projectDir), text);
     await assert.rejects(p.run(), broken);
   }
   fs.rmSync(registryPath(p.projectDir));
   if (canLink) {
-    // qa/ — ссылка на чужую папку отчётов: её отчёты не читаются, а реестр не пишется мимо проекта.
+    // qa/ – ссылка на чужую папку отчётов: её отчёты не читаются, а реестр не пишется мимо проекта.
     const foreign = path.join(p.root, 'foreign-qa');
     fs.renameSync(qa, foreign);
     fs.symlinkSync(foreign, qa, 'dir');
@@ -258,7 +258,7 @@ test('import errors keep their code and get a Russian hint', { skip: !hasFfmpeg 
   const p = layerProject(t);
   const cases = {
     MEDIA_IMPORT_BUSY: /идёт другой импорт/,
-    MEDIA_IMPORT_TOO_LARGE: /больше 1 ГБ — сократите слой или понизьте качество/,
+    MEDIA_IMPORT_TOO_LARGE: /больше 1 ГБ – сократите слой или понизьте качество/,
     MEDIA_IMPORT_DISK_FULL: /не хватает места/,
     MEDIA_IMPORT_DURATION_UNSUPPORTED: /длиннее 30 минут/,
     MEDIA_IMPORT_DECODE_FAILED: /импорт не удался/,
@@ -286,7 +286,7 @@ test('the checked descriptor itself is hashed and streamed from the start', { sk
   assert.equal(opened.length, 1, 'файл открыт один раз: без отдельного открытия по пути');
   if (process.platform !== 'win32') assert.ok(opened[0] & fs.constants.O_NOFOLLOW, 'открыт без прохода по ссылке');
 
-  // fstat дескриптора видит не тот файл, что lstat, — или файл меняется, пока его хешируют.
+  // fstat дескриптора видит не тот файл, что lstat, – или файл меняется, пока его хешируют.
   const neverImport = async () => { throw new Error('импорт не должен начаться'); };
   const changed = (stat, fields) => Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, fields);
   const shiftingOn = (changeOn) => {
@@ -296,7 +296,7 @@ test('the checked descriptor itself is hashed and streamed from the start', { sk
   for (const changeOn of [1, 2]) {
     await assert.rejects(p.run(p.file, { ...quiet, fileSystem: shiftingOn(changeOn), importImpl: neverImport }), /файл изменился во время импорта/);
   }
-  // Третья сверка — после импорта: файл, изменившийся пока его читал импорт, не попадает в реестр.
+  // Третья сверка – после импорта: файл, изменившийся пока его читал импорт, не попадает в реестр.
   const drained = async ({ request }) => {
     for await (const chunk of request) void chunk;
     return { reference: 'assets/broll/video/x/media.mp4', canonicalSha256: 'c'.repeat(64) };
@@ -323,10 +323,10 @@ test('findRenderReport matches only the layer input and takes the newest report'
   const dir = tempDir(t);
   const layerSha = 'a'.repeat(64);
   const sourceSha = 'b'.repeat(64);
-  assert.equal(findRenderReport(dir, layerSha), null, 'нет папки qa — нет отчёта');
+  assert.equal(findRenderReport(dir, layerSha), null, 'нет папки qa – нет отчёта');
   renderReport(dir, { n: 1, layerSha, sourceSha });
-  assert.equal(findRenderReport(dir, sourceSha), null, 'исходник — вход role source, а не слой');
-  assert.equal(findRenderReport(dir, 'm'.repeat(64)), null, 'манифест — не слой');
+  assert.equal(findRenderReport(dir, sourceSha), null, 'исходник – вход role source, а не слой');
+  assert.equal(findRenderReport(dir, 'm'.repeat(64)), null, 'манифест – не слой');
   writeJson(path.join(dir, 'qa', 'layer-motion-v01-render-02.json'), { kind: 'layer-render', layer: 'motion-v01', inputs: [{ sha256: sourceSha }], summary: { status: 'pass' }, error: null });
   assert.equal(findRenderReport(dir, sourceSha), null, 'вход без role не считается слоем');
   assert.equal(findRenderReport(dir, layerSha).fileName, 'layer-motion-v01-render-01.json');
@@ -341,7 +341,7 @@ test('findRenderReport matches only the layer input and takes the newest report'
   assert.deepEqual([newest.fileName, newest.renderNumber, renderPassed(newest)], ['layer-motion-v01-render-03.json', 3, false]);
   assert.equal(findRenderReport(dir, other, { path: 'motion-v01/renders/layer-04.mp4' }).fileName, 'layer-motion-v01-render-04.json');
 
-  // При равном createdAt — больший номер, числом: 100 новее 99, хотя строкой «100» < «99».
+  // При равном createdAt – больший номер, числом: 100 новее 99, хотя строкой «100» < «99».
   const third = 'd'.repeat(64);
   renderReport(dir, { n: 99, layerSha: third, status: 'fail' });
   renderReport(dir, { n: 100, layerSha: third, status: 'pass' });
@@ -363,7 +363,7 @@ test('renderPassed accepts only a whole, consistent layer render report that pas
   assert.equal(renderPassed(report({ error: 'x' })), false);
   assert.equal(renderPassed(report({}, (r) => ({ ...r, error: 'x' }))), false);
   assert.equal(renderPassed(report({ g6: 'fail' }, (r) => ({ ...r, summary: { status: 'pass', fail: 0, warn: 0 } }))), false);
-  // Итог сверяется целиком: верный статус с чужими счётчиками fail/warn — тоже правка руками.
+  // Итог сверяется целиком: верный статус с чужими счётчиками fail/warn – тоже правка руками.
   assert.equal(renderPassed(report({}, (r) => ({ ...r, summary: { ...r.summary, fail: 1 } }))), false);
   assert.equal(renderPassed(report({}, (r) => ({ ...r, summary: { ...r.summary, warn: 1 } }))), false);
   assert.equal(renderPassed(report({ g7: 'warn' }, (r) => ({ ...r, summary: { ...r.summary, warn: 2 } }))), false);

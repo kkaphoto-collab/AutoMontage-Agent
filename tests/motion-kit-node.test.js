@@ -25,8 +25,8 @@ test('kit core resolves the real remotion package when loaded standalone in Node
   const kit = loadKitCore();
   assert.equal(typeof kit.compileLayer, 'function');
   assert.equal(kit.secToFrame(2, 25), 50);
-  // secToFrame — чистая арифметика; compileCamera/cameraAt внутри используют Easing/interpolate/
-  // spring из настоящего пакета 'remotion' — если бы esbuild не смог отдать его извне бандла,
+  // secToFrame – чистая арифметика; compileCamera/cameraAt внутри используют Easing/interpolate/
+  // spring из настоящего пакета 'remotion' – если бы esbuild не смог отдать его извне бандла,
   // здесь бросило бы Cannot find module 'remotion', а не в тестах на манифест.
   const camera = kit.compileCamera({ face: { x: 540, y: 787 }, shots: [{ at: 0, preset: 'W' }] },
     { fps: 25, width: 1080, height: 1920, durationInFrames: 50 });
@@ -44,7 +44,7 @@ test('a layer outside the engine folder compiles to a manifest from its plan', (
 });
 
 // Task 19 review item 5: один и тот же compilePlan/buildManifest используется и Node-манифестом,
-// и (в задаче 29) Root.jsx слоя — здесь проверяем, что buildLayerManifest не изобретает свой путь
+// и (в задаче 29) Root.jsx слоя – здесь проверяем, что buildLayerManifest не изобретает свой путь
 // компиляции, а даёт ровно то, что дал бы прямой вызов loadKitCore().compilePlan/buildManifest.
 test('the manifest matches buildManifest(compilePlan(...)) computed directly from the loaded kit core', (t) => {
   const dir = tmp();
@@ -95,21 +95,21 @@ test('a broken layer.json blames layer.json with a file:line:column location', (
   const dir = tmp();
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   writeLayer(dir, GOOD_PLAN, { layerJson: '{ "fps": 25, ' });
-  assert.throws(() => buildLayerManifest(dir), /не собирается layer\.json — layer\.json:\d+:\d+:/);
+  assert.throws(() => buildLayerManifest(dir), /не собирается layer\.json – layer\.json:\d+:\d+:/);
 });
 
 test('a plan.js syntax error keeps "не собирается plan.js" and reports a line number', (t) => {
   const dir = tmp();
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   writeLayer(dir, 'export default function buildPlan( {\n');
-  assert.throws(() => buildLayerManifest(dir), /не собирается plan\.js — src\/plan\.js:\d+:\d+:/);
+  assert.throws(() => buildLayerManifest(dir), /не собирается plan\.js – src\/plan\.js:\d+:\d+:/);
 });
 
 test('a broken src/words.js blames words.js, not plan.js', (t) => {
   const dir = tmp();
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   writeLayer(dir, GOOD_PLAN, { words: 'export default [ {"w":"a"' });
-  assert.throws(() => buildLayerManifest(dir), /не собирается words\.js — src\/words\.js:\d+:\d+:/);
+  assert.throws(() => buildLayerManifest(dir), /не собирается words\.js – src\/words\.js:\d+:\d+:/);
 });
 
 test('a throwing buildPlan is wrapped with the layer name instead of a raw stack', (t) => {
@@ -117,7 +117,7 @@ test('a throwing buildPlan is wrapped with the layer name instead of a raw stack
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   writeLayer(dir, "export default function buildPlan(){ throw new Error('boom'); }\n");
   const name = path.basename(dir);
-  assert.throws(() => buildLayerManifest(dir), new RegExp(`слой ${name}: src/plan\\.js упал при построении плана — boom`));
+  assert.throws(() => buildLayerManifest(dir), new RegExp(`слой ${name}: src/plan\\.js упал при построении плана – boom`));
 });
 
 test('a buildPlan that returns undefined gets a clear hint instead of a TypeError deep inside buildManifest', (t) => {
@@ -145,7 +145,7 @@ test('broken layers explain what is missing or failing', (t) => {
 });
 
 // Task 19 review item 2: ошибки валидации самого kit (compileCamera/compileItems/...) идут через
-// compilePlan без изменений — buildLayerManifest должен лишь добавить «слой X:» спереди, а не
+// compilePlan без изменений – buildLayerManifest должен лишь добавить «слой X:» спереди, а не
 // проглотить или переформулировать текст, иначе следующая задача (layer check CLI) не сможет
 // отличить нарушение контракта от прочих ошибок.
 test('kit validation errors keep their text and gain the "слой X:" prefix', (t) => {
@@ -156,7 +156,7 @@ test('kit validation errors keep their text and gain the "слой X:" prefix', 
   assert.throws(() => buildLayerManifest(dir), new RegExp(`слой ${name}: camera\\.face`));
 });
 
-// Task 19 review item 4: plan.js — чистые данные для гейта. Если ему разрешить React, remotion,
+// Task 19 review item 4: plan.js – чистые данные для гейта. Если ему разрешить React, remotion,
 // сами внутренности kit или системные модули Node, манифест перестаёт быть надёжным описанием
 // того, что реально попадёт в рендер (например, доступ к файловой системе или process.env внутри
 // buildPlan даёт разный манифест на разных машинах).
@@ -165,10 +165,10 @@ test('plan.js cannot import the full @automontage/motion-kit or its other subpat
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   writeLayer(dir, "import { KitBox } from '@automontage/motion-kit';\n"
     + "export default function buildPlan({face}){ return { camera: { face, shots: [{at:0,preset:'W'}] }, items: [] }; }\n");
-  assert.throws(() => buildLayerManifest(dir), /src\/plan\.js импортирует «@automontage\/motion-kit» — из kit разрешён только '@automontage\/motion-kit\/core'/);
-  // Чистый подпуть — не React, но всё равно не публичный вход: только core.
+  assert.throws(() => buildLayerManifest(dir), /src\/plan\.js импортирует «@automontage\/motion-kit» – из kit разрешён только '@automontage\/motion-kit\/core'/);
+  // Чистый подпуть – не React, но всё равно не публичный вход: только core.
   writeLayer(dir, "import { secToFrame } from '@automontage/motion-kit/time.js';\n" + GOOD_PLAN);
-  assert.throws(() => buildLayerManifest(dir), /«@automontage\/motion-kit\/time\.js» — из kit разрешён только '@automontage\/motion-kit\/core'/);
+  assert.throws(() => buildLayerManifest(dir), /«@automontage\/motion-kit\/time\.js» – из kit разрешён только '@automontage\/motion-kit\/core'/);
 });
 
 test('plan.js cannot import react directly', (t) => {
@@ -209,7 +209,7 @@ test('plan.js can still use @automontage/motion-kit/core and a relative helper i
 });
 
 // Task 19 review item 3: new Module(filename, module) добавлял каждый скомпилированный слой в
-// module.children этого файла навсегда — процесс, который много раз вызывает layer check (или
+// module.children этого файла навсегда – процесс, который много раз вызывает layer check (или
 // preview), копил бы утечку. new Module(filename) без родителя ничего никуда не добавляет.
 test('evaluated layer modules do not leak into motion-kit-node module.children', (t) => {
   const dir = tmp();
@@ -238,7 +238,7 @@ test('a relative layerDir resolves against the current working directory', (t) =
 });
 
 // Task 19, второе ревью. Граница «чистого плана» считается после синхронной сборки по metafile
-// esbuild: stdin-entry и сам kit — доверенные, всё остальное — код ролика, где бы он ни лежал.
+// esbuild: stdin-entry и сам kit – доверенные, всё остальное – код ролика, где бы он ни лежал.
 const ENGINE_ROOT = path.join(__dirname, '..');
 const LAYER_FILE_NAMES = ['layer.json', 'src/words.js', 'src/sfx-library.js', 'src/plan.js'];
 
@@ -249,16 +249,16 @@ function cleanTmp(t) {
 }
 
 // Спецификатор импорта из src/ слоя на file. esbuild считает относительные импорты от
-// канонического пути (на macOS временная папка — симлинк), поэтому и здесь канонические пути. Если
-// пути на разных дисках (Windows CI: движок на D:, временные файлы на C:), относительного пути нет —
+// канонического пути (на macOS временная папка – симлинк), поэтому и здесь канонические пути. Если
+// пути на разных дисках (Windows CI: движок на D:, временные файлы на C:), относительного пути нет –
 // тогда импорт абсолютный.
 function importSpec(layerDir, file) {
   const rel = path.relative(path.join(fs.realpathSync(layerDir), 'src'), fs.realpathSync(file));
   return path.isAbsolute(rel) ? file : rel.split(path.sep).join('/');
 }
 
-// Чистая модель metafile, как его отдаёт esbuild на Windows: ключи и path — относительно
-// absWorkingDir через '/', на другом диске — абсолютные; original — как написано в исходнике.
+// Чистая модель metafile, как его отдаёт esbuild на Windows: ключи и path – относительно
+// absWorkingDir через '/', на другом диске – абсолютные; original – как написано в исходнике.
 function winMetafile(root, planExtra = [], moreInputs = {}) {
   const env = { path: '<define:process.env>', kind: 'import-statement', external: true };
   const kit = 'D:/a/AutoMontage-Agent/src';
@@ -301,7 +301,7 @@ test('the plan boundary works with Windows paths: entry and in-layer imports pas
   const check = winBoundary(root);
   const imp = (p, original, extra = {}) => ({ path: p, kind: 'import-statement', original, ...extra });
   assert.equal(check(winMetafile(root)), null);
-  // Регистр букв на Windows не важен: тот же файл слоя другими буквами — всё ещё внутри.
+  // Регистр букв на Windows не важен: тот же файл слоя другими буквами – всё ещё внутри.
   assert.equal(check(winMetafile(root, [imp('c:/WORK/Reels/motion-v01/src/Helper.js', './Helper.js')])), null);
 
   const outside = check(winMetafile(root, [imp('../outside/x.js', '..\\..\\outside\\x.js')]));
@@ -322,7 +322,7 @@ test('the plan boundary works with Windows paths: entry and in-layer imports pas
   assert.equal(hidden.file, 'src/plan.js');
   assert.match(hidden.reason, /внутри слоя/);
 
-  // Entry — наш собственный код: всё, кроме четырёх файлов слоя, у него — отказ.
+  // Entry – наш собственный код: всё, кроме четырёх файлов слоя, у него – отказ.
   const polluted = winMetafile(root);
   polluted.inputs['<stdin>'].imports.push({ path: 'node:fs', kind: 'import-statement', external: true });
   assert.notEqual(check(polluted), null);
@@ -336,7 +336,7 @@ test('a path spelling mismatch makes the boundary deny, never silently allow', (
   const abs = { path: 'C:/work/long-folder-name/motion-v01/src/helper.js', kind: 'import-statement', original: './helper.js' };
   assert.equal(winBoundary(longRoot)(winMetafile(longRoot, [abs])), null);
   assert.notEqual(winBoundary(shortRoot)(winMetafile(shortRoot, [abs])), null);
-  // kit, записанный другим написанием, перестаёт быть доверенным: его импорт remotion — отказ.
+  // kit, записанный другим написанием, перестаёт быть доверенным: его импорт remotion – отказ.
   assert.notEqual(winBoundary(longRoot, 'D:\\A\\AUTOMO~1\\src\\motion-kit')(winMetafile(longRoot)), null);
 });
 
@@ -346,7 +346,7 @@ test('a helper outside the layer is rejected, even one that hides a Node built-i
   fs.writeFileSync(path.join(out, 'helper.js'), "import fs from 'node:fs';\nexport const shotAt = (at, preset) => ({ at, preset, n: fs.readdirSync('.').length });\n");
   writeLayer(dir, `import { shotAt } from ${JSON.stringify(importSpec(dir, path.join(out, 'helper.js')))};\n`
     + "export default function buildPlan({face}){ return { camera: { face, shots: [shotAt(0,'W')] }, items: [] }; }\n");
-  assert.throws(() => buildLayerManifest(dir), /src\/plan\.js импортирует «[^»]*helper\.js» — .*файлы ролика должны лежать внутри слоя/);
+  assert.throws(() => buildLayerManifest(dir), /src\/plan\.js импортирует «[^»]*helper\.js» – .*файлы ролика должны лежать внутри слоя/);
 });
 
 test('an absolute-path import of a file outside the layer is rejected', (t) => {
@@ -354,7 +354,7 @@ test('an absolute-path import of a file outside the layer is rejected', (t) => {
   const out = cleanTmp(t);
   fs.writeFileSync(path.join(out, 'data.js'), 'export default 1;\n');
   writeLayer(dir, `import n from ${JSON.stringify(path.join(out, 'data.js'))};\n` + GOOD_PLAN);
-  assert.throws(() => buildLayerManifest(dir), /src\/plan\.js импортирует .* — .*файлы ролика должны лежать внутри слоя/);
+  assert.throws(() => buildLayerManifest(dir), /src\/plan\.js импортирует .* – .*файлы ролика должны лежать внутри слоя/);
 });
 
 test('a relative import into the engine kit is rejected and named by its kit path', (t) => {
@@ -362,7 +362,7 @@ test('a relative import into the engine kit is rejected and named by its kit pat
   const kitIndex = path.join(ENGINE_ROOT, 'src', 'motion-kit', 'index.js');
   writeLayer(dir, `import * as kit from ${JSON.stringify(importSpec(dir, kitIndex))};\n` + GOOD_PLAN);
   assert.throws(() => buildLayerManifest(dir), (error) => {
-    assert.match(error.message, /«@automontage\/motion-kit\/index\.js» — из kit разрешён только '@automontage\/motion-kit\/core'/);
+    assert.match(error.message, /«@automontage\/motion-kit\/index\.js» – из kit разрешён только '@automontage\/motion-kit\/core'/);
     assert.ok(!error.message.includes(ENGINE_ROOT), error.message);
     return true;
   });
@@ -380,10 +380,10 @@ test('a symlink inside the layer that points outside is rejected', (t) => {
     if (['EPERM', 'EACCES', 'ENOSYS'].includes(error.code)) return t.skip(`нет прав на симлинки: ${error.code}`);
     throw error;
   }
-  assert.throws(() => buildLayerManifest(dir), /«\.\/shots\.js» — .*файлы ролика должны лежать внутри слоя/);
+  assert.throws(() => buildLayerManifest(dir), /«\.\/shots\.js» – .*файлы ролика должны лежать внутри слоя/);
 });
 
-// Рендер слоя идёт с пустым env-файлом — план не должен ветвиться по переменным окружения машины.
+// Рендер слоя идёт с пустым env-файлом – план не должен ветвиться по переменным окружения машины.
 test('plan.js sees an empty process.env, like the render', (t) => {
   const dir = cleanTmp(t);
   assert.ok(process.env.PATH, 'в тестовом процессе PATH задан');
@@ -398,12 +398,12 @@ test('a top-level throw in plan.js or words.js is wrapped as a layer loading err
   const name = path.basename(dir);
   writeLayer(dir, "throw new Error('top boom');\n" + GOOD_PLAN);
   assert.throws(() => buildLayerManifest(dir), (error) => {
-    assert.match(error.message, new RegExp(`^слой ${name}: ошибка при загрузке файлов слоя — top boom`));
+    assert.match(error.message, new RegExp(`^слой ${name}: ошибка при загрузке файлов слоя – top boom`));
     assert.equal(error.cause?.message, 'top boom');
     return true;
   });
   writeLayer(dir, GOOD_PLAN, { words: "throw new Error('words boom');\nexport default [];\n" });
-  assert.throws(() => buildLayerManifest(dir), /ошибка при загрузке файлов слоя — words boom/);
+  assert.throws(() => buildLayerManifest(dir), /ошибка при загрузке файлов слоя – words boom/);
 });
 
 test('an async buildPlan is rejected with a clear hint', (t) => {
@@ -413,7 +413,7 @@ test('an async buildPlan is rejected with a clear hint', (t) => {
   assert.throws(() => buildLayerManifest(dir), new RegExp(`слой ${name}: buildPlan в src/plan\\.js должен быть синхронным`));
 });
 
-// CLI слоя (Task 28) включит source maps — тогда ошибка buildPlan называет строку в самом plan.js.
+// CLI слоя (Task 28) включит source maps – тогда ошибка buildPlan называет строку в самом plan.js.
 test('with source maps on, a throwing buildPlan points at its line in src/plan.js', (t) => {
   const dir = cleanTmp(t);
   const was = process.sourceMapsEnabled ?? false;
@@ -421,14 +421,14 @@ test('with source maps on, a throwing buildPlan points at its line in src/plan.j
   t.after(() => process.setSourceMapsEnabled(was));
   writeLayer(dir, '// строка 1\n// строка 2\nexport default function buildPlan({ wrds }) {\n'
     + '  return { camera: { shots: wrds.map((w) => w) }, items: [] };\n}\n');
-  assert.throws(() => buildLayerManifest(dir), /src\/plan\.js упал при построении плана — .* \(src\/plan\.js:4:\d+\)$/);
+  assert.throws(() => buildLayerManifest(dir), /src\/plan\.js упал при построении плана – .* \(src\/plan\.js:4:\d+\)$/);
 });
 
 test('build errors that mention kit files show @automontage/motion-kit/…, not engine paths', (t) => {
   const dir = cleanTmp(t);
   writeLayer(dir, "import Kit from '@automontage/motion-kit';\n" + GOOD_PLAN);
   assert.throws(() => buildLayerManifest(dir), (error) => {
-    assert.match(error.message, /не собирается plan\.js — src\/plan\.js:\d+:\d+: .*"@automontage\/motion-kit\/index\.js"/);
+    assert.match(error.message, /не собирается plan\.js – src\/plan\.js:\d+:\d+: .*"@automontage\/motion-kit\/index\.js"/);
     assert.ok(!error.message.includes(ENGINE_ROOT), error.message);
     assert.ok(!/src[\\/]motion-kit/.test(error.message), error.message);
     return true;
@@ -444,10 +444,10 @@ test('a real layer-manifest.js in the layer is checked like any other layer file
   writeLayer(dir, "import { n } from '../layer-manifest.js';\n"
     + "export default function buildPlan({face}){ return { hook: n ? 'speaker' : 'enumeration', camera: { face, shots: [{at:0,preset:'W'}] }, items: [] }; }\n");
   fs.writeFileSync(path.join(dir, 'layer-manifest.js'), "import fs from 'node:fs';\nexport const n = fs.readdirSync('.').length;\n");
-  assert.throws(() => buildLayerManifest(dir), /src\/plan\.js → layer-manifest\.js импортирует «node:fs» — встроенный модуль Node/);
+  assert.throws(() => buildLayerManifest(dir), /src\/plan\.js → layer-manifest\.js импортирует «node:fs» – встроенный модуль Node/);
 });
 
-// Ревью Task 19/20: когда нарушивший файл — не сам src/plan.js, а его собственный helper (файл со
+// Ревью Task 19/20: когда нарушивший файл – не сам src/plan.js, а его собственный helper (файл со
 // сценами, который сам тянет remotion), автору негде искать причину, если назван только helper.
 // Сообщение показывает всю цепочку от plan.js и говорит прямо, что убрать из плана.
 test('a forbidden import reached through a layer helper shows the chain from plan.js and names the fix', (t) => {
@@ -456,11 +456,11 @@ test('a forbidden import reached through a layer helper shows the chain from pla
     + "export default function buildPlan({face}){ return { camera: { face, shots: [{at:0,preset:'W'}] }, items: [] }; }\n");
   fs.writeFileSync(path.join(dir, 'src/scenes.jsx'), "import { useCurrentFrame } from 'remotion';\nexport const TITLE = String(useCurrentFrame);\n");
   assert.throws(() => buildLayerManifest(dir),
-    /src\/plan\.js → src\/scenes\.jsx импортирует «remotion» — .*рендерится\. Уберите импорт src\/scenes\.jsx из src\/plan\.js/s);
+    /src\/plan\.js → src\/scenes\.jsx импортирует «remotion» – .*рендерится\. Уберите импорт src\/scenes\.jsx из src\/plan\.js/s);
 });
 
-// Тот же случай, но нарушивший файл лежит глубже: plan.js подключает helper.js, а тот — scenes.jsx
-// с remotion. Цепочка называет оба файла по порядку; подсказка чинить — helper.js (первый файл
+// Тот же случай, но нарушивший файл лежит глубже: plan.js подключает helper.js, а тот – scenes.jsx
+// с remotion. Цепочка называет оба файла по порядку; подсказка чинить – helper.js (первый файл
 // после plan.js), а не сам scenes.jsx, потому что именно его импорт стоит убрать из плана.
 test('a forbidden import reached through two hops shows the full chain and names the first file after plan.js as the fix', (t) => {
   const dir = cleanTmp(t);
@@ -475,7 +475,7 @@ test('a forbidden import reached through two hops shows the full chain and names
 // esbuild перечисляет metafile.inputs в пост-порядке (зависимости раньше того, кто их подключил),
 // поэтому линейный проход в поисках «первого» импортёра нашёл бы src/sfx-library.js (сам файл слоя,
 // уже стоящий в четырёх обязательных импортах entry) по helper-у, который его импортировал бы
-// глубже — и напрасно приписал бы файлу цепочку. sfx-library.js импортирован entry напрямую, и
+// глубже – и напрасно приписал бы файлу цепочку. sfx-library.js импортирован entry напрямую, и
 // приписки быть не должно, даже если plan.js его тоже импортирует.
 test('an entry file that plan.js also imports directly gets no chain suffix', (t) => {
   const dir = cleanTmp(t);
@@ -490,9 +490,9 @@ test('an entry file that plan.js also imports directly gets no chain suffix', (t
 });
 
 // Когда и plan.js, и его helper импортируют один и тот же нарушивший файл напрямую, кратчайший
-// путь от plan.js — короче и понятнее: BFS должен вернуть именно его, независимо от того, в каком
+// путь от plan.js – короче и понятнее: BFS должен вернуть именно его, независимо от того, в каком
 // порядке plan.js написал свои собственные импорты (helper мог оказаться в metafile раньше или
-// позже — это не должно менять найденную цепочку).
+// позже – это не должно менять найденную цепочку).
 test('when both plan.js and a helper import the same offending file, the chain picks the shorter path via plan.js', (t) => {
   for (const order of ['scenes-first', 'helper-first']) {
     const dir = cleanTmp(t);
@@ -507,7 +507,7 @@ test('when both plan.js and a helper import the same offending file, the chain p
 });
 
 // Step 0 задачи 21 (ревью Task 20): цепочка и подсказка «что убрать» могут начинаться не только с
-// plan.js — sfx-library.js тоже входит в четвёрку файлов слоя и может сам подключить чужой helper.
+// plan.js – sfx-library.js тоже входит в четвёрку файлов слоя и может сам подключить чужой helper.
 // Раньше подсказка всегда писала «из плана», даже когда нарушение вообще не касалось plan.js.
 test('a forbidden import reached from sfx-library.js names sfx-library.js as the chain and the fix', (t) => {
   const dir = cleanTmp(t);
@@ -517,7 +517,7 @@ test('a forbidden import reached from sfx-library.js names sfx-library.js as the
     /src\/sfx-library\.js → src\/x\.js импортирует «remotion».*Уберите импорт src\/x\.js из src\/sfx-library\.js/s);
 });
 
-// Подсказка «уберите импорт X из Y» имеет смысл только для React/remotion-протечки — для узла Node
+// Подсказка «уберите импорт X из Y» имеет смысл только для React/remotion-протечки – для узла Node
 // или стороннего пакета убирать нечего (это не JSX-компонент, который надо подключать через id), и
 // подсказка не должна печататься вовсе.
 test('the "remove this import" hint is absent for a Node or third-party package reason', (t) => {
@@ -562,5 +562,5 @@ test('a layer file literally named <stdin> cannot hide its imports behind the en
   } catch (error) {
     return t.skip(`файловая система не допускает такое имя: ${error.code}`);
   }
-  assert.throws(() => buildLayerManifest(dir), /src\/plan\.js импортирует «\.\.\/<stdin>» — имя «<stdin>» занято сборкой слоя/);
+  assert.throws(() => buildLayerManifest(dir), /src\/plan\.js импортирует «\.\.\/<stdin>» – имя «<stdin>» занято сборкой слоя/);
 });

@@ -40,7 +40,7 @@ test('captions can be switched off and the hook and waivers pass through', () =>
   assert.equal(layer.waivers[0].gate, 'G4');
 });
 
-// Task 18 review: captions.hide[i].from/to обязаны быть конечными секундами с from < to — иначе
+// Task 18 review: captions.hide[i].from/to обязаны быть конечными секундами с from < to – иначе
 // опечатка в plan.js (например, «until» вместо «to», давая undefined/NaN, или края задом наперёд)
 // молча дала бы NaN-кадры или окно в обратную сторону в captionSpans, без единой ошибки на этапе
 // layer check.
@@ -66,7 +66,7 @@ test('compileLayer rejects a captions.hide window with a backwards or non-finite
 
 // Граничные случаи сверх плана: ролик без карточек и вставок (только камера) не должен падать,
 // а `until`, заданный далеко за концом композиции, должен обрезаться до durationInFrames, а не
-// бросать непонятную ошибку — это обычная ситуация, когда автор plan.js пишет «до конца ролика»
+// бросать непонятную ошибку – это обычная ситуация, когда автор plan.js пишет «до конца ролика»
 // с запасом.
 test('compileLayer accepts a layer with no items or inserts', () => {
   const layer = kit.compileLayer({ ...plan, items: [], inserts: [] }, cfg);
@@ -102,14 +102,14 @@ test('compileItems rejects a negative at and an at at or after the composition e
     () => kit.compileItems([{ ...base, at: -0.5, until: 1 }], cfg),
     /items a: at не может быть отрицательным/,
   );
-  // cfg.durationInFrames = 250 = 10 с при 25 fps — at ровно на границе тоже поздно.
+  // cfg.durationInFrames = 250 = 10 с при 25 fps – at ровно на границе тоже поздно.
   assert.throws(
     () => kit.compileItems([{ ...base, at: 10, until: 11 }], cfg),
     /items a: начинается после конца ролика/,
   );
 });
 
-// Ревью задачи 23: настоящая причина NaN-габарита в манифесте — enter.from без y ([-200] вместо
+// Ревью задачи 23: настоящая причина NaN-габарита в манифесте – enter.from без y ([-200] вместо
 // [-200, 0]). animOf молча считал out.dy = undefined * (1 - sp) = NaN, и safe-zone (G5) сравнивал
 // NaN с порогом (всегда false) вместо явной ошибки. Проверяем на входе компиляции, а не в гейте.
 test('compileItems rejects a malformed enter.from and names the item', () => {
@@ -129,7 +129,7 @@ test('compileItems rejects a malformed enter.from and names the item', () => {
   assert.doesNotThrow(() => kit.compileItems([{ ...base, enter: { kind: 'fly', from: [-200, 0] } }], cfg));
 });
 
-// Task 19 review: единая точка построения плана — Node-манифест (scripts/motion-kit-node.js) и
+// Task 19 review: единая точка построения плана – Node-манифест (scripts/motion-kit-node.js) и
 // будущий Root.jsx (задача 29) вызывают buildPlan через один и тот же compilePlan, чтобы у гейта
 // и у рендера были одинаковые правила ошибок и один и тот же скомпилированный слой.
 test('compilePlan calls buildPlan with ctx and compiles the result exactly like compileLayer', () => {
@@ -145,7 +145,7 @@ test('compilePlan rejects a non-function buildPlan with a Russian hint', () => {
 
 test('compilePlan wraps a throwing buildPlan instead of leaking a raw stack', () => {
   const buildPlan = () => { throw new Error('boom'); };
-  assert.throws(() => kit.compilePlan(buildPlan, cfg), /src\/plan\.js упал при построении плана — boom/);
+  assert.throws(() => kit.compilePlan(buildPlan, cfg), /src\/plan\.js упал при построении плана – boom/);
 });
 
 test('compilePlan rejects a buildPlan that does not return a plan object', () => {
@@ -158,28 +158,28 @@ test('compilePlan lets kit validation errors (e.g. a missing camera.face) pass t
 });
 
 // Task 19, второе ревью: исходная ошибка buildPlan сохраняется в cause (по её стеку Node-манифест
-// находит строку в src/plan.js), а async buildPlan отклоняется сразу — иначе Promise дошёл бы до
+// находит строку в src/plan.js), а async buildPlan отклоняется сразу – иначе Promise дошёл бы до
 // compileLayer и дал бы непонятную ошибку про camera.face.
 test('compilePlan keeps the original buildPlan error as cause', () => {
   const boom = new Error('boom');
   assert.throws(() => kit.compilePlan(() => { throw boom; }, cfg), (error) => {
-    assert.match(error.message, /src\/plan\.js упал при построении плана — boom/);
+    assert.match(error.message, /src\/plan\.js упал при построении плана – boom/);
     assert.equal(error.cause, boom);
     return true;
   });
 });
 
-// Ревью Task 20: waivers в plan.js — решение автора ролика, не гейта. Если он опечатался (не тот
+// Ревью Task 20: waivers в plan.js – решение автора ролика, не гейта. Если он опечатался (не тот
 // gate, пустая причина, забыл обернуть в массив), это должно упасть уже на layer check понятной
 // русской строкой, а не тихо остаться неприменённым (и тем более не уронить applyWaivers
-// TypeError'ом где-то дальше в отчёте — там форма входа доверия не заслуживает и просто игнорится).
+// TypeError'ом где-то дальше в отчёте – там форма входа доверия не заслуживает и просто игнорится).
 test('compileLayer rejects a malformed waivers entry with the gate list and its index', () => {
   const bad = (waivers) => () => kit.compileLayer({ ...plan, waivers }, cfg);
   assert.throws(bad({ G1: 'x' }), /waivers должен быть массивом/);
   assert.throws(bad([null]), /waivers\[0\]: исключение возможно только для G1, G4, G11 и только с причиной/);
   assert.throws(bad([{ gate: 'G1', reason: 123 }]), /waivers\[0\]/);
   assert.throws(bad([{ gate: 'G5', reason: 'причина' }]), /waivers\[0\]/);
-  // Регистр важен: G1 — да, g1 — нет, это не тот же гейт.
+  // Регистр важен: G1 – да, g1 – нет, это не тот же гейт.
   assert.throws(bad([{ gate: 'g1', reason: 'причина' }]), /waivers\[0\]/);
   assert.throws(bad([{ gate: 'G1', reason: '   ' }]), /waivers\[0\]/);
   // Второй, невалидный элемент называется по своему индексу, а не по первому.
@@ -191,14 +191,14 @@ test('compileLayer keeps the same waivable gate list as scripts/qa/profiles.js W
   assert.deepEqual(kit.WAIVABLE_GATES, [...WAIVABLE]);
 });
 
-// Ревью Task 20 (Step 0 задачи 21): один и тот же список гейтов не должен незаметно расшириться —
+// Ревью Task 20 (Step 0 задачи 21): один и тот же список гейтов не должен незаметно расшириться –
 // ни plan.js, ни applyWaivers не имеют причины его менять.
 test('WAIVABLE_GATES is frozen, so nothing can silently widen the waivable gate list', () => {
   assert.ok(Object.isFrozen(kit.WAIVABLE_GATES));
 });
 
 // plan.js без исключений часто пишет `waivers: null`, а не опускает поле вовсе (JSON.stringify
-// плана, дефолт схемы) — compileWaivers должен принимать null точно так же, как undefined, а не
+// плана, дефолт схемы) – compileWaivers должен принимать null точно так же, как undefined, а не
 // падать на Array.isArray(null) === false с невнятным «waivers должен быть массивом».
 test('compileLayer treats waivers: null the same as an omitted field, not as a malformed entry', () => {
   const layer = kit.compileLayer({ ...plan, waivers: null }, cfg);

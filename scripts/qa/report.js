@@ -15,7 +15,7 @@ function gate(id, title, fields = {}) {
     throw new Error(`gate ${id}: status должен быть одним из ${STATUSES.join('|')}, получено «${g.status}»`);
   }
   // Явный gate(..., { spans: undefined }) перекрыл бы дефолт через spread и уронил бы formatReport
-  // на .slice() ниже — подстраховываемся уже здесь, а не в каждом месте, что читает spans.
+  // на .slice() ниже – подстраховываемся уже здесь, а не в каждом месте, что читает spans.
   if (!Array.isArray(g.spans)) g.spans = [];
   return g;
 }
@@ -28,7 +28,7 @@ function summarize(gates) {
 
 function applyWaivers(gates, waivers = [], waivable = WAIVABLE) {
   // waivers сюда может прийти не только из уже провалидированного compileLayer (src/motion-kit/
-  // compile.js), а прямо из manifest.json на диске или из ручного вызова — форма входа доверия не
+  // compile.js), а прямо из manifest.json на диске или из ручного вызова – форма входа доверия не
   // заслуживает, но падать на ней applyWaivers не должен: просто не находим исключение.
   const list = Array.isArray(waivers) ? waivers : [];
   return gates.map((g) => {
@@ -38,7 +38,7 @@ function applyWaivers(gates, waivers = [], waivable = WAIVABLE) {
   });
 }
 
-// unusedWaivers — исключения плана, которые ничего не сняли (их гейт прошёл или дал только warn):
+// unusedWaivers – исключения плана, которые ничего не сняли (их гейт прошёл или дал только warn):
 // автору видно, что их пора убрать. На вердикт и код выхода они не влияют.
 function buildReport({ kind, profile, gates, inputs = [], layer = null, now = new Date(), error = null, unusedWaivers = [] }) {
   const hasError = error !== null && error !== undefined;
@@ -62,8 +62,8 @@ function exitCodeFor(report) {
 const number = (value) => (typeof value === 'number' ? String(Number(value.toFixed(2))).replace('.', ',') : String(value));
 
 // Сначала округляем секунды до сантисекунд, только потом делим на минуты (иначе 59.999 печаталось
-// бы как «0:60,00» — отдельная минутная часть уже отрезана до .toFixed(2) остатка). Отрицательные
-// секунды (округление на границе нуля, опечатка в плане) зажимаем в 0 — «-1:55,00» ничего не
+// бы как «0:60,00» – отдельная минутная часть уже отрезана до .toFixed(2) остатка). Отрицательные
+// секунды (округление на границе нуля, опечатка в плане) зажимаем в 0 – «-1:55,00» ничего не
 // говорит человеку, который не думает во внутренних кадрах.
 const clock = (sec) => {
   const cs = Math.max(0, Math.round(sec * 100));
@@ -86,23 +86,23 @@ function formatReport(report) {
     const threshold = g.threshold == null ? '' : ` (порог ${typeof g.threshold === 'number' ? number(g.threshold) : g.threshold})`;
     lines.push(`${ICONS[g.status]} ${g.id} ${g.title}${value}${threshold}`);
     for (const span of g.spans.slice(0, 3)) lines.push(`   ${clock(span.fromSec)}–${clock(span.toSec)} ${span.note || ''}`.trimEnd());
-    // Настоящее имя JSON-файла выбирает writeReport, а не formatReport — здесь нечего подставить
+    // Настоящее имя JSON-файла выбирает writeReport, а не formatReport – здесь нечего подставить
     // вместо него, кроме выдуманного плейсхолдера. Указываем на файл рядом, не называя его.
-    if (g.spans.length > 3) lines.push(`   …и ещё ${g.spans.length - 3} — полный список в JSON-отчёте рядом`);
+    if (g.spans.length > 3) lines.push(`   …и ещё ${g.spans.length - 3} – полный список в JSON-отчёте рядом`);
     if (g.hint && g.status !== 'pass') lines.push(`   → ${g.hint}`);
   }
-  // Отчёт, прочитанный с диска, может быть старше поля unusedWaivers. ℹ️, а не ☑️: ☑️ — гейт, который
-  // исключение действительно сняло. Гейт с warn исключение не трогает — объясняем, почему оно лишнее.
+  // Отчёт, прочитанный с диска, может быть старше поля unusedWaivers. ℹ️, а не ☑️: ☑️ – гейт, который
+  // исключение действительно сняло. Гейт с warn исключение не трогает – объясняем, почему оно лишнее.
   for (const w of report.unusedWaivers || []) {
-    lines.push(`ℹ️ исключение ${w.gate} не понадобилось: ${w.reason} — уберите его из plan.js`);
+    lines.push(`ℹ️ исключение ${w.gate} не понадобилось: ${w.reason} – уберите его из plan.js`);
     if (report.gates.some((g) => g.id === w.gate && g.status === 'warn')) {
-      lines.push(`   → ${w.gate} даёт только предупреждение — исключение снимает лишь стоп`);
+      lines.push(`   → ${w.gate} даёт только предупреждение – исключение снимает лишь стоп`);
     }
   }
   return lines.join('\n');
 }
 
-// Запись и rename в одном try — тот же приём, что writeJsonAtomic в scripts/pult/files.js:
+// Запись и rename в одном try – тот же приём, что writeJsonAtomic в scripts/pult/files.js:
 // randomUUID вместо PID (PID переиспользуют разные процессы и контейнеры), 'wx' не даёт молча
 // затереть чужой недописанный временный файл, force-rm подчищает temp при любом сбое записи или
 // переименования. Не переиспользуем саму writeJsonAtomic: она пишет только JSON и не принимает

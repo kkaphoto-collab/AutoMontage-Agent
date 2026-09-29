@@ -1,9 +1,9 @@
-// Дизайн карточек и полноэкранных вставок этого ролика: палитра, шрифты и композиции — свои для каждой темы.
+// Дизайн карточек и полноэкранных вставок этого ролика: палитра, шрифты и композиции – свои для каждой темы.
 import { AbsoluteFill, OffthreadVideo, Sequence, staticFile, useVideoConfig } from 'remotion';
 import { BrowserFrame, REVEAL_FRAMES, ScrollShot, closeWindow, ref25, revealCard } from '@automontage/motion-kit';
 
-// Шрифты ролика — кириллические OFL, свои под тему; Root.jsx только регистрирует их через
-// FontLoader и не выбирает их сам. CAPTION_FONT — какая из семей FONTS достаётся субтитрам.
+// Шрифты ролика – кириллические OFL, свои под тему; Root.jsx только регистрирует их через
+// FontLoader и не выбирает их сам. CAPTION_FONT – какая из семей FONTS достаётся субтитрам.
 export const FONTS = [{ family: 'KitOnest', file: 'fonts/Onest.ttf' }, { family: 'KitOswald', file: 'fonts/Oswald.ttf' }];
 export const CAPTION_FONT = 'KitOnest';
 
@@ -16,7 +16,7 @@ export function SceneContent({ item }) {
   const k = Math.min(width, height) / 1080;
   const { view } = item.props;
   if (view === 'title') {
-    // border-box и overflow: карточка не шире своего box — G5 проверяет именно box.
+    // border-box и overflow: карточка не шире своего box – G5 проверяет именно box.
     return (
       <div style={{ width: '100%', height: '100%', boxSizing: 'border-box', display: 'flex', alignItems: 'center',
         justifyContent: 'center', overflow: 'hidden', background: 'rgba(12,16,24,.82)', borderRadius: Math.round(28 * k),
@@ -25,21 +25,21 @@ export function SceneContent({ item }) {
     );
   }
   if (view === 'browser') {
-    // Прокрутка — после входа карточки (mask, 8 эталонных кадров) и до начала выхода (5 кадров).
+    // Прокрутка – после входа карточки (mask, 8 эталонных кадров) и до начала выхода (5 кадров).
     return (
       <BrowserFrame url={item.props.url}>
         <ScrollShot src={item.props.src} from={item.from + ref25(8, fps)} to={item.until - ref25(5, fps)} scroll={item.props.scroll ?? 1} />
       </BrowserFrame>
     );
   }
-  throw new Error(`scenes.jsx: неизвестный view «${view}» у элемента ${item.id} — добавьте его дизайн в SceneContent`);
+  throw new Error(`scenes.jsx: неизвестный view «${view}» у элемента ${item.id} – добавьте его дизайн в SceneContent`);
 }
 
 // Содержимое полноэкранных вставок screen/scene/donor (сток StockInsert рисует сам). Скриншот на весь
-// кадр — окно браузера внутри safe-зоны (revealCard), иначе в 9:16 хром окна уходит под интерфейс площадки.
+// кадр – окно браузера внутри safe-зоны (revealCard), иначе в 9:16 хром окна уходит под интерфейс площадки.
 export function InsertContent({ insert }) {
   const { fps, width, height } = useVideoConfig();
-  // Оверлей без cover (донор поверх спикера) ролик рисует сам — в своей рамке и в своём окне времени:
+  // Оверлей без cover (донор поверх спикера) ролик рисует сам – в своей рамке и в своём окне времени:
   // заливка на весь кадр здесь закрыла бы спикера на весь ролик.
   if (!insert.cover) return null;
   if (insert.kind === 'screen' && insert.src) {
@@ -55,7 +55,7 @@ export function InsertContent({ insert }) {
     );
   }
   if (insert.kind === 'donor' && insert.src) {
-    // Чужое видео — с его собственного начала и без звука: в звуке слоя только эффекты (G7).
+    // Чужое видео – с его собственного начала и без звука: в звуке слоя только эффекты (G7).
     return (
       <AbsoluteFill>
         <Sequence from={insert.from} durationInFrames={insert.to - insert.from} layout="none">

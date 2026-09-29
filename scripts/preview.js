@@ -234,7 +234,7 @@ function runPreview(options, dependencies = {}) {
         stagedOutput = planned.mixedPath;
       }
       // Барьер: по настоящим дорожкам этого preview (голос после finish.js, музыка из того же lease), пока
-      // lease жив. motion-reel сюда не входит — его brief не lesson и не собирается через layer brief.
+      // lease жив. motion-reel сюда не входит – его brief не lesson и не собирается через layer brief.
       if (kind !== 'motion-reel') {
         gateResult = runPreviewGatesImpl({
           projectDir, brief, manifest, hasMusic: Boolean(prepared.music), range: prepared.range, sourceSha256,
@@ -245,7 +245,7 @@ function runPreview(options, dependencies = {}) {
       }
     });
 
-    // Сначала вердикт, потом решение. Стоп — до полного декодирования: прошлый preview остаётся, промежуточные
+    // Сначала вердикт, потом решение. Стоп – до полного декодирования: прошлый preview остаётся, промежуточные
     // файлы убирает finally. Слой kit без записанного отчёта не публикуется; прочим роликам сбой записи не мешает.
     if (gateResult) log(formatReport(gateResult.report));
     if (gateResult?.writeError) {

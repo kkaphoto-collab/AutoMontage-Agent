@@ -13,7 +13,7 @@ function tmpDirs(t) {
   return { root, lib: path.join(root, 'lib'), target: path.join(root, 'layer', 'public', 'sfx') };
 }
 
-// Простой моно WAV 16 бит из сырых сэмплов — для случаев, где нужен БИТ-В-БИТ контроль над
+// Простой моно WAV 16 бит из сырых сэмплов – для случаев, где нужен БИТ-В-БИТ контроль над
 // сигналом (тест на выбор ПЕРВОГО при точной ничьей), который выражения ffmpeg lavfi не гарантируют.
 function writeMonoWavInt16(file, sampleRate, samples) {
   const n = samples.length;
@@ -32,9 +32,9 @@ test('library dir comes from AUTOMONTAGE_SFX_DIR or the hidden projects/.library
   assert.match(sfxLibraryDir({}), /projects[\\/]\.library[\\/]sfx$/);
 });
 
-// Отклонение (ревью, п.6): дефолтная папка (переменная не задана) вправе молча отсутствовать —
+// Отклонение (ревью, п.6): дефолтная папка (переменная не задана) вправе молча отсутствовать –
 // это обычный клон без приватного пакета звуков. Но явная AUTOMONTAGE_SFX_DIR на несуществующую
-// папку — это опечатка в пути, и она должна стать ошибкой сразу, а не тихим «звуков нет».
+// папку – это опечатка в пути, и она должна стать ошибкой сразу, а не тихим «звуков нет».
 test('an explicit AUTOMONTAGE_SFX_DIR pointing at a missing folder is an error; the default location may be absent silently', () => {
   const missing = path.join(os.tmpdir(), 'no-such-sfx-dir-xyz-123');
   fs.rmSync(missing, { recursive: true, force: true });
@@ -54,8 +54,8 @@ test('copying measures length and a windowed peak, keeps role/volume, hashes and
   const sound = result.library.sounds['whoosh-in'];
   assert.equal(sound.file, 'sfx/whoosh-in.wav');
   assert.ok(Math.abs(sound.lengthSec - 1) < 0.01);
-  // ±0,01 с (не ±0,03) — узкий допуск нарочно: симметричная огибающая ловит мутанты, которые
-  // считают пик от НАЧАЛА окна вместо его ЦЕНТРА («no window centring» — такой сдвиг был бы виден
+  // ±0,01 с (не ±0,03) – узкий допуск нарочно: симметричная огибающая ловит мутанты, которые
+  // считают пик от НАЧАЛА окна вместо его ЦЕНТРА («no window centring» – такой сдвиг был бы виден
   // сразу как половина ширины окна, 15 мс, а не тонет в широком допуске.
   assert.ok(Math.abs(sound.peakSec - 0.4) < 0.01, `peakSec=${sound.peakSec}`);
   assert.equal(sound.volume, 0.8);
@@ -64,9 +64,9 @@ test('copying measures length and a windowed peak, keeps role/volume, hashes and
   assert.equal(sound.role, 'whoosh');
   const copied = path.join(target, 'whoosh-in.wav');
   assert.ok(fs.existsSync(copied));
-  // Скопированные байты — точно исходные (мутант out-empty-copy: пустая/усечённая копия).
+  // Скопированные байты – точно исходные (мутант out-empty-copy: пустая/усечённая копия).
   assert.ok(fs.readFileSync(copied).equals(fs.readFileSync(source)), 'скопированный файл должен быть побайтовой копией исходника');
-  // sha256 — настоящий хеш байт (мутант out-hash-name: не «похоже на хеш», а именно хеш ЭТОГО файла).
+  // sha256 – настоящий хеш байт (мутант out-hash-name: не «похоже на хеш», а именно хеш ЭТОГО файла).
   assert.equal(sound.sha256, crypto.createHash('sha256').update(fs.readFileSync(copied)).digest('hex'));
   assert.match(result.sourceRows[0], /\| `sfx\/whoosh-in\.wav` \| Test license \| https:\/\/example\.com\/sfx \| [a-f0-9]{64} \|/);
   assert.deepEqual(result.skipped, []);
@@ -82,8 +82,8 @@ test('a missing library yields an empty sound set instead of an error', () => {
 });
 
 // Отклонение (п.1, ВАЖНО): argmax одного сэмпла на 8 кГц моно (старое измерение) теряет удары
-// выше ~4 кГц — антиалиасинг при передискретизации на 8 кГц режет именно то, что и есть сам «удар».
-// Ниже — синтетические фикстуры (НЕ сам реальный пакет — тот только читается read-only отдельным
+// выше ~4 кГц – антиалиасинг при передискретизации на 8 кГц режет именно то, что и есть сам «удар».
+// Ниже – синтетические фикстуры (НЕ сам реальный пакет – тот только читается read-only отдельным
 // разовым замером для отчёта), воспроизводящие паттерны, из-за которых старое измерение давало
 // неверный peakSec на реальных impact-ring/click/стерео-свистах: тихий низкий предудар + громкое
 // ВЧ-тело, щелчок перед телом звука, противофазный стерео. Новое измерение (полная полоса 48 кГц,
@@ -124,7 +124,7 @@ test('an anti-phase stereo whoosh is not cancelled by a naive downmix: the peak 
 });
 
 // Мутант «только левый канал»: если бы measure() суммировал мощность лишь channel 0, звук,
-// существующий ЦЕЛИКОМ в правом канале (левый — полная тишина), измерился бы как беззвучный или
+// существующий ЦЕЛИКОМ в правом канале (левый – полная тишина), измерился бы как беззвучный или
 // нашёл бы пик по шуму квантования где угодно. Левый канал здесь буквально '0' (не тихий сигнал,
 // а константный ноль), поэтому мутант не может случайно найти правильный ответ через утечку.
 test('a whoosh present only in the right channel is still found (kills a "left channel only" measurement)', { skip: !toolAvailable('ffmpeg') }, (t) => {
@@ -138,7 +138,7 @@ test('a whoosh present only in the right channel is still found (kills a "left c
 });
 
 // Мутант ревью out-last-max: при точной ничьей окно должно взять ПЕРВОЕ (самое раннее) вхождение
-// максимума, а не последнее — иначе повторяющийся по громкости звук (два одинаковых всплеска)
+// максимума, а не последнее – иначе повторяющийся по громкости звук (два одинаковых всплеска)
 // «уезжает» на последний всплеск вместо настоящего первого удара. Сэмплы собраны вручную (Int16),
 // чтобы обе вспышки были побитово идентичны на одной и той же сетке шага (hop=240=5 мс при 48 кГц).
 test('the loudest window picks the first occurrence on an exact tie, never the last', { skip: !toolAvailable('ffmpeg') }, (t) => {
@@ -150,15 +150,15 @@ test('the loudest window picks the first occurrence on an exact tie, never the l
   const burst = new Int16Array(burstLen);
   for (let i = 0; i < burstLen; i += 1) burst[i] = Math.round(20000 * Math.sin((Math.PI * i) / burstLen));
   const placeAt = (start) => { for (let i = 0; i < burstLen; i += 1) samples[start + i] = burst[i]; };
-  placeAt(9600); // 0,2 с — истинный (первый) удар
-  placeAt(38400); // 0,8 с — точная копия на той же сетке (28800 = 120×240)
+  placeAt(9600); // 0,2 с – истинный (первый) удар
+  placeAt(38400); // 0,8 с – точная копия на той же сетке (28800 = 120×240)
   writeMonoWavInt16(path.join(lib, 'twin-peak.wav'), sr, samples);
   const { peakSec } = copySfxLibrary(lib, target).library.sounds['twin-peak'];
-  assert.ok(peakSec < 0.5, `ожидали первый пик (~0,2 с) при ничьей, получили ${peakSec} — похоже на «последний максимум»`);
+  assert.ok(peakSec < 0.5, `ожидали первый пик (~0,2 с) при ничьей, получили ${peakSec} – похоже на «последний максимум»`);
   assert.ok(Math.abs(peakSec - 0.2) < 0.05, `peakSec=${peakSec}`);
 });
 
-// Отклонение (п.1): необязательный ручной peakSec в library.json — автор точно знает, где удар
+// Отклонение (п.1): необязательный ручной peakSec в library.json – автор точно знает, где удар
 // (или хочет его сдвинуть) и не обязан полагаться на автодетект.
 test('an explicit peakSec in library.json overrides the measured one when it is a valid 0 ≤ peakSec < lengthSec', { skip: !toolAvailable('ffmpeg') }, (t) => {
   const { lib, target } = tmpDirs(t);
@@ -179,11 +179,11 @@ test('an explicit peakSec at or past lengthSec is a clear, named error', { skip:
   assert.throws(() => copySfxLibrary(lib, target), /library\/sfx click\.wav.*sounds\.click\.peakSec.*lengthSec/s);
 });
 
-// Отклонение (ревью round 2, п.4): опечатка вне ^[a-z0-9][a-z0-9-]*\.wav$ не копируется молча — но
+// Отклонение (ревью round 2, п.4): опечатка вне ^[a-z0-9][a-z0-9-]*\.wav$ не копируется молча – но
 // в skipped попадают только файлы, ПОХОЖИЕ на звук (расширения .wav/.mp3/.flac/.aif/.aiff/.ogg/.m4a
 // в любом регистре), которые не подошли под имя. Обычные файлы папки (Notes.txt, README.md,
-// LICENSE) — не опечатка в имени звука, а нормальное содержимое папки, и не должны попадать в
-// skipped вовсе; дотфайлы (.DS_Store) и обычные папки — обычный «мусор» ОС и служебные подпапки.
+// LICENSE) – не опечатка в имени звука, а нормальное содержимое папки, и не должны попадать в
+// skipped вовсе; дотфайлы (.DS_Store) и обычные папки – обычный «мусор» ОС и служебные подпапки.
 test('skipped only lists audio-looking near-misses; ordinary files, dotfiles and folders are ignored silently', (t) => {
   const { lib, target } = tmpDirs(t);
   fs.mkdirSync(lib, { recursive: true });
@@ -203,7 +203,7 @@ test('skipped only lists audio-looking near-misses; ordinary files, dotfiles and
 });
 
 // Отклонение (п.4): `|` и переносы строк в license/sourceUrl ломают ячейку Markdown-таблицы
-// SOURCE.md — экранируем `|` и схлопываем переносы в пробел, как в обычной таблице.
+// SOURCE.md – экранируем `|` и схлопываем переносы в пробел, как в обычной таблице.
 test('a | or a newline in license or sourceUrl does not break the SOURCE.md table row', { skip: !toolAvailable('ffmpeg') }, (t) => {
   const { lib, target } = tmpDirs(t);
   fs.mkdirSync(lib, { recursive: true });
@@ -218,7 +218,7 @@ test('a | or a newline in license or sourceUrl does not break the SOURCE.md tabl
   assert.match(row, /https:\/\/example\.com\/a\\\|b c/);
 });
 
-// Отклонение (п.2, п.6): library.json проходит через readJson (именованные ошибки) и валидируется —
+// Отклонение (п.2, п.6): library.json проходит через readJson (именованные ошибки) и валидируется –
 // опечатка формы становится понятной русской ошибкой с именем звука, а не тихо испорченным
 // src/sfx-library.js или невнятным исключением где-то ниже по пайплайну.
 test('library.json is read with named errors and its shape is validated with clear Russian errors naming the sound', (t) => {
@@ -269,7 +269,7 @@ test('library.json is read with named errors and its shape is validated with cle
   assert.throws(() => copySfxLibrary(lib, target), /library\.json → sourceUrl должен быть строкой/);
 });
 
-// Отклонение (п.4): library.json может назвать звук, для которого нет файла (опечатка в ключе) —
+// Отклонение (п.4): library.json может назвать звук, для которого нет файла (опечатка в ключе) –
 // это должно быть видно вызывающему коду, а не молча остаться прочитанным и неиспользованным.
 test('a library.json sound key with no matching wav comes back in unknownMeta, not silently ignored', { skip: !toolAvailable('ffmpeg') }, (t) => {
   const { lib, target } = tmpDirs(t);
@@ -282,7 +282,7 @@ test('a library.json sound key with no matching wav comes back in unknownMeta, n
   assert.equal('role' in result.library.sounds.pop, false, 'опечатка не должна была «подтянуться» к похожему имени');
 });
 
-// Отклонение (п.3): битая символическая ссылка и папка с именем *.wav — не звук; сообщение
+// Отклонение (п.3): битая символическая ссылка и папка с именем *.wav – не звук; сообщение
 // называет файл и по-русски объясняет причину, а не голый ENOENT/EISDIR из fs.
 test('a dangling symlink named *.wav is rejected with a Russian message naming the file, nothing is left in target', (t) => {
   const { lib, target } = tmpDirs(t);
@@ -300,7 +300,7 @@ test('a directory named *.wav is rejected with a Russian message naming the file
   assert.ok(!fs.existsSync(path.join(target, 'folder.wav')));
 });
 
-// Отклонение (п.3): тишина или пустой поток — явная ошибка с именем файла, а не «пик на нулевой
+// Отклонение (п.3): тишина или пустой поток – явная ошибка с именем файла, а не «пик на нулевой
 // секунде» без единого предупреждения (звук, который потом не будет слышно вообще).
 test('a completely silent wav is a clear, named error, not a silent peakSec: 0', { skip: !toolAvailable('ffmpeg') }, (t) => {
   const { lib, target } = tmpDirs(t);
@@ -322,10 +322,10 @@ test('a zero-length wav is a clear, named error naming the file', { skip: !toolA
 
 // ============================================================================================
 // КРИТИЧЕСКОЕ ревью round 2: прошлая версия «очищала» targetDir от старых *.wav перед копированием
-// (см. git history) — а на любом пересечении путей library и target это стирало ЧУЖИЕ файлы:
+// (см. git history) – а на любом пересечении путей library и target это стирало ЧУЖИЕ файлы:
 // саму библиотеку (target === library, симлинк на неё, вариант по регистру на нечувствительной к
 // регистру ФС, AUTOMONTAGE_SFX_DIR старого слоя, ре-синхронизированного в самого себя) или файлы
-// пользователя (target — родитель библиотеки, или вовсе не та папка). Библиотека не в Git —
+// пользователя (target – родитель библиотеки, или вовсе не та папка). Библиотека не в Git –
 // потеря невосстановима. Вместо очистки copySfxLibrary теперь ОТКАЗЫВАЕТ на непустой targetDir:
 // это закрывает все перечисленные пересечения разом (совпадающая папка непуста, если в библиотеке
 // вообще есть файлы; библиотека ВНУТРИ target делает target непустым; target ВНУТРИ library
@@ -358,7 +358,7 @@ function isCaseInsensitiveFs(dir) {
   return insensitive;
 }
 
-test('CRITICAL: refuses when the target equals the library — nothing in it is touched', { skip: !toolAvailable('ffmpeg') }, (t) => {
+test('CRITICAL: refuses when the target equals the library – nothing in it is touched', { skip: !toolAvailable('ffmpeg') }, (t) => {
   const { lib } = tmpDirs(t);
   fs.mkdirSync(lib, { recursive: true });
   genPop(lib);
@@ -367,7 +367,7 @@ test('CRITICAL: refuses when the target equals the library — nothing in it is 
   assertFilesUnchanged(lib, before);
 });
 
-test('CRITICAL: refuses when the target is a symlink to the library — nothing in it is touched', { skip: !toolAvailable('ffmpeg') }, (t) => {
+test('CRITICAL: refuses when the target is a symlink to the library – nothing in it is touched', { skip: !toolAvailable('ffmpeg') }, (t) => {
   const { root, lib } = tmpDirs(t);
   fs.mkdirSync(lib, { recursive: true });
   genPop(lib);
@@ -381,7 +381,7 @@ test('CRITICAL: refuses when the target is a symlink to the library — nothing 
 test('CRITICAL: refuses when the target differs from the library only by case, on a case-insensitive filesystem', { skip: !toolAvailable('ffmpeg') }, (t) => {
   const { root, lib } = tmpDirs(t);
   fs.mkdirSync(lib, { recursive: true });
-  if (!isCaseInsensitiveFs(root)) { t.skip('файловая система чувствительна к регистру — сценарий неприменим'); return; }
+  if (!isCaseInsensitiveFs(root)) { t.skip('файловая система чувствительна к регистру – сценарий неприменим'); return; }
   genPop(lib);
   const caseVariantTarget = path.join(path.dirname(lib), path.basename(lib).toUpperCase());
   const before = snapshotFiles(lib);
@@ -389,7 +389,7 @@ test('CRITICAL: refuses when the target differs from the library only by case, o
   assertFilesUnchanged(lib, before);
 });
 
-test('CRITICAL: refuses when the target is the library\'s own parent folder — the user\'s own file next to it survives', { skip: !toolAvailable('ffmpeg') }, (t) => {
+test('CRITICAL: refuses when the target is the library\'s own parent folder – the user\'s own file next to it survives', { skip: !toolAvailable('ffmpeg') }, (t) => {
   const { root } = tmpDirs(t);
   const parent = path.join(root, 'parent');
   const lib = path.join(parent, 'sfx');
@@ -403,7 +403,7 @@ test('CRITICAL: refuses when the target is the library\'s own parent folder — 
   assertFilesUnchanged(lib, beforeLib);
 });
 
-test('CRITICAL: refuses to copy into a non-empty user folder — podcast-master.WAV and voice take 3.wav are not touched', { skip: !toolAvailable('ffmpeg') }, (t) => {
+test('CRITICAL: refuses to copy into a non-empty user folder – podcast-master.WAV and voice take 3.wav are not touched', { skip: !toolAvailable('ffmpeg') }, (t) => {
   const { root, lib } = tmpDirs(t);
   fs.mkdirSync(lib, { recursive: true });
   genPop(lib);
@@ -428,8 +428,8 @@ test('a fresh, not-yet-existing target still copies normally', { skip: !toolAvai
   assert.deepEqual(fs.readdirSync(target), ['pop.wav']);
 });
 
-// Правило «только пустая папка» закреплено с обеих сторон: любой файл (не только *.wav) — отказ,
-// уже существующая, но пустая папка — обычное копирование.
+// Правило «только пустая папка» закреплено с обеих сторон: любой файл (не только *.wav) – отказ,
+// уже существующая, но пустая папка – обычное копирование.
 test('a target holding only notes.txt is refused and the note is not touched', { skip: !toolAvailable('ffmpeg') }, (t) => {
   const { lib, target } = tmpDirs(t);
   fs.mkdirSync(lib, { recursive: true });
@@ -458,7 +458,7 @@ test('a target path that is an existing file is a Russian error, not a raw EEXIS
   const file = path.join(root, 'sfx');
   fs.writeFileSync(file, 'не папка');
   assert.throws(() => copySfxLibrary(lib, file), (error) => {
-    assert.match(error.message, /папка звуков слоя .* — это файл/);
+    assert.match(error.message, /папка звуков слоя .* – это файл/);
     assert.doesNotMatch(error.message, /EEXIST/);
     return true;
   });
@@ -507,7 +507,7 @@ test('a symlink planted in the target after the emptiness check is not followed:
 });
 
 // Копия, оборвавшаяся не на EEXIST (например ENOSPC на середине), оставила бы в public/sfx половину
-// звука: её убираем. Это всегда файл этого вызова — с COPYFILE_EXCL чужой файл дал бы EEXIST.
+// звука: её убираем. Это всегда файл этого вызова – с COPYFILE_EXCL чужой файл дал бы EEXIST.
 test('a copy that fails half-way (ENOSPC) leaves no partial sound in the target', { skip: !toolAvailable('ffmpeg') }, (t) => {
   const { lib, target } = tmpDirs(t);
   fs.mkdirSync(lib, { recursive: true });

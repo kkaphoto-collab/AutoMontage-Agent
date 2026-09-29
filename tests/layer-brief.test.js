@@ -25,7 +25,7 @@ test('layer brief is one full-length broll scene without overlay, with preview-r
   assert.equal(brief.status, 'draft');
   assert.equal(brief.brollReviewPolicy, 'preview-required');
   assert.deepEqual(brief.output, { aspect: 'vertical', width: 1080, height: 1920, fps: 25, durationInFrames: 2109 });
-  assert.equal(brief.scenes.length, 1, 'слой — одна сцена: brollEnvelope глушит звук слоя на стыках сцен');
+  assert.equal(brief.scenes.length, 1, 'слой – одна сцена: brollEnvelope глушит звук слоя на стыках сцен');
   const [scene] = brief.scenes;
   assert.deepEqual([scene.scene, scene.start, scene.end], ['broll', 0, 84.36]);
   assert.deepEqual(scene.brollMedia, { kind: 'video', src: entry.reference, sha256: entry.canonicalSha256, trimStartSec: 0, fit: 'cover', audioMode: 'mix', overlay: 'none' });
@@ -91,10 +91,10 @@ test('layer brief publishes the next draft revision for the imported layer and n
   assert.deepEqual(brief.scenes[0].brollMedia, { kind: 'video', src: p.imported.reference, sha256: p.imported.canonicalSha256,
     trimStartSec: 0, fit: 'cover', audioMode: 'mix', overlay: 'none' });
   assert.ok(fs.existsSync(path.join(p.projectDir, 'brief', 'v01-draft.lesson.md')));
-  assert.ok(p.logs.some((line) => /первые и последние 0,12 с приглушён огибающей сцены — эффект хука ставьте не раньше 0,12 с/.test(line)), p.logs.join('\n'));
+  assert.ok(p.logs.some((line) => /первые и последние 0,12 с приглушён огибающей сцены – эффект хука ставьте не раньше 0,12 с/.test(line)), p.logs.join('\n'));
   assert.ok(p.logs.some((line) => line.includes('automontage preview --project-dir') && line.includes('brief/v01-draft.lesson.json')), p.logs.join('\n'));
 
-  // По sha256 ассета тоже находится; --audio mute — звук слоя выключен; следующая ревизия — v02.
+  // По sha256 ассета тоже находится; --audio mute – звук слоя выключен; следующая ревизия – v02.
   assert.equal(await p.run({ asset: p.imported.canonicalSha256, audio: 'mute' }), 0);
   const next = readProjectManifest(p.projectDir);
   assert.equal(next.currentBrief, 'brief/v02-draft.lesson.json');
@@ -114,7 +114,7 @@ test('music outside the project is copied into assets/music; a different file wi
   assert.deepEqual([brief.music.gainDb, brief.music.startSec], [-18, 4.5]);
   assert.deepEqual(brief.music.ducking, { thresholdDb: -40, ratio: 4, attackMs: 10, releaseMs: 260 }, 'профиль слоя avatar');
 
-  // Файл уже в assets/music — берётся как есть; повторная копия тех же байтов — не ошибка.
+  // Файл уже в assets/music – берётся как есть; повторная копия тех же байтов – не ошибка.
   assert.equal(await p.run({ music: copy }), 0);
   assert.equal(readBrief(p.projectDir, readProjectManifest(p.projectDir).currentBrief).music.gainDb, -16, 'avatar по умолчанию −16 дБ');
   assert.equal(await p.run({ music: outside }), 0);
@@ -143,7 +143,7 @@ test('flags are checked before anything is written', { skip: !hasFfmpeg }, async
 
 test('only an asset registered as a checked layer, with a passing render report and an intact bundle, gets a brief', { skip: !hasFfmpeg }, async (t) => {
   const p = await layerProject(t);
-  const notChecked = /ассет не импортирован как проверенный слой .*— сначала automontage layer import --project-dir ".+" --file motion-vNN\/renders\/layer-NN\.mp4/;
+  const notChecked = /ассет не импортирован как проверенный слой .*– сначала automontage layer import --project-dir ".+" --file motion-vNN\/renders\/layer-NN\.mp4/;
   // Ассет, которого нет в реестре (например, импортирован обычным путём Review), и чужой sha256.
   await assert.rejects(p.run({ asset: 'assets/broll/video/00000000-0000-4000-8000-000000000000/media.mp4' }), notChecked);
   await assert.rejects(p.run({ asset: 'f'.repeat(64) }), notChecked);
@@ -172,7 +172,7 @@ test('only an asset registered as a checked layer, with a passing render report 
 });
 
 test('a layer shorter than the source (any frame) or longer by more than a frame is refused', { skip: !hasFfmpeg }, async (t) => {
-  // Короче на кадр — preview упал бы на BROLL_MEDIA_CLIP_OVERRUN; длиннее — слой собран не под этот исходник.
+  // Короче на кадр – preview упал бы на BROLL_MEDIA_CLIP_OVERRUN; длиннее – слой собран не под этот исходник.
   for (const [layerSeconds, pattern] of [[1.96, /слой короче исходника: 1,96 с против 2 с/], [2.2, /слой длиннее исходника: 2,2 с против 2 с/]]) {
     const p = await layerProject(t, { layerSeconds });
     await assert.rejects(p.run(), (error) => pattern.test(error.message)
@@ -183,18 +183,18 @@ test('a layer shorter than the source (any frame) or longer by more than a frame
 
 test('regression: a layer rendered for an earlier source is refused after the source bytes change', { skip: !hasFfmpeg }, async (t) => {
   const p = await layerProject(t);
-  // Та же длина, другие байты: проверка длины этого не видит — только sha256 исходника из отчёта layer render.
+  // Та же длина, другие байты: проверка длины этого не видит – только sha256 исходника из отчёта layer render.
   const replacement = `${p.workspace.sourcePath}.new.mp4`;
   runTool('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc=s=540x960:r=25:d=2',
     '-f', 'lavfi', '-i', 'sine=frequency=300:duration=2', '-shortest', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-c:a', 'aac', replacement]);
   fs.renameSync(replacement, p.workspace.sourcePath);
-  await assert.rejects(p.run(), /слой собран для другого исходника \(отчёт qa\/layer-motion-v01-render-01\.json\) — создайте новый слой: automontage layer new --project-dir ".+" → layer render → layer import/);
+  await assert.rejects(p.run(), /слой собран для другого исходника \(отчёт qa\/layer-motion-v01-render-01\.json\) – создайте новый слой: automontage layer new --project-dir ".+" → layer render → layer import/);
   nothingPublished(p.projectDir);
 });
 
 test('a layer without an audio track is refused with the layer sound on, and works muted', { skip: !hasFfmpeg }, async (t) => {
   const p = await layerProject(t, { layerAudio: false });
-  await assert.rejects(p.run(), /в слое нет звука — укажите --audio mute или пересоберите слой со звуками/);
+  await assert.rejects(p.run(), /в слое нет звука – укажите --audio mute или пересоберите слой со звуками/);
   nothingPublished(p.projectDir);
   assert.equal(await p.run({ audio: 'mute' }), 0);
   const brief = readBrief(p.projectDir, readProjectManifest(p.projectDir).currentBrief);

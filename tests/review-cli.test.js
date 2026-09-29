@@ -17,7 +17,7 @@ const { startReviewServer } = require('../scripts/review/server');
 const { runMediaProcess } = require('../scripts/review/media-process');
 const { makeReviewProject } = require('./helpers/review-project');
 
-// SIGHUP — закрытое окно терминала — убирается так же, как SIGINT/SIGTERM (Step 0 задачи 33).
+// SIGHUP – закрытое окно терминала – убирается так же, как SIGINT/SIGTERM (Step 0 задачи 33).
 const REVIEW_SIGNAL_EXIT_CODES = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 };
 
 async function closeServer(server) {

@@ -4,7 +4,7 @@ import { BROWSER_COLORS, FLASH_FRAMES, flashOpacity, scrollShare } from './scree
 const DOTS = ['#ff5f57', '#febc2e', '#28c840'];
 
 // Хром окна масштабируется под реальное разрешение так же, как safe-зона и радиус вставок:
-// k = короткая сторона кадра / 1080. scale — явный override (например, для превью в интерфейсе
+// k = короткая сторона кадра / 1080. scale – явный override (например, для превью в интерфейсе
 // Review, где composition-разрешение не совпадает с тем, что должен «увидеть» браузер).
 export function BrowserFrame({ url, children, colors = {}, radius = 22, scale, fontFamily = 'sans-serif' }) {
   const { width, height } = useVideoConfig();
@@ -17,7 +17,7 @@ export function BrowserFrame({ url, children, colors = {}, radius = 22, scale, f
       <div style={{ height: px(64), flexShrink: 0, background: c.bar, display: 'flex', alignItems: 'center', gap: px(12), padding: `0 ${px(20)}px` }}>
         {DOTS.map((color) => <span key={color} style={{ width: px(16), height: px(16), borderRadius: px(8), background: color }} />)}
         <span style={{ marginLeft: px(16), flex: 1, height: px(36), borderRadius: px(18), background: 'rgba(255,255,255,.08)', color: c.text,
-          // display:block, а не flex — text-overflow:ellipsis не работает на анонимном
+          // display:block, а не flex – text-overflow:ellipsis не работает на анонимном
           // flex-элементе ни в одном браузере. lineHeight равен той же px(36), что и height,
           // поэтому текст остаётся вертикально отцентрован без display:flex/align-items.
           fontFamily, fontSize: px(22), display: 'block', lineHeight: `${px(36)}px`, padding: `0 ${px(18)}px`,

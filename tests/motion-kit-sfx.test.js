@@ -17,7 +17,7 @@ test('a whoosh starts early so its peak lands on the element entrance', () => {
   assert.deepEqual([cue.startFrame, cue.hitFrame, cue.notable, cue.role], [90, 100, true, 'whoosh']);
 });
 
-// Отклонение от плана Task 30 (п.1): library.json может пометить звук заметным явно — своё слово
+// Отклонение от плана Task 30 (п.1): library.json может пометить звук заметным явно – своё слово
 // сильнее угадывания по роли в обе стороны (ui обычно не заметен, whoosh обычно заметен).
 test('an explicit notable field in the library overrides the role default in both directions', () => {
   const libWithNotable = { sounds: {
@@ -45,9 +45,9 @@ test('typing is a bed that lasts as long as the text types and picks the long lo
   assert.deepEqual([cue.name, cue.durationFrames, cue.bed], ['typing-long', 100, true]);
 });
 
-// BAD CASE (ревью Task 30, п.2): бед — зацикленный звук (typing/typing-long), и его самый громкий
-// момент (peakSec) — это случайный акцент цикла, а не «удар», который нужно подвести под старт
-// набора текста. Библиотека реального пакета даёт typing-long peakSec≈10.9 при lengthSec=12 —
+// BAD CASE (ревью Task 30, п.2): бед – зацикленный звук (typing/typing-long), и его самый громкий
+// момент (peakSec) – это случайный акцент цикла, а не «удар», который нужно подвести под старт
+// набора текста. Библиотека реального пакета даёт typing-long peakSec≈10.9 при lengthSec=12 –
 // раньше это утаскивало бы startFrame к frame 300 - round(10.9*25)=573, что клэмпилось до 0, и
 // бед начинал звучать не с той точки цикла, что реально видно на кадре набора текста.
 test('a bed (typing) ignores the sound\'s peakSec as a lead unless leadFrames is explicit', () => {
@@ -81,7 +81,7 @@ test('pickSound returns a role only when the library has it', () => {
   assert.equal(kit.pickSound({ sounds: {} }, 'whoosh'), null);
 });
 
-// Граничные случаи сверх плана: пустые items/extra не должны падать (ролик без звуков —
+// Граничные случаи сверх плана: пустые items/extra не должны падать (ролик без звуков –
 // обычный случай), thinCues на пустом списке тоже, а явный typeSfx:null должен молча
 // выключать бед набора текста, а не пытаться резолвить несуществующий звук.
 test('empty items and extra sfx lists compile and thin without throwing', () => {
@@ -99,10 +99,10 @@ test('assertMasterDb accepts a finite number <= 0 and names layer.json → sfxMa
   assert.throws(() => kit.assertMasterDb(3), /layer\.json.*sfxMasterDb/);
 });
 
-// Ревью follow-up (Task 28 fix): String("-5") и String(-5) печатают одно и то же "-5" — опечатка
+// Ревью follow-up (Task 28 fix): String("-5") и String(-5) печатают одно и то же "-5" – опечатка
 // «строка вместо числа» в layer.json была не видна в сообщении. Строка теперь в кавычках через
 // JSON.stringify, а NaN/null/undefined остаются как раньше (JSON.stringify дал бы им "null" или
-// сам undefined — хуже, а не лучше).
+// сам undefined – хуже, а не лучше).
 test('assertMasterDb quotes a string value so it cannot be confused with a real number', () => {
   assert.throws(() => kit.assertMasterDb('-5'), /получено "-5"/);
   assert.throws(() => kit.assertMasterDb(NaN), /получено NaN/);
@@ -115,7 +115,7 @@ test('an explicit typeSfx: null suppresses the typing bed', () => {
   assert.deepEqual(cues, []);
 });
 
-// Ревью: 5) границы 0 ≤ hitFrame < durationInFrames — лид звука мог утащить start в минус, но
+// Ревью: 5) границы 0 ≤ hitFrame < durationInFrames – лид звука мог утащить start в минус, но
 // сам hitFrame оставался как задан; звук целиком за пределами композиции (в обе стороны) должен
 // исчезать, а не оставаться в списке с отрицательным или запредельным hitFrame.
 test('a lead longer than the time since element start clamps startFrame to 0 but keeps hitFrame', () => {
@@ -129,7 +129,7 @@ test('cues entirely outside [0, durationInFrames) are dropped, not clamped into 
   assert.deepEqual(kit.sfxFromItems([{ from: 505, sfx: 'whoosh-in' }], [], opts), []);
 });
 
-// 6) leadFrames — в кадрах эталона 25 fps, как и остальные длительности kit (ref25), а не в кадрах
+// 6) leadFrames – в кадрах эталона 25 fps, как и остальные длительности kit (ref25), а не в кадрах
 // композиции: иначе один и тот же plan.js звучит на разных fps по-разному.
 test('leadFrames is interpreted as 25-fps reference frames, not raw composition frames', () => {
   const at25 = kit.sfxFromItems([{ from: 100, sfx: { name: 'whoosh-in', leadFrames: 10 } }], [], opts);
@@ -140,7 +140,7 @@ test('leadFrames is interpreted as 25-fps reference frames, not raw composition 
   assert.equal(zero[0].startFrame, zero[0].hitFrame, 'leadFrames:0 must not get a minimum of 1');
 });
 
-// 7) id должны быть уникальны — иначе React-ключи в SfxTrack дублируются.
+// 7) id должны быть уникальны – иначе React-ключи в SfxTrack дублируются.
 test('cue ids stay unique even when two typing beds start on the same frame', () => {
   const cues = kit.sfxFromItems([
     { from: 50, typeFrom: 50, typeTo: 80 }, { from: 50, typeFrom: 50, typeTo: 90 },
@@ -150,8 +150,8 @@ test('cue ids stay unique even when two typing beds start on the same frame', ()
 });
 
 // 8) неявная подложка набора текста (никто явно не просил typeSfx) молча пропускается, если в
-// библиотеке нет ни typing, ни typing-long — это обычный ролик без такого звука в паке; но явный
-// type.sfx на несуществующий звук — это ошибка автора plan.js, и она должна бросаться, как раньше.
+// библиотеке нет ни typing, ни typing-long – это обычный ролик без такого звука в паке; но явный
+// type.sfx на несуществующий звук – это ошибка автора plan.js, и она должна бросаться, как раньше.
 test('an implicit typing bed is skipped when the library has no typing sound, but an explicit one still throws', () => {
   const empty = { fps: 25, library: { sounds: {} }, durationInFrames: 500 };
   assert.deepEqual(kit.sfxFromItems([{ from: 10, typeFrom: 10, typeTo: 40 }], [], empty), []);

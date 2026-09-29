@@ -1,4 +1,4 @@
-// automontage layer stock — сток Pexels в слой: поиск тем же клиентом, что B-roll discovery в Review
+// automontage layer stock – сток Pexels в слой: поиск тем же клиентом, что B-roll discovery в Review
 // (scripts/broll/pexels.js, requestRemote с разрешёнными хостами и лимитом размера), обрезка и кадрирование
 // под слой без звука в public/stock/pexels-<id>.mp4 и строка источника в public/SOURCE.md.
 // Ключ PEXELS_API_KEY необязателен: без него команда объясняет, как положить клип вручную.
@@ -27,21 +27,21 @@ const DIRECT_HOSTS = Object.freeze(['videos.pexels.com']);
 const PAGE_HOSTS = Object.freeze(['www.pexels.com', 'pexels.com']);
 const MANUAL = 'выберите другой --pick или положите клип вручную в public/stock/';
 
-// Коды ошибок scripts/broll/* — по-русски и без подробностей ответа: в них никогда нет ключа.
+// Коды ошибок scripts/broll/* – по-русски и без подробностей ответа: в них никогда нет ключа.
 const MESSAGES = {
-  BROLL_CONFIG_INVALID: 'PEXELS_API_KEY или .env движка неверного вида (пробелы, управляющие символы, файл больше 64 КБ) — проверьте запись; значение ключа не показываем',
+  BROLL_CONFIG_INVALID: 'PEXELS_API_KEY или .env движка неверного вида (пробелы, управляющие символы, файл больше 64 КБ) – проверьте запись; значение ключа не показываем',
   BROLL_PROVIDER_UNSUPPORTED: 'BROLL_SEARCH_PROVIDER: поддерживается только pexels',
   BROLL_SEARCH_INVALID: '--query и --query-original: пустой, слишком длинный или со служебными символами запрос',
-  BROLL_PROVIDER_FAILED: 'Pexels не ответил или отказал (ключ, лимит запросов или сеть) — повторите позже или положите клип вручную',
-  BROLL_REMOTE_TIMEOUT: `Pexels не ответил вовремя — повторите позже, ${MANUAL}`,
+  BROLL_PROVIDER_FAILED: 'Pexels не ответил или отказал (ключ, лимит запросов или сеть) – повторите позже или положите клип вручную',
+  BROLL_REMOTE_TIMEOUT: `Pexels не ответил вовремя – повторите позже, ${MANUAL}`,
   BROLL_REMOTE_ABORTED: 'запрос к Pexels прерван',
-  BROLL_REMOTE_REJECTED: `скачать клип не вышло (хост не Pexels, не video/mp4, больше 256 МБ или обрыв) — ${MANUAL}`,
+  BROLL_REMOTE_REJECTED: `скачать клип не вышло (хост не Pexels, не video/mp4, больше 256 МБ или обрыв) – ${MANUAL}`,
 };
-// Ошибка без известного кода (чужой провайдер, сбой внутри запроса) — общее русское сообщение: сырой текст
+// Ошибка без известного кода (чужой провайдер, сбой внутри запроса) – общее русское сообщение: сырой текст
 // мог бы унести ключ или ответ сервера. Исходник остаётся в cause для отладки.
 function explain(error, prefix) {
   const known = typeof error?.code === 'string' && Object.hasOwn(MESSAGES, error.code);
-  return new Error(`${prefix}${known ? MESSAGES[error.code] : `неожиданная ошибка — повторите позже, ${MANUAL}`}`, { cause: error });
+  return new Error(`${prefix}${known ? MESSAGES[error.code] : `неожиданная ошибка – повторите позже, ${MANUAL}`}`, { cause: error });
 }
 
 // Сторож ключа: короткий «ключ» совпал бы с любым текстом, поэтому только от 8 символов.
@@ -55,7 +55,7 @@ function clipSeconds(options, layerDir, buildManifest) {
     const stocks = manifest.inserts.filter((i) => i.kind === 'stock');
     const insert = stocks.find((i) => i.id === options.insert);
     if (!insert) {
-      throw new Error(`вставки ${options.insert} нет среди stock-вставок plan.js: ${stocks.map((i) => i.id).join(', ') || 'их нет — добавьте { kind: \'stock\' } в inserts'}`);
+      throw new Error(`вставки ${options.insert} нет среди stock-вставок plan.js: ${stocks.map((i) => i.id).join(', ') || 'их нет – добавьте { kind: \'stock\' } в inserts'}`);
     }
     insertSec = Math.ceil(((insert.to - insert.from) / manifest.fps) * 10 - 1e-9) / 10;
   }
@@ -75,7 +75,7 @@ function loadKey(env, root, { layerName, layer, sec }) {
   } catch (error) {
     if (error?.code !== 'BROLL_KEY_MISSING') throw explain(error, '');
     throw new Error([
-      'PEXELS_API_KEY не задан — поиск стока необязателен, монтаж работает и без него.',
+      'PEXELS_API_KEY не задан – поиск стока необязателен, монтаж работает и без него.',
       `Без ключа: положите свой клип (mp4, ${layer.width}×${layer.height}, не короче ${formatNumber(sec)} с) в ${layerName}/public/stock/,`,
       'пропишите его src во вставке { kind: \'stock\' } в src/plan.js и добавьте строку в public/SOURCE.md',
       '(файл | лицензия, автор | ссылка на источник | SHA-256).',
@@ -84,7 +84,7 @@ function loadKey(env, root, { layerName, layer, sec }) {
   }
 }
 
-// Прямая https-ссылка на mp4 разрешённого хоста — только такие кандидаты попадают в --list и --pick.
+// Прямая https-ссылка на mp4 разрешённого хоста – только такие кандидаты попадают в --list и --pick.
 function isDirect(candidate) {
   let url;
   try { url = new URL(candidate?.downloadUrl); } catch { return false; }
@@ -94,10 +94,10 @@ function isDirect(candidate) {
 
 // Те же девять полей provenance, что candidateProvenance в scripts/review/broll-discovery.js
 // собирает для Review: слой их проверяет напрямую через validateProvenance (scripts/broll/provenance),
-// а не через Review-модуль — код слоя не должен зависеть от кода Review.
+// а не через Review-модуль – код слоя не должен зависеть от кода Review.
 const PROVENANCE_KEYS = ['provider', 'providerAssetId', 'sourcePage', 'author', 'license', 'queryOriginal', 'queryEnglish', 'retrievedAt', 'rendition'];
 
-// id идёт в имя файла, поэтому только цифры; источник, автор и лицензия — тем же контрактом provenance,
+// id идёт в имя файла, поэтому только цифры; источник, автор и лицензия – тем же контрактом provenance,
 // что у B-roll в Review (https-адреса, NFKC-текст без управляющих символов, рендишн).
 function assertCandidate(candidate) {
   let provenance = null;
@@ -105,7 +105,7 @@ function assertCandidate(candidate) {
   const onPexels = (url) => PAGE_HOSTS.includes(new URL(url).hostname);
   if (!provenance || provenance.provider !== 'pexels' || !ASSET_ID.test(provenance.providerAssetId)
     || !onPexels(provenance.sourcePage) || !onPexels(provenance.author.url)) {
-    throw new Error('кандидат Pexels без числового id или с неверными источником, автором или лицензией — выберите другой --pick');
+    throw new Error('кандидат Pexels без числового id или с неверными источником, автором или лицензией – выберите другой --pick');
   }
   return provenance;
 }
@@ -114,7 +114,7 @@ function assertCandidate(candidate) {
 const linkUrl = (url) => markdownCell(url).replace(/\(/gu, '%28').replace(/\)/gu, '%29');
 const linkText = (text) => markdownCell(text).replace(/[[\]]/gu, '\\$&');
 
-// Папки назначения — настоящие папки слоя, не симлинки наружу.
+// Папки назначения – настоящие папки слоя, не симлинки наружу.
 function realDir(dir, label) {
   const stat = fs.lstatSync(dir, { throwIfNoEntry: false });
   if (stat && !stat.isDirectory()) throw new Error(`${label} должна быть папкой, а не симлинком или файлом`);
@@ -149,8 +149,8 @@ async function fetchStock(options, deps, env) {
   const apiKey = loadKey(env, root, { layerName, layer, sec });
   const queryOriginal = options['query-original'] || options.query;
 
-  // preferSize: самый маленький рендишн, покрывающий кадр слоя, — не качаем UHD ради кадра 540×960.
-  // videoHosts: DIRECT_HOSTS — только прямые mp4 Pexels даже смотрят внутрь выбора рендишна; иначе
+  // preferSize: самый маленький рендишн, покрывающий кадр слоя, – не качаем UHD ради кадра 540×960.
+  // videoHosts: DIRECT_HOSTS – только прямые mp4 Pexels даже смотрят внутрь выбора рендишна; иначе
   // preferSize мог бы предпочесть меньший, но зеркальный на player.vimeo.com файл, и весь кандидат
   // потом отсеивался бы isDirect() ниже, хотя у него был подходящий прямой файл покрупнее.
   const provider = (deps.createProvider || createPexelsProvider)({ apiKey, preferSize: { width: layer.width, height: layer.height }, videoHosts: DIRECT_HOSTS });
@@ -163,9 +163,9 @@ async function fetchStock(options, deps, env) {
   }
   if (!Array.isArray(found) || !found.length) throw new Error('Pexels ничего не нашёл: переформулируйте --query');
   const candidates = found.filter(isDirect);
-  if (!candidates.length) throw new Error('у найденных роликов Pexels нет прямой ссылки на mp4 (videos.pexels.com) — переформулируйте --query или положите клип вручную в public/stock/');
+  if (!candidates.length) throw new Error('у найденных роликов Pexels нет прямой ссылки на mp4 (videos.pexels.com) – переформулируйте --query или положите клип вручную в public/stock/');
   if (options.list) {
-    candidates.forEach((c, i) => log(markdownCell(`${i + 1}. ${c.providerAssetId} ${c.width}×${c.height} ${c.durationSec} с — ${c.author?.name} ${c.sourcePage}`)));
+    candidates.forEach((c, i) => log(markdownCell(`${i + 1}. ${c.providerAssetId} ${c.width}×${c.height} ${c.durationSec} с – ${c.author?.name} ${c.sourcePage}`)));
     return 0;
   }
   const candidate = candidates[pick - 1];
@@ -177,7 +177,7 @@ async function fetchStock(options, deps, env) {
   realDir(path.join(publicDir, 'stock'), 'public/stock/');
   const name = `pexels-${candidate.providerAssetId}.mp4`;
   const target = path.join(publicDir, 'stock', name);
-  const exists = () => new Error(`stock/${name} уже есть (клип другой вставки) — не перезаписываем: выберите другой --pick или удалите старый файл, если он больше не нужен`);
+  const exists = () => new Error(`stock/${name} уже есть (клип другой вставки) – не перезаписываем: выберите другой --pick или удалите старый файл, если он больше не нужен`);
   if (fs.existsSync(target)) throw exists();
 
   let response;
@@ -189,7 +189,7 @@ async function fetchStock(options, deps, env) {
     throw explain(error, 'скачивание клипа Pexels: ');
   }
   if (response?.contentType !== 'video/mp4' || !looksLikeMp4(response.bytes)) {
-    throw new Error('Pexels отдал не mp4-видео (другой тип, пустой ответ или больше 256 МБ) — выберите другой --pick');
+    throw new Error('Pexels отдал не mp4-видео (другой тип, пустой ответ или больше 256 МБ) – выберите другой --pick');
   }
 
   const outDir = path.join(layerDir, 'out');
@@ -202,7 +202,7 @@ async function fetchStock(options, deps, env) {
     let probe;
     try { probe = probeVideo(download, { stage: 'layer stock probe' }); } catch { probe = null; }
     if (!probe || probe.width > 4096 || probe.height > 4096) {
-      throw new Error('скачанный файл Pexels не читается как видео до 4096 px — выберите другой --pick');
+      throw new Error('скачанный файл Pexels не читается как видео до 4096 px – выберите другой --pick');
     }
     const { width, height, fps } = layer;
     runTool('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-n', '-i', download, '-t', String(sec),
@@ -220,7 +220,7 @@ async function fetchStock(options, deps, env) {
     fs.rmSync(normalized, { force: true });
   }
 
-  // В SOURCE.md — измеренная длина готового клипа и отрезок исходного ролика, а не запрошенная длина.
+  // В SOURCE.md – измеренная длина готового клипа и отрезок исходного ролика, а не запрошенная длина.
   const duration = probeVideo(target, { stage: 'layer stock result' }).duration;
   const { license, author, sourcePage, retrievedAt, queryEnglish } = provenance;
   const total = Number.isFinite(candidate.durationSec) ? ` из ${formatNumber(candidate.durationSec)} с` : '';
@@ -231,7 +231,7 @@ async function fetchStock(options, deps, env) {
   // Сторож на случай чужого провайдера: ключ не должен попасть в файл, который уходит вместе со слоем.
   if (leaks(row, apiKey)) {
     fs.rmSync(target, { force: true });
-    throw new Error('ответ Pexels содержит ключ — строка источника не записана, клип удалён');
+    throw new Error('ответ Pexels содержит ключ – строка источника не записана, клип удалён');
   }
   const sourceFile = path.join(publicDir, 'SOURCE.md');
   const header = fs.existsSync(sourceFile) ? ''
@@ -242,9 +242,9 @@ async function fetchStock(options, deps, env) {
   log(`✅ сток stock/${name} (${formatNumber(duration)} с): поставьте src: 'stock/${name}' ${where} в src/plan.js`);
   // Ролик Pexels мог оказаться короче заявленного: сверяем измеренную длину с запрошенной всегда.
   if (duration < sec - 1 / layer.fps) {
-    log(`⚠️ клип ${formatNumber(duration)} с короче запрошенных ${formatNumber(sec)} с — последний кадр замрёт; ${MANUAL}`);
+    log(`⚠️ клип ${formatNumber(duration)} с короче запрошенных ${formatNumber(sec)} с – последний кадр замрёт; ${MANUAL}`);
   } else if (insertSec !== null && duration < insertSec - 1 / layer.fps) {
-    log(`⚠️ клип ${formatNumber(duration)} с короче вставки ${options.insert} (${formatNumber(insertSec)} с) — последний кадр замрёт`);
+    log(`⚠️ клип ${formatNumber(duration)} с короче вставки ${options.insert} (${formatNumber(insertSec)} с) – последний кадр замрёт`);
   }
   return 0;
 }

@@ -41,10 +41,10 @@ test('caption lane also fits inside a landscape frame', () => {
   assert.ok(lane.x >= 0 && lane.y >= 0 && lane.x + lane.w <= 1920 && lane.y + lane.h <= 1080);
 });
 
-// Ревью: слияние коротких кусков ничем не ограничено — цепочка из многих слов короче minDur
+// Ревью: слияние коротких кусков ничем не ограничено – цепочка из многих слов короче minDur
 // (0,45 с) с паузами короче hardGap (0,3 с) склеивается в один длинный кусок, который переполняет
 // однострочную полосу субтитров (overflow hidden обрежет текст, и гейт G5 не увидит проблему).
-// Девять слов по 0,02 с с интервалом 0,03 с — каждое своим предложением («да.», «нет.»…), поэтому
+// Девять слов по 0,02 с с интервалом 0,03 с – каждое своим предложением («да.», «нет.»…), поэтому
 // на исходном (нефиксированном) коде цепочка мержится в один кусок из 9 слов / 40 знаков.
 test('merging short chunks stays within maxWords+1 words and maxChars+8 characters', () => {
   const words = ['да.', 'нет.', 'ок.', 'вот.', 'ага.', 'угу.', 'да.', 'нет.', 'ок.']
@@ -60,19 +60,19 @@ test('merging short chunks stays within maxWords+1 words and maxChars+8 characte
 
 // Task 18 review: activeChunk теперь живёт здесь (captions.js), построен на captionSpans через
 // secToFrame, а не на прямом сравнении секунд. Ассерты из плана Task 18 обязаны продолжать
-// выполняться дословно (с явным fps=25 — отклонение round 2: fps больше не имеет дефолта, см. тест
+// выполняться дословно (с явным fps=25 – отклонение round 2: fps больше не имеет дефолта, см. тест
 // ниже про обязательный fps).
 test('activeChunk finds the chunk containing a frame derived from sec via secToFrame, and respects hide', () => {
   const chunks = [{ units: [{ t: 'Раз', s: 0, e: 0.3 }, { t: 'два', s: 0.4, e: 0.6 }], s: 0, e: 0.6, show: 1, text: 'Раз два' }];
   assert.equal(kit.activeChunk(chunks, 0.5, [], 25).text, 'Раз два');
   assert.equal(kit.activeChunk(chunks, 1.2, [], 25), null);
   assert.equal(kit.activeChunk(chunks, 0.5, [{ from: 0.4, to: 0.9 }], 25), null);
-  // fps явно отличный от 25 — тот же chunk, но границы считаются иначе.
+  // fps явно отличный от 25 – тот же chunk, но границы считаются иначе.
   assert.equal(kit.activeChunk(chunks, 0.5, [], 30).text, 'Раз два');
   assert.equal(kit.activeChunk(chunks, 1.2, [], 30), null);
 });
 
-// Отклонение round 2 (ревью minor 6): fps раньше был необязательным (дефолт 25) — молчаливый
+// Отклонение round 2 (ревью minor 6): fps раньше был необязательным (дефолт 25) – молчаливый
 // дефолт маскировал разницу между «забыли передать fps» и «явно хотели 25». Теперь обязателен.
 test('activeChunk requires a positive finite fps and throws a clear error without one', () => {
   const chunks = [{ units: [], s: 0, e: 0.3, show: 1 }];
@@ -82,7 +82,7 @@ test('activeChunk requires a positive finite fps and throws a clear error withou
   assert.throws(() => kit.activeChunk(chunks, 0.1, [], -25), /activeChunk.*fps/);
 });
 
-// Task 18 review: captionSpans — options-объект, секунды переводятся в кадры через secToFrame (тот
+// Task 18 review: captionSpans – options-объект, секунды переводятся в кадры через secToFrame (тот
 // же перевод, что compileInserts), until клэмпится под durationInFrames, и никакие два chunk не
 // должны претендовать на один и тот же кадр.
 test('captionSpans converts seconds via secToFrame, clamps to durationInFrames and drops a chunk past the end', () => {
@@ -91,12 +91,12 @@ test('captionSpans converts seconds via secToFrame, clamps to durationInFrames a
     { units: [], s: 10, e: 10.1, show: 10.2 }, // далеко за durationInFrames ниже
   ];
   const spans = kit.captionSpans(chunks, { fps: 25, durationInFrames: 30 });
-  assert.deepEqual(spans, [{ index: 0, from: 0, until: 30 }], 'until клэмпится под durationInFrames, chunk[1] целиком за концом ролика — его нет вовсе');
+  assert.deepEqual(spans, [{ index: 0, from: 0, until: 30 }], 'until клэмпится под durationInFrames, chunk[1] целиком за концом ролика – его нет вовсе');
 });
 
 // Отклонение round 2 (ревью minor 7): раньше отсутствующий/испорченный fps (например, при
 // опечатке в позиционном вызове) молча превращался в NaN-границы, и captionSpans тихо возвращал
-// пустой список — Subtitles/buildManifest «теряли» субтитры без единой ошибки, объясняющей почему.
+// пустой список – Subtitles/buildManifest «теряли» субтитры без единой ошибки, объясняющей почему.
 test('captionSpans throws a clear error when fps or durationInFrames is missing or invalid', () => {
   const chunks = [{ units: [], s: 0, e: 0.3, show: 1 }];
   assert.throws(() => kit.captionSpans(chunks, { durationInFrames: 100 }), /captionSpans.*fps/);
@@ -119,18 +119,18 @@ test('captionSpans hide windows: unsorted, overlapping, and touching a chunk edg
   const overlap = kit.captionSpans(chunks, { hide: [{ from: 0.6, to: 0.8 }, { from: 0.4, to: 0.64 }], fps: 25, durationInFrames: 1000 });
   assert.deepEqual(overlap, [{ index: 0, from: 0, until: 10 }, { index: 0, from: 20, until: 30 }]);
   // Окно, касающееся ЛЕВОГО края span'а ровно в его начале (from=0..to=0.4=[0,10)) не должно
-  // оставить пустой сегмент [0,0) — только правый остаток.
+  // оставить пустой сегмент [0,0) – только правый остаток.
   const touchLeft = kit.captionSpans(chunks, { hide: [{ from: 0, to: 0.4 }], fps: 25, durationInFrames: 1000 });
   assert.deepEqual(touchLeft, [{ index: 0, from: 10, until: 30 }]);
-  // Окно, касающееся ПРАВОГО края ровно на его конце — только левый остаток.
+  // Окно, касающееся ПРАВОГО края ровно на его конце – только левый остаток.
   const touchRight = kit.captionSpans(chunks, { hide: [{ from: 0.8, to: 1.2 }], fps: 25, durationInFrames: 1000 });
   assert.deepEqual(touchRight, [{ index: 0, from: 0, until: 20 }]);
 });
 
 // Регрессия ревью Task 18 (karaoke.js): buildChunks округляет show через toFixed(3) независимо от
-// следующего chunk.s — на некоторых секундах (chunk0 кончается на 0.4506, chunk1 начинается на
+// следующего chunk.s – на некоторых секундах (chunk0 кончается на 0.4506, chunk1 начинается на
 // 0.4596) show после округления «перепрыгивает» вперёд следующего from на 1 кадр при fps=25.
-// Отклонение (ревью round 2): 0.4506/0.4596 — синтетические секунды с 4 знаками после запятой,
+// Отклонение (ревью round 2): 0.4506/0.4596 – синтетические секунды с 4 знаками после запятой,
 // подобранные именно чтобы попасть в этот стык округления; scripts/transcribe.py всегда округляет
 // секунды до 2 знаков (round(w.start, 2)), поэтому реальный транскрипт таких значений не даст. Тест
 // всё равно ценен: он показывает, что даже 1 кадр перекрытия недопустим при ЛЮБЫХ входных секундах
@@ -145,7 +145,7 @@ test('captionSpans never lets two chunks claim the same frame, even when toFixed
 });
 
 // Пряма проверка: hide, заданный теми же секундами, что insert.from/to, обязан дать те же самые
-// кадры, что compileInserts даёт этой вставке — оба используют secToFrame.
+// кадры, что compileInserts даёт этой вставке – оба используют secToFrame.
 test('a hide window converts the same seconds to the same frame as compileInserts does for an insert', () => {
   const [insert] = kit.compileInserts([{ kind: 'stock', from: 0.58, to: 1.42, src: 'x.mp4' }], { fps: 30, durationInFrames: 1000 });
   const hideFrame = kit.secToFrame(0.58, 30);
@@ -153,7 +153,7 @@ test('a hide window converts the same seconds to the same frame as compileInsert
 });
 
 test('captionFontSize keeps base at a roomy lane and only shrinks for a lane too short to hold it', () => {
-  // 84/(1.1+12/44) ≈ 61.2 — стандартная полоса 1080x1920 не трогает базовый 44px кегль.
+  // 84/(1.1+12/44) ≈ 61.2 – стандартная полоса 1080x1920 не трогает базовый 44px кегль.
   assert.equal(kit.captionFontSize({ base: 44, laneH: 84 }), 44);
   assert.ok(kit.captionFontSize({ base: 44, laneH: 40 }) < 44, 'тесная полоса обязана сжать кегль');
   // Высокая кастомная полоса не должна РАЗДУВАТЬ кегль сверх base.
@@ -165,9 +165,9 @@ test('narrowFitBounds halves the binary-search range toward whichever half still
   assert.deepEqual(kit.narrowFitBounds({ low: 10, high: 50, fits: false }), { low: 10, high: 30 });
 });
 
-// Round 2 (важно, minor 3): fitCaptionWidth — единственная impure зависимость это measure, поэтому
+// Round 2 (важно, minor 3): fitCaptionWidth – единственная impure зависимость это measure, поэтому
 // вся стратегия (skip-if-fits/floor/throw/бинарный поиск) тестируется без браузера и без Remotion.
-// base уже влезает → ни одного лишнего вызова measure — тот же размер, что рисует SSR без эффекта.
+// base уже влезает → ни одного лишнего вызова measure – тот же размер, что рисует SSR без эффекта.
 test('fitCaptionWidth returns base untouched (and measures it only once) when it already fits', () => {
   const measured = [];
   const size = kit.fitCaptionWidth({ base: 44, available: 500, text: 'x', measure: (s) => { measured.push(s); return 100; } });
@@ -175,7 +175,7 @@ test('fitCaptionWidth returns base untouched (and measures it only once) when it
   assert.deepEqual(measured, [44]);
 });
 
-// measure — синтетическая линейная модель (10px ширины на 1pt кегля): база 44pt даёт 440px, что не
+// measure – синтетическая линейная модель (10px ширины на 1pt кегля): база 44pt даёт 440px, что не
 // влезает в available=300 → поиск обязан сойтись к <=30pt (300/10) с точностью бинарного поиска.
 test('fitCaptionWidth binary-searches down to the largest size that fits between the 60% floor and base', () => {
   const measure = (s) => s * 10;
@@ -184,7 +184,7 @@ test('fitCaptionWidth binary-searches down to the largest size that fits between
   assert.ok(size >= kit.round1(44 * 0.6), 'must never go below the 60% floor');
 });
 
-// Round 2 (важно, minor 4): даже 60% кегля не влезает — явная ошибка с текстом chunk, а не молчаливое
+// Round 2 (важно, minor 4): даже 60% кегля не влезает – явная ошибка с текстом chunk, а не молчаливое
 // обрезание или перенос строки на невидимый глазу второй ряд.
 test('fitCaptionWidth throws a clear error naming the chunk text when even the 60% floor does not fit', () => {
   const measure = () => 999999;

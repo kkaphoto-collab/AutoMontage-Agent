@@ -257,8 +257,8 @@ test('URL cap is checked after canonical percent encoding', async () => {
   assert.ok(new URL(oversized).href.length > 500);
   assert.equal((await fixtureProvider({url:oversized}).search(search)).candidates.length, 0);
 });
-// preferSize — для слоя motion-kit: самый маленький mp4, у которого обе стороны не меньше кадра слоя
-// (короткая к короткой, длинная к длинной); если такого нет — самый большой, как по умолчанию.
+// preferSize – для слоя motion-kit: самый маленький mp4, у которого обе стороны не меньше кадра слоя
+// (короткая к короткой, длинная к длинной); если такого нет – самый большой, как по умолчанию.
 const portraitVideo = {
   ...video,
   id: 5,
@@ -302,7 +302,7 @@ test('a malformed preferSize is refused as an invalid search', async () => {
 
 // videoHosts (слой motion-kit): renditions вне списка отсекаются ДО preferSize/fallback, поэтому
 // зеркало на стороннем хосте (player.vimeo.com у самого Pexels API) не может «победить» подходящий
-// по размеру прямой mp4 и увести весь кандидат в него — scripts/layer/stock.js после этого ещё раз
+// по размеру прямой mp4 и увести весь кандидат в него – scripts/layer/stock.js после этого ещё раз
 // сверяет итоговую ссылку со своим DIRECT_HOSTS, это первая линия защиты.
 const mixedHostVideo = {
   ...video,

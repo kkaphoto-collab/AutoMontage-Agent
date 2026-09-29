@@ -7,11 +7,11 @@ const ENGINE_ROOT = path.join(__dirname, '..', '..');
 const SOUND_NAME = /^[a-z0-9][a-z0-9-]*\.wav$/u;
 // Расширения, «похожие на звук», для skipped (ревью round 2, п.4): файл с таким расширением, не
 // подошедший под SOUND_NAME, вероятно опечатка или чужой формат этого же звука. Обычные файлы
-// папки (Notes.txt, README.md, LICENSE) — не опечатка в имени звука, они не попадают сюда вовсе.
+// папки (Notes.txt, README.md, LICENSE) – не опечатка в имени звука, они не попадают сюда вовсе.
 const AUDIO_LIKE_EXT = /\.(wav|mp3|flac|aif|aiff|ogg|m4a)$/i;
 
 // Дефолтная папка вправе молча отсутствовать (обычный клон без приватного пакета звуков), но явная
-// AUTOMONTAGE_SFX_DIR на несуществующую папку — это опечатка в пути, а не «звуков нет»: остальной
+// AUTOMONTAGE_SFX_DIR на несуществующую папку – это опечатка в пути, а не «звуков нет»: остальной
 // код молча получил бы пустую библиотеку и никто не узнал бы, что путь вообще не тот.
 function sfxLibraryDir(env = process.env) {
   if (!env.AUTOMONTAGE_SFX_DIR) return path.join(ENGINE_ROOT, 'projects', '.library', 'sfx');
@@ -23,19 +23,19 @@ function sfxLibraryDir(env = process.env) {
   return resolved;
 }
 
-// Измерение — полная полоса, 48 кГц, стерео: decodeAudio (8 кГц моно, используется гейтами ритма и
+// Измерение – полная полоса, 48 кГц, стерео: decodeAudio (8 кГц моно, используется гейтами ритма и
 // громкости) режет антиалиасингом всё выше ~4 кГц, а у многих эффектов (импакт, шаттер, некоторые
-// вжухи) самый громкий момент именно там (ревью Task 30 на реальном пакете: impact-ring — 0,823 с
-// вместо истинных ~0,44 с). Сумма МОЩНОСТЕЙ каналов (L²+R², а не наивный (L+R)/2-даунмикс) — иначе
+// вжухи) самый громкий момент именно там (ревью Task 30 на реальном пакете: impact-ring – 0,823 с
+// вместо истинных ~0,44 с). Сумма МОЩНОСТЕЙ каналов (L²+R², а не наивный (L+R)/2-даунмикс) – иначе
 // противофазный стерео-эффект гасится почти в тишину ещё до всякого измерения пика.
 const MEASURE_SAMPLE_RATE = 48000;
 const MEASURE_CHANNELS = 2;
-// 30 мс — компромисс из рекомендованного диапазона 20–50 мс: короче ловит резкие «тук»-транзиенты,
+// 30 мс – компромисс из рекомендованного диапазона 20–50 мс: короче ловит резкие «тук»-транзиенты,
 // не размывая их обратно к тихому пред-туку; длиннее уже усредняет соседние отдельные события.
-// Шаг сетки 5 мс — не грубее самой короткой огибающей эффекта, которую есть смысл различать.
+// Шаг сетки 5 мс – не грубее самой короткой огибающей эффекта, которую есть смысл различать.
 const PEAK_WINDOW_SEC = 0.03;
 const PEAK_HOP_SEC = 0.005;
-// Тише — эффект на практике не будет слышен в миксе; отдельная явная ошибка лучше, чем peakSec на
+// Тише – эффект на практике не будет слышен в миксе; отдельная явная ошибка лучше, чем peakSec на
 // случайном шуме квантования.
 const SILENT_PEAK_DB = -60;
 
@@ -44,7 +44,7 @@ function peakWindowDb(peakPower, windowSamples) {
   return 20 * Math.log10(rms + 1e-12);
 }
 
-// Длина и пик по звуку. Пик — центр самого громкого скользящего окна (средняя энергия окна), а не
+// Длина и пик по звуку. Пик – центр самого громкого скользящего окна (средняя энергия окна), а не
 // один сэмпл: так резкий ВЧ-удар честно выигрывает у случайного мгновенного всплеска соседнего шума,
 // и короткий щелчок длиной в пару миллисекунд не перевешивает более длинное и громкое «тело» звука.
 function measure(file) {
@@ -72,7 +72,7 @@ function measure(file) {
     if (windowSum > best) { best = windowSum; bestStart = start; }
   }
   if (peakWindowDb(best, win) < SILENT_PEAK_DB) {
-    throw new Error(`звук беззвучный — самое громкое окно тише ${SILENT_PEAK_DB} дБФС`);
+    throw new Error(`звук беззвучный – самое громкое окно тише ${SILENT_PEAK_DB} дБФС`);
   }
   return {
     lengthSec: Number((n / MEASURE_SAMPLE_RATE).toFixed(3)),
@@ -120,30 +120,30 @@ function readLibraryMeta(metaPath) {
   return meta;
 }
 
-// Копирует звуки в public/sfx слоя, измеряет и хеширует каждый на СКОПИРОВАННОМ файле (провенанс —
+// Копирует звуки в public/sfx слоя, измеряет и хеширует каждый на СКОПИРОВАННОМ файле (провенанс –
 // то, что реально попадёт в слой, а не исходник, который теоретически мог бы отличаться), и
 // возвращает библиотеку для src/sfx-library.js и строки таблицы public/SOURCE.md.
 //
-// targetDir обязан быть пуст (или ещё не существовать) — copySfxLibrary пишет только в свежую
+// targetDir обязан быть пуст (или ещё не существовать) – copySfxLibrary пишет только в свежую
 // public/sfx нового слоя и НИКОГДА не чистит и не трогает то, что там уже лежит. КРИТИЧНО (ревью
-// round 2): более ранняя версия удаляла старые *.wav из targetDir перед копированием — на любом
+// round 2): более ранняя версия удаляла старые *.wav из targetDir перед копированием – на любом
 // пересечении путей library и target (одна и та же папка, симлинк на неё, вариант по регистру на
-// нечувствительной к регистру ФС, target — родитель или просто не та папка) это стирало саму
-// библиотеку или файлы пользователя, а библиотека не в Git — потеря невосстановима. Отказ на
+// нечувствительной к регистру ФС, target – родитель или просто не та папка) это стирало саму
+// библиотеку или файлы пользователя, а библиотека не в Git – потеря невосстановима. Отказ на
 // непустой target закрывает все эти случаи разом: совпадающая с library папка непуста, если в
 // библиотеке вообще есть файлы; library ВНУТРИ target делает target непустым; target ВНУТРИ
 // library безопасен сам по себе, потому что подпапки при сканировании library пропускаются.
 //
 // Имена вне ^[a-z0-9][a-z0-9-]*\.wav$ (кроме самого library.json) не копируются молча: похожие на
-// звук по расширению (.wav/.mp3/.flac/.aif/.aiff/.ogg/.m4a в любом регистре) — опечатка или чужой
-// формат — попадают в `skipped`, чтобы вызывающий код мог предупредить о них; обычные файлы папки
+// звук по расширению (.wav/.mp3/.flac/.aif/.aiff/.ogg/.m4a в любом регистре) – опечатка или чужой
+// формат – попадают в `skipped`, чтобы вызывающий код мог предупредить о них; обычные файлы папки
 // (README.md, LICENSE), дотфайлы (.DS_Store и т.п.) и обычные папки игнорируются тихо и не
 // засоряют `skipped`. Ключ library.json → sounds без соответствующего файла (опечатка в имени)
 // попадает в `unknownMeta`.
 //
-// Битый файл (папка с именем *.wav, битая символическая ссылка, беззвучный или пустой поток) —
+// Битый файл (папка с именем *.wav, битая символическая ссылка, беззвучный или пустой поток) –
 // явная ошибка, названная по имени файла (`library/sfx <имя>: …`); при ней из target удаляется
-// только частичная копия ЭТОГО файла — более ранние успешно скопированные звуки в этом же вызове
+// только частичная копия ЭТОГО файла – более ранние успешно скопированные звуки в этом же вызове
 // остаются на месте (вызывающий код, `layer new`, в ответ на ошибку выбрасывает всю свежую папку
 // слоя целиком, а не пытается угадать, что в target уже безопасно).
 function copySfxLibrary(libraryDir, targetDir) {
@@ -156,9 +156,9 @@ function copySfxLibrary(libraryDir, targetDir) {
     const entryName = dirent.name;
     if (entryName === 'library.json') continue;
     if (SOUND_NAME.test(entryName)) { names.push(entryName); continue; }
-    // Не подошло под имя звука: дотфайлы и обычные папки — молча игнорируем (не опечатка, а
+    // Не подошло под имя звука: дотфайлы и обычные папки – молча игнорируем (не опечатка, а
     // обычный «мусор» ОС или служебная подпапка). Из оставшегося (плоских файлов) в skipped идут
-    // только похожие на звук по расширению — обычные файлы папки вроде README.md или LICENSE не
+    // только похожие на звук по расширению – обычные файлы папки вроде README.md или LICENSE не
     // опечатка в имени звука, а нормальное содержимое папки, и не должны туда попадать.
     if (entryName.startsWith('.') || dirent.isDirectory()) continue;
     if (AUDIO_LIKE_EXT.test(entryName)) skipped.push(entryName);
@@ -166,14 +166,14 @@ function copySfxLibrary(libraryDir, targetDir) {
   names.sort();
   skipped.sort();
 
-  // Файл на месте папки — понятная ошибка, а не голый EEXIST из mkdirSync.
+  // Файл на месте папки – понятная ошибка, а не голый EEXIST из mkdirSync.
   if (fs.statSync(targetDir, { throwIfNoEntry: false })?.isDirectory() === false) {
-    throw new Error(`папка звуков слоя ${targetDir} — это файл, а не папка`);
+    throw new Error(`папка звуков слоя ${targetDir} – это файл, а не папка`);
   }
   fs.mkdirSync(targetDir, { recursive: true });
   const leftovers = fs.readdirSync(targetDir);
   if (leftovers.length) {
-    throw new Error(`папка звуков слоя ${targetDir} не пуста (${leftovers.slice(0, 3).join(', ')}) — copySfxLibrary пишет только в новую public/sfx`);
+    throw new Error(`папка звуков слоя ${targetDir} не пуста (${leftovers.slice(0, 3).join(', ')}) – copySfxLibrary пишет только в новую public/sfx`);
   }
 
   const sounds = {};
@@ -183,9 +183,9 @@ function copySfxLibrary(libraryDir, targetDir) {
       const name = fileName.slice(0, -4);
       const source = path.join(libraryDir, fileName);
       // fs.copyFileSync на битой символической ссылке или на папке даёт голый ENOENT/EISDIR/ENOTSUP
-      // без единого слова о причине — статим цель (следует за ссылкой) и называем её по-русски сами.
+      // без единого слова о причине – статим цель (следует за ссылкой) и называем её по-русски сами.
       const stat = fs.statSync(source, { throwIfNoEntry: false });
-      if (!stat) throw new Error('файл недоступен — возможно, битая символическая ссылка');
+      if (!stat) throw new Error('файл недоступен – возможно, битая символическая ссылка');
       if (!stat.isFile()) throw new Error('не обычный файл (папка с этим именем?)');
       const destination = path.join(targetDir, fileName);
       // COPYFILE_EXCL: файл или ссылка, появившиеся в target после проверки пустоты, не перезаписываются
@@ -194,7 +194,7 @@ function copySfxLibrary(libraryDir, targetDir) {
       try {
         fs.copyFileSync(source, destination, fs.constants.COPYFILE_EXCL);
       } catch (error) {
-        if (error?.code === 'EEXIST') throw new Error('в папке звуков слоя уже появился файл с этим именем — не перезаписываю', { cause: error });
+        if (error?.code === 'EEXIST') throw new Error('в папке звуков слоя уже появился файл с этим именем – не перезаписываю', { cause: error });
         // Любой другой отказ (ENOSPC на середине) оставил бы половину звука. С COPYFILE_EXCL до вызова
         // файла с этим именем не было, значит то, что лежит на его месте, создал этот вызов.
         fs.rmSync(destination, { force: true });
@@ -205,9 +205,9 @@ function copySfxLibrary(libraryDir, targetDir) {
         const { lengthSec, peakSec: measuredPeak } = measure(destination);
         const own = meta.sounds?.[name] || {};
         let peakSec = measuredPeak;
-        // Необязательный ручной peakSec — автор точно знает, где удар (или хочет его сдвинуть), и
+        // Необязательный ручной peakSec – автор точно знает, где удар (или хочет его сдвинуть), и
         // не обязан полагаться на автодетект; форма (число ≥ 0) уже проверена в readLibraryMeta,
-        // здесь — единственная проверка, которую можно сделать только после измерения lengthSec.
+        // здесь – единственная проверка, которую можно сделать только после измерения lengthSec.
         if (own.peakSec !== undefined) {
           if (!(own.peakSec < lengthSec)) {
             throw new Error(`library.json → sounds.${name}.peakSec (${own.peakSec} с) должен быть меньше lengthSec (${lengthSec} с)`);
@@ -220,7 +220,7 @@ function copySfxLibrary(libraryDir, targetDir) {
           ...(own.notable !== undefined ? { notable: own.notable } : {}),
           ...(own.volume !== undefined ? { volume: own.volume } : {}),
         };
-        sourceRows.push(`| \`sfx/${fileName}\` | ${markdownCell(meta.license || 'лицензия не указана в library.json')} | ${markdownCell(meta.sourceUrl || '—')} | ${sha256} |`);
+        sourceRows.push(`| \`sfx/${fileName}\` | ${markdownCell(meta.license || 'лицензия не указана в library.json')} | ${markdownCell(meta.sourceUrl || '–')} | ${sha256} |`);
       } catch (error) {
         // Ничего битого не остаётся в target: половинная копия хуже отсутствия звука вовсе.
         fs.rmSync(destination, { force: true });

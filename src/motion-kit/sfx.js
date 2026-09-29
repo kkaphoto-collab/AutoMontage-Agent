@@ -1,6 +1,6 @@
 import { ref25, secToFrame } from './time.js';
 
-// Дефолты плотности звуков thinCues — тот же профиль гейтов (scripts/qa/profiles.js sfx.minGapSec/
+// Дефолты плотности звуков thinCues – тот же профиль гейтов (scripts/qa/profiles.js sfx.minGapSec/
 // notableGapSec) обязан совпадать с этими числами; экспортируем их, чтобы тест сверял один источник,
 // а не держал одно и то же число вручную в двух местах (Task 24 review).
 export const MIN_GAP_SEC = 0.3;
@@ -41,10 +41,10 @@ export function sfxFromItems(items, extra, { fps, library, durationInFrames }) {
     const role = sound.role || roleOf(sound.name);
     const own = typeof spec === 'object' ? spec.vol : undefined;
     const vol = own ?? sound.volume ?? ROLE_VOLUME[role] ?? 0.5;
-    // leadFrames — в кадрах эталона 25 fps, как и все остальные длительности kit (см. ref25 в
-    // time.js/camera.js/motion.js), а не в кадрах композиции — иначе один и тот же plan.js звучит
+    // leadFrames – в кадрах эталона 25 fps, как и все остальные длительности kit (см. ref25 в
+    // time.js/camera.js/motion.js), а не в кадрах композиции – иначе один и тот же plan.js звучит
     // по-разному на разных fps. Math.round без минимума в 1, поэтому leadFrames:0 остаётся 0.
-    // BAD CASE (ревью Task 30, п.2): бед (typing/typing-long) — зацикленный звук; его peakSec —
+    // BAD CASE (ревью Task 30, п.2): бед (typing/typing-long) – зацикленный звук; его peakSec –
     // самый громкий акцент цикла, а не «удар», который нужно подвести под старт элемента. Без
     // явного leadFrames бед обязан стартовать ровно с hitFrame (набор текста начинается со своей
     // точки), а не утаскиваться к случайному месту в петле.
@@ -55,7 +55,7 @@ export function sfxFromItems(items, extra, { fps, library, durationInFrames }) {
     const durationFrames = Math.max(1, Math.min(bedFrames ?? natural, natural, durationInFrames - startFrame));
     cues.push({
       id: `${sound.name}@${hitFrame}#${n}`, name: sound.name, file: sound.file, startFrame, hitFrame, durationFrames,
-      // library.json звука может пометить его заметным явно (notable) — своё слово сильнее
+      // library.json звука может пометить его заметным явно (notable) – своё слово сильнее
       // угадывания по роли; без явного поля поведение прежнее (роль из NOTABLE_ROLES).
       vol, role, notable: sound.notable ?? NOTABLE_ROLES.includes(role), bed: bedFrames !== null, prio: prio ?? ROLE_PRIO[role] ?? 1,
     });
@@ -67,9 +67,9 @@ export function sfxFromItems(items, extra, { fps, library, durationInFrames }) {
       const span = item.typeTo - item.typeFrom;
       const short = library?.sounds?.typing;
       const long = library?.sounds?.['typing-long'];
-      // Никто явно не просил typeSfx, а в библиотеке нет ни typing, ни typing-long — обычный
+      // Никто явно не просил typeSfx, а в библиотеке нет ни typing, ни typing-long – обычный
       // ролик без такого звука в паке, подложку молча пропускаем. Явный item.typeSfx (даже на
-      // отсутствующий звук) — это запрос автора plan.js, resolveSound должен бросить как раньше.
+      // отсутствующий звук) – это запрос автора plan.js, resolveSound должен бросить как раньше.
       if (item.typeSfx || short || long) {
         const spec = item.typeSfx || (long && short && span > short.lengthSec * fps ? 'typing-long' : 'typing');
         push(spec, item.typeFrom, { bedFrames: span, prio: 0 });
@@ -83,7 +83,7 @@ export function sfxFromItems(items, extra, { fps, library, durationInFrames }) {
   return cues.filter((cue) => cue.hitFrame >= 0 && cue.hitFrame < durationInFrames);
 }
 
-// Не больше одного заметного звука в секунду и не ближе 0,3 с между любыми; набор текста — подложка.
+// Не больше одного заметного звука в секунду и не ближе 0,3 с между любыми; набор текста – подложка.
 export function thinCues(cues, { fps, minGapSec = MIN_GAP_SEC, notableGapSec = NOTABLE_GAP_SEC } = {}) {
   const kept = [];
   const dropped = [];
@@ -111,32 +111,32 @@ export function thinCues(cues, { fps, minGapSec = MIN_GAP_SEC, notableGapSec = N
 
 export const dbToGain = (db) => 10 ** (db / 20);
 
-// masterDb −5 — утверждённый уровень эффектов относительно «горячих» громкостей в плане; движок
+// masterDb −5 – утверждённый уровень эффектов относительно «горячих» громкостей в плане; движок
 // затем подмешивает звук слоя ещё на −18 dB (audioMode "mix", см. D5/D6 в context.md).
-// fade — не жёсткая константа 5 кадров, а ref25(5, fps) эталонных кадров: хвост звука обязан
-// затухать одно и то же ВРЕМЯ на любом fps (5 кадров на 50fps — это вдвое короче по времени, чем
+// fade – не жёсткая константа 5 кадров, а ref25(5, fps) эталонных кадров: хвост звука обязан
+// затухать одно и то же ВРЕМЯ на любом fps (5 кадров на 50fps – это вдвое короче по времени, чем
 // на 25fps). SfxTrack передаёт fps из useVideoConfig(); значение по умолчанию 25 сохраняет старое
 // поведение вызовов без явного fps.
 //
 // Одна проверка masterDb для двух вызывающих: cueVolume (расчёт громкости конкретного cue) и
-// SfxTrack (проверка на кадре 0 компонента, до того как какой-либо cue вообще вызовет cueVolume —
+// SfxTrack (проверка на кадре 0 компонента, до того как какой-либо cue вообще вызовет cueVolume –
 // в настоящем Remotion volume() зовётся только пока Sequence этого cue активна). Название поля
 // (layer.json → sfxMasterDb) в сообщении держим одно на оба места: разойдись оно, тесты на два
 // разных текста перестали бы совпадать при следующей правке. cue.vol клэмпится в [0, 1] отдельно
-// внутри cueVolume — «горячая» громкость в plan.js не должна поднимать итоговый уровень выше
+// внутри cueVolume – «горячая» громкость в plan.js не должна поднимать итоговый уровень выше
 // самого звука. masterDb обязан быть конечным числом ≤ 0: null (например, незаполненное
-// layer.sfxMasterDb) — это не «оставить громкость как есть», а испорченные данные, и он не должен
-// тихо превратиться в 0 дБ. undefined — это и есть «оставить как есть» (аргумент не передан или
+// layer.sfxMasterDb) – это не «оставить громкость как есть», а испорченные данные, и он не должен
+// тихо превратиться в 0 дБ. undefined – это и есть «оставить как есть» (аргумент не передан или
 // передан явно), поэтому только он держит дефолт −5.
-// Строка "-5" в JSON — частая опечатка (число получилось строкой). String("-5") и String(-5)
+// Строка "-5" в JSON – частая опечатка (число получилось строкой). String("-5") и String(-5)
 // печатают одинаково "-5", и в сообщении об ошибке их было не различить. JSON.stringify только
-// для строк — кавычки делают опечатку видимой; для числа/NaN/null/undefined остаётся прежний
+// для строк – кавычки делают опечатку видимой; для числа/NaN/null/undefined остаётся прежний
 // читаемый вид (JSON.stringify(NaN/undefined) дал бы "null"/сам undefined, что хуже String()).
 const describeMasterDb = (value) => (typeof value === 'string' ? JSON.stringify(value) : String(value));
 
 export function assertMasterDb(masterDb) {
   if (!(Number.isFinite(masterDb) && masterDb <= 0)) {
-    throw new Error(`layer.json → sfxMasterDb должен быть конечным числом ≤ 0 (по умолчанию −5 дБ) — получено ${describeMasterDb(masterDb)}`);
+    throw new Error(`layer.json → sfxMasterDb должен быть конечным числом ≤ 0 (по умолчанию −5 дБ) – получено ${describeMasterDb(masterDb)}`);
   }
 }
 

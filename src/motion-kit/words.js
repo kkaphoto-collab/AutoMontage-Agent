@@ -5,10 +5,10 @@ export function normWord(value) {
 }
 
 // transcript/words.json движка: [{start, end, text, words: [{w, s, e}]}] → [{w, t, s, e}]
-// w — как услышал Whisper (по нему ищутся якоря), t — написание на экране.
+// w – как услышал Whisper (по нему ищутся якоря), t – написание на экране.
 export function flattenTranscript(segments, { spelling = {} } = {}) {
   if (!Array.isArray(segments)) throw new Error('transcript: ожидается массив сегментов');
-  // Ключи spelling пишут как удобно человеку («CloudCode», «Ёлка»), а не в normWord-форме —
+  // Ключи spelling пишут как удобно человеку («CloudCode», «Ёлка»), а не в normWord-форме –
   // строим таблицу один раз, чтобы искать по той же нормализации, что и сами слова.
   const spellingByNorm = Object.fromEntries(
     Object.entries(spelling).map(([key, value]) => [normWord(key), value]),
@@ -33,7 +33,7 @@ export function makeAnchors(words, { tolerance = 1.2 } = {}) {
   let cursor = 0;
   const matches = (word, key) => {
     const n = normWord(word.w);
-    // Точное совпадение — всегда. Совпадение по началу слова — только для ключей от 4 символов:
+    // Точное совпадение – всегда. Совпадение по началу слова – только для ключей от 4 символов:
     // короткий ключ («это») иначе цепляет соседнее слово («этот») и сбивает курсор якорей.
     return n === key || (key.length >= 4 && n.startsWith(key));
   };

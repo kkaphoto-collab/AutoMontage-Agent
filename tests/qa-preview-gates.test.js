@@ -120,7 +120,7 @@ test('a broken registry blocks: the project has kit layers but the barrier canno
   const result = runPreviewGates(base(dir), { measureImpl: good });
   assert.equal(result.block, true);
   assert.equal(result.report.gates[0].id, 'L');
-  assert.match(result.report.gates[0].hint, /^реестр слоёв повреждён: qa\/layer-imports\.json \(неверный JSON\) — почините или удалите его/u);
+  assert.match(result.report.gates[0].hint, /^реестр слоёв повреждён: qa\/layer-imports\.json \(неверный JSON\) – почините или удалите его/u);
   assert.doesNotMatch(result.report.gates[0].hint, /layer render/u);
 });
 
@@ -131,7 +131,7 @@ test('qa/ as a link blocks a brief with video and says so', (t) => {
   fs.symlinkSync(elsewhere, path.join(dir, 'qa'), 'dir');
   const result = runPreviewGates(base(dir), { measureImpl: good, write: false });
   assert.equal(result.block, true);
-  assert.match(result.report.gates[0].hint, /^qa\/ — ссылка или файл, а не папка проекта/u);
+  assert.match(result.report.gates[0].hint, /^qa\/ – ссылка или файл, а не папка проекта/u);
   assert.doesNotMatch(result.report.gates[0].hint, /layer render/u);
 });
 
@@ -144,7 +144,7 @@ test('other projects get G8 for reference only: no stop, no warning, no gain adv
     assert.equal(result.report.profile, 'live');
     assert.equal(result.report.layer, null);
     assert.equal(result.report.gates[0].threshold, null);
-    assert.match(result.report.gates[0].hint, /^для справки: разница голос\/музыка [\d,]+ LU; коридор live не откалиброван — музыку по этой цифре не менять$/u);
+    assert.match(result.report.gates[0].hint, /^для справки: разница голос\/музыка [\d,]+ LU; коридор live не откалиброван – музыку по этой цифре не менять$/u);
     assert.doesNotMatch(result.report.gates[0].hint, NO_ADVICE);
   }
 });
@@ -199,7 +199,7 @@ test('an unregistered video that looks like a kit layer render only warns to run
   assert.equal(both.block, false);
   assert.deepEqual(statuses(both), [['L', 'warn'], ['G8', 'pass']]);
 
-  // Обычный сток B-roll без признаков слоя — без гейта L.
+  // Обычный сток B-roll без признаков слоя – без гейта L.
   const plain = project(t);
   writeJson(path.join(plain, 'assets', 'broll', 'video', 'id-stock', 'asset.json'), { label: 'city-night.mp4' });
   const stock = runPreviewGates(base(plain, { brief: { scenes: [videoScene(sha('e'), 'id-stock')] } }), { measureImpl: good });
@@ -219,7 +219,7 @@ test('a failed measurement stops a kit layer and is reference-only for other pro
   assert.match(other.report.gates[0].hint, /^для справки: замер не удался: ffmpeg упал/u);
   assert.doesNotMatch(other.report.gates[0].hint, NO_ADVICE);
 
-  // Замер старой формы гейт отклоняет — это тоже «замер не удался», а не пропуск.
+  // Замер старой формы гейт отклоняет – это тоже «замер не удался», а не пропуск.
   const oldShape = runPreviewGates(base(project(t, { registered: true })), { measureImpl: () => ({ median: 12, p10: 9 }) });
   assert.equal(oldShape.block, true);
   assert.match(oldShape.report.gates[1].hint, /замер не удался: .*gapLu/u);
@@ -255,7 +255,7 @@ test('speech words come from the project transcript; a missing transcript stops 
   assert.deepEqual(seen.windows, [{ s: 0, e: 1.5 }]);
   assert.equal(seen.durationSec, 8);
 
-  // Нет речи в диапазоне — замер не нужен, G8 пропущен.
+  // Нет речи в диапазоне – замер не нужен, G8 пропущен.
   const silent = runPreviewGates(base(dir, { words: undefined, manifest, range: { fromSec: 5, toSec: 8 } }),
     { measureImpl: () => { throw new Error('не должен мерить'); } });
   assert.deepEqual(statuses(silent), [['L', 'pass'], ['G8', 'skipped']]);
@@ -273,7 +273,7 @@ test('two previews in the same millisecond write two separate reports', (t) => {
   assert.equal(JSON.parse(fs.readFileSync(second.paths.jsonPath, 'utf8')).summary.status, 'pass');
   assert.equal(runPreviewGates(base(dir), { measureImpl: good, write: false }).paths, null);
 
-  // Имя занято и одним .txt (JSON потерян) — берётся следующее.
+  // Имя занято и одним .txt (JSON потерян) – берётся следующее.
   fs.writeFileSync(path.join(dir, 'qa', 'preview-20260929-120001-01.txt'), 'старый отчёт');
   const third = runPreviewGates(base(dir), { measureImpl: good, now: () => new Date('2026-09-29T12:00:01.000Z') });
   assert.equal(path.basename(third.paths.jsonPath), 'preview-20260929-120001-02.json');
@@ -281,7 +281,7 @@ test('two previews in the same millisecond write two separate reports', (t) => {
 });
 
 test('a report that cannot be written is still returned with a short reason', (t) => {
-  // Ролик без слоя kit: qa/ — обычный файл, отчёт не записан, но вердикт есть и ничего не блокируется.
+  // Ролик без слоя kit: qa/ – обычный файл, отчёт не записан, но вердикт есть и ничего не блокируется.
   const plain = project(t);
   fs.writeFileSync(path.join(plain, 'qa'), 'не папка');
   const other = runPreviewGates(base(plain, { brief: { scenes: [], music: { gainDb: -16 } } }), { measureImpl: loud });
@@ -292,7 +292,7 @@ test('a report that cannot be written is still returned with a short reason', (t
   assert.match(other.writeError, /qa\//u);
   assert.equal(other.writeError.includes(plain), false);
 
-  // Бриф с видео: реестр за файлом qa/ не прочитать — барьер закрыт, причина записи тоже без абсолютных путей.
+  // Бриф с видео: реестр за файлом qa/ не прочитать – барьер закрыт, причина записи тоже без абсолютных путей.
   const kit = project(t);
   fs.writeFileSync(path.join(kit, 'qa'), 'не папка');
   const closed = runPreviewGates(base(kit), { measureImpl: good });
@@ -301,7 +301,7 @@ test('a report that cannot be written is still returned with a short reason', (t
   assert.equal(closed.paths, null);
   assert.match(closed.writeError, /qa\//u);
   assert.equal(closed.writeError.includes(kit), false);
-  assert.match(closed.report.gates[0].hint, /^qa\/ — ссылка или файл/u);
+  assert.match(closed.report.gates[0].hint, /^qa\/ – ссылка или файл/u);
 });
 
 test('layers with different profiles: G8 uses the profile of the first layer in scene order', (t) => {
@@ -309,7 +309,7 @@ test('layers with different profiles: G8 uses the profile of the first layer in 
   addLayer(dir, { layer: 'motion-v01', render: sha('1'), canonical: sha('a'), profile: 'live' });
   addLayer(dir, { layer: 'motion-v02', render: sha('2'), canonical: sha('b'), profile: 'avatar' });
   const scenes = [videoScene(sha('a'), 'id-motion-v01'), videoScene(sha('b'), 'id-motion-v02')];
-  // 10 LU различает профили: в коридоре avatar (9–15) — pass, ниже коридора live (12–18) — warn.
+  // 10 LU различает профили: в коридоре avatar (9–15) – pass, ниже коридора live (12–18) – warn.
   const gap10 = () => ({ gapLu: 10, voiceLufs: -14, musicLufs: -24, blocks: 100 });
   const first = runPreviewGates(base(dir, { brief: { scenes, music: { gainDb: -16 } } }), { measureImpl: gap10 });
   assert.equal(first.report.profile, 'live');

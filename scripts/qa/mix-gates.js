@@ -1,9 +1,9 @@
 // G8 «Голос и музыка» (D8): разрыв громкости голоса и музыки на участках речи по настоящим дорожкам
-// preview. Голос — звук после finish.js (голос + эффекты слоя, нормализация), музыка — ветка музыки
-// после того же sidechaincompress, что в mix-music.js. Громкость — как LUFS (BS.1770): K-взвешивание
+// preview. Голос – звук после finish.js (голос + эффекты слоя, нормализация), музыка – ветка музыки
+// после того же sidechaincompress, что в mix-music.js. Громкость – как LUFS (BS.1770): K-взвешивание
 // на 48 кГц, сумма мощностей каналов, блоки 50 мс внутри окон речи. Разрыв = 10·log10(ΣP голоса /
 // ΣP музыки) в LU. Гейтинга НАМЕРЕННО нет: окна речи уже выбраны по транскрипту, а тихие места музыки
-// под речью должны тянуть разрыв вверх — это то, что в среднем слышно под голосом. На музыке с
+// под речью должны тянуть разрыв вверх – это то, что в среднем слышно под голосом. На музыке с
 // паузами он поэтому расходится с gated ebur128; при калибровке это не ошибка, которую надо исправлять.
 const { BLOCK_SEC, floatPcmFromFfmpeg, formatSeconds } = require('./audio');
 const { gate } = require('./report');
@@ -54,9 +54,9 @@ function blockPowers(samples, { sampleRate = RATE, channels = CHANNELS } = {}) {
   return out;
 }
 
-// Разрыв громкости по целым блокам внутри окон. null — ни одного блока (нет речи); gapLu −Infinity —
-// голос в окнах речи не звучит (даже если и музыка молчит: сначала чинить голос); Infinity — под речью
-// цифровая тишина музыки. voiceLufs/musicLufs — громкость участков речи без гейтинга.
+// Разрыв громкости по целым блокам внутри окон. null – ни одного блока (нет речи); gapLu −Infinity –
+// голос в окнах речи не звучит (даже если и музыка молчит: сначала чинить голос); Infinity – под речью
+// цифровая тишина музыки. voiceLufs/musicLufs – громкость участков речи без гейтинга.
 function loudnessGap(voicePowers, musicPowers, windows) {
   let voice = 0;
   let music = 0;
@@ -81,7 +81,7 @@ function loudnessGap(voicePowers, musicPowers, windows) {
   };
 }
 
-// voicePath — голос после finish.js. Музыка идёт через те же входы (mixMusicInputArgs: порядок,
+// voicePath – голос после finish.js. Музыка идёт через те же входы (mixMusicInputArgs: порядок,
 // -stream_loop -1, пути) и тот же граф, что в mix-music.js, в режиме stem: 'music'; к его выходу
 // дописано только K-взвешивание. Голос проходит тот же aformat, что ветка [v] микса. Remotion и
 // finish.js отдают стерео, так что это страховка: моно-голос микс сыграл бы стерео-копией −3 дБ на
@@ -107,7 +107,7 @@ function measureVoiceMusic({ voicePath, musicPath, mixOptions, durationSec, wind
     ...mixMusicInputArgs(voicePath, musicPath),
     '-filter_complex', `${buildMusicFilter(mixOptions, { stem: 'music' })};[aout]${weighting}[k]`, '-map', '[k]', '-t', duration,
   ]);
-  // Пустой PCM — «ffmpeg ничего не отдал», а не «музыки нет»: иначе G8 тихо пропустился бы.
+  // Пустой PCM – «ffmpeg ничего не отдал», а не «музыки нет»: иначе G8 тихо пропустился бы.
   if (!voice.length) throw new Error(`нет звука голоса в ${voicePath}`);
   if (!music.length) throw new Error(`нет звука музыки после sidechain: ${musicPath}`);
   return loudnessGap(blockPowers(voice), blockPowers(music), windows);
@@ -126,30 +126,30 @@ const QUIETER = 'возьмите трек тише или усильте duckin
 const LOUDER = 'возьмите трек громче или ослабьте ducking: выше ducking.thresholdDb или меньше ducking.ratio';
 
 // Совет по music.gainDb. Sidechain сжимает музыку по уровню голоса, поэтому gainDb сдвигает разрыв
-// ровно на столько же — но не за пределы схемы: gainDb (текущее значение brief) ограничивает шаг краем
+// ровно на столько же – но не за пределы схемы: gainDb (текущее значение brief) ограничивает шаг краем
 // −60/0 дБ, остаток предлагается добрать треком или ducking. Без gainDb край неизвестен.
 function gainAdvice(m, v, gainDb) {
   const target = `(цель ${number(v.target)} LU)`;
   if (m < v.warnLow) {
     const step = v.target - m;
     const room = gainDb === undefined ? Infinity : gainDb - GAIN_MIN_DB;
-    if (step <= room + EPS) return `: слишком громко под речью — уменьшите music.gainDb примерно на ${number(r1(step))} дБ ${target}`;
-    if (room <= EPS) return `: слишком громко под речью — music.gainDb уже −60 дБ (минимум схемы): ${QUIETER} ${target}`;
-    return `: слишком громко под речью — уменьшите music.gainDb до −60 дБ (ниже схема не даёт); `
-      + `не хватит ещё ~${number(r1(step - room))} дБ — ${QUIETER} ${target}`;
+    if (step <= room + EPS) return `: слишком громко под речью – уменьшите music.gainDb примерно на ${number(r1(step))} дБ ${target}`;
+    if (room <= EPS) return `: слишком громко под речью – music.gainDb уже −60 дБ (минимум схемы): ${QUIETER} ${target}`;
+    return `: слишком громко под речью – уменьшите music.gainDb до −60 дБ (ниже схема не даёт); `
+      + `не хватит ещё ~${number(r1(step - room))} дБ – ${QUIETER} ${target}`;
   }
   if (m > v.warnHigh) {
     const step = m - v.target;
     const room = gainDb === undefined ? Infinity : GAIN_MAX_DB - gainDb;
-    if (step <= room + EPS) return `: музыку почти не слышно — увеличьте music.gainDb примерно на ${number(r1(step))} дБ ${target}`;
-    if (room <= EPS) return `: музыку почти не слышно — music.gainDb уже 0 дБ (максимум схемы): ${LOUDER} ${target}`;
-    return `: музыку почти не слышно — увеличьте music.gainDb до 0 дБ (выше схема не даёт); `
-      + `не хватит ещё ~${number(r1(step - room))} дБ — ${LOUDER} ${target}`;
+    if (step <= room + EPS) return `: музыку почти не слышно – увеличьте music.gainDb примерно на ${number(r1(step))} дБ ${target}`;
+    if (room <= EPS) return `: музыку почти не слышно – music.gainDb уже 0 дБ (максимум схемы): ${LOUDER} ${target}`;
+    return `: музыку почти не слышно – увеличьте music.gainDb до 0 дБ (выше схема не даёт); `
+      + `не хватит ещё ~${number(r1(step - room))} дБ – ${LOUDER} ${target}`;
   }
   return '';
 }
 
-// gainDb — текущий music.gainDb из brief: с ним совет не выходит за −60…0 дБ схемы.
+// gainDb – текущий music.gainDb из brief: с ним совет не выходит за −60…0 дБ схемы.
 function gateVoiceMusic(result, profile, { hasMusic = true, gainDb } = {}) {
   const title = 'Голос и музыка';
   const v = profile.voiceMusic;

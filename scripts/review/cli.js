@@ -4,7 +4,7 @@ const path = require('node:path');
 
 const { startReviewServer } = require('./server');
 
-// SIGHUP — закрытое окно терминала: без обработчика оно осиротило бы сервер вместе с активным
+// SIGHUP – закрытое окно терминала: без обработчика оно осиротило бы сервер вместе с активным
 // импортом и его блокировкой проекта. Убираемся так же, как по SIGTERM (installReviewShutdownHandlers
 // ниже вешает один и тот же shutdown на каждый сигнал из этой таблицы).
 const SIGNAL_EXIT_CODES = Object.freeze({ SIGINT: 130, SIGTERM: 143, SIGHUP: 129 });

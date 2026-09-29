@@ -1,4 +1,4 @@
-// automontage layer import — импорт отрендеренного слоя kit тем же путём, что и в Review (importReviewMedia:
+// automontage layer import – импорт отрендеренного слоя kit тем же путём, что и в Review (importReviewMedia:
 // перекодирование в assets/broll/video/<id>/media.mp4 с sha256), и запись в реестр проверенных слоёв
 // qa/layer-imports.json. Принимается только сам рендер (файл внутри проекта по тому пути и с тем sha256,
 // что во входе «layer» самого свежего отчёта layer render), если этот отчёт целый, без ошибки и не «стоп» и
@@ -20,10 +20,10 @@ const HASH_CHUNK_BYTES = 1024 * 1024;
 
 // Коды importReviewMedia остаются в сообщении, частые получают подсказку, что делать.
 const IMPORT_HINTS = {
-  MEDIA_IMPORT_BUSY: 'идёт другой импорт или правка этого проекта — повторите позже',
-  MEDIA_IMPORT_TOO_LARGE: `файл слоя больше ${VIDEO_MAX_BYTES / 1024 ** 3} ГБ — сократите слой или понизьте качество рендера`,
-  MEDIA_IMPORT_DISK_FULL: 'на диске не хватает места для импорта — освободите место и повторите',
-  MEDIA_IMPORT_DURATION_UNSUPPORTED: 'слой длиннее 30 минут — такой импорт не поддерживается, сократите слой',
+  MEDIA_IMPORT_BUSY: 'идёт другой импорт или правка этого проекта – повторите позже',
+  MEDIA_IMPORT_TOO_LARGE: `файл слоя больше ${VIDEO_MAX_BYTES / 1024 ** 3} ГБ – сократите слой или понизьте качество рендера`,
+  MEDIA_IMPORT_DISK_FULL: 'на диске не хватает места для импорта – освободите место и повторите',
+  MEDIA_IMPORT_DURATION_UNSUPPORTED: 'слой длиннее 30 минут – такой импорт не поддерживается, сократите слой',
 };
 
 function importFailure(error) {
@@ -45,9 +45,9 @@ function resolveLayerFile(projectDir, option, fileSystem) {
   if (!stat) throw new Error(`--file ${option}: файл не найден`);
   const projectReal = fileSystem.realpathSync(projectDir);
   const real = path.join(fileSystem.realpathSync(path.dirname(absolute)), path.basename(absolute));
-  if (!isInside(projectReal, real)) throw new Error(`--file ${option}: файл вне проекта — импортируется только слой из папки проекта (${HINT})`);
-  if (stat.isSymbolicLink()) throw new Error(`--file ${option}: это ссылка — укажите сам файл слоя (${HINT})`);
-  if (!stat.isFile()) throw new Error(`--file ${option}: это не обычный файл — укажите файл слоя (${HINT})`);
+  if (!isInside(projectReal, real)) throw new Error(`--file ${option}: файл вне проекта – импортируется только слой из папки проекта (${HINT})`);
+  if (stat.isSymbolicLink()) throw new Error(`--file ${option}: это ссылка – укажите сам файл слоя (${HINT})`);
+  if (!stat.isFile()) throw new Error(`--file ${option}: это не обычный файл – укажите файл слоя (${HINT})`);
   return { file: real, stat, relativePath: relative(projectReal, real) };
 }
 
@@ -58,7 +58,7 @@ function openLayerFile(fileSystem, { file, stat }, option) {
   const same = () => {
     const now = fileSystem.fstatSync(descriptor);
     if (!now.isFile() || now.dev !== stat.dev || now.ino !== stat.ino || now.size !== stat.size || now.mtimeMs !== stat.mtimeMs) {
-      throw new Error(`--file ${option}: файл изменился во время импорта — повторите команду`);
+      throw new Error(`--file ${option}: файл изменился во время импорта – повторите команду`);
     }
   };
   return { descriptor, same, size: stat.size };
@@ -79,16 +79,16 @@ function hashDescriptor(fileSystem, descriptor) {
 }
 
 // Отчёт layer render, которому можно доверить этот файл: проверял именно его (тот же путь и sha256 во входе
-// «layer»), целый и прошёл (renderReportProblem) и собран для текущего исходника проекта — старый рендер до
+// «layer»), целый и прошёл (renderReportProblem) и собран для текущего исходника проекта – старый рендер до
 // замены исходника или чужой рендер с отчётом из другого проекта не проходят.
 function checkedReport(projectDir, { renderSha256, relativePath, sourcePath, option }) {
   const report = findRenderReport(projectDir, renderSha256, { path: relativePath });
   if (!report) {
     const original = findRenderReport(projectDir, renderSha256);
     if (original) {
-      throw new Error(`--file ${option}: это копия слоя ${original.layerPath}, проверенного в qa/${original.fileName} — импортируйте сам ${original.layerPath}`);
+      throw new Error(`--file ${option}: это копия слоя ${original.layerPath}, проверенного в qa/${original.fileName} – импортируйте сам ${original.layerPath}`);
     }
-    throw new Error('этот файл не проходил layer render: импортируется только проверенный слой — '
+    throw new Error('этот файл не проходил layer render: импортируется только проверенный слой – '
       + `его sha256 нет во входе «layer» ни одного отчёта qa/layer-<слой>-render-NN.json (${relativePath})`);
   }
   const problem = renderReportProblem(report, { layer: relativePath.split('/')[0] });
@@ -141,7 +141,7 @@ async function importLayerFile({ projectDir, sourcePath, file, opened, fileSyste
   }
 }
 
-// deps: log — вывод (тихий в тестах); fileSystem — доступ к файлу слоя; importImpl — importReviewMedia.
+// deps: log – вывод (тихий в тестах); fileSystem – доступ к файлу слоя; importImpl – importReviewMedia.
 async function run(options, deps = {}) {
   const log = deps.log || console.log;
   const fileSystem = deps.fileSystem || fs;
@@ -151,19 +151,19 @@ async function run(options, deps = {}) {
   const layerFile = resolveLayerFile(projectDir, options.file, fileSystem);
   const { relativePath } = layerFile;
   const opened = openLayerFile(fileSystem, layerFile, options.file);
-  let ownsDescriptor = true; // до импорта дескриптор закрывает run, потом — поток импорта
+  let ownsDescriptor = true; // до импорта дескриптор закрывает run, потом – поток импорта
   try {
     opened.same();
     const renderSha256 = hashDescriptor(fileSystem, opened.descriptor);
     opened.same();
-    // Всё, что может отказать, — до импорта: отчёт, исходник, qa/ и реестр; иначе остался бы ассет без записи.
+    // Всё, что может отказать, – до импорта: отчёт, исходник, qa/ и реестр; иначе остался бы ассет без записи.
     const report = checkedReport(projectDir, { renderSha256, relativePath, sourcePath, option: options.file });
     const existing = findByRender(projectDir, renderSha256);
     let asset;
-    // Ассет прошлого импорта цел (layerAsset) — переиспользуем, иначе импортируем заново.
+    // Ассет прошлого импорта цел (layerAsset) – переиспользуем, иначе импортируем заново.
     if (existing && layerAsset(projectDir, existing)) {
       asset = existing;
-      log(`Этот рендер уже импортирован: ${existing.reference} — новый ассет не создан`);
+      log(`Этот рендер уже импортирован: ${existing.reference} – новый ассет не создан`);
     } else {
       ownsDescriptor = false;
       asset = await importLayerFile({ projectDir, sourcePath, file: layerFile.file, opened, fileSystem, importImpl });
@@ -174,7 +174,7 @@ async function run(options, deps = {}) {
   }
 }
 
-// renderFile — путь самого рендера, тот же, что во входе «layer» отчёта (копии в другом месте не принимаются).
+// renderFile – путь самого рендера, тот же, что во входе «layer» отчёта (копии в другом месте не принимаются).
 function register({ projectDir, report, relativePath, renderSha256, asset, existing, log }) {
   const entry = {
     layer: report.layer,

@@ -8,14 +8,14 @@ const { bundle } = require('@remotion/bundler');
 const ROOT = path.resolve(__dirname, '..');
 
 // Настоящий CLI грузит remotion.config.js через esbuild и выполняет его через eval внутри
-// node_modules/@remotion/cli/dist/load-config.js — там __dirname указывает в node_modules,
+// node_modules/@remotion/cli/dist/load-config.js – там __dirname указывает в node_modules,
 // а не в scripts/. Этот тест повторяет тот же путь загрузки конфига, чтобы поймать ту же
 // поломку alias, что видит реальный `npx remotion render`, а не синтетический вызов функции.
 test('remotion.config.js resolves @automontage/motion-kit the same way the Remotion CLI loads it', { timeout: 180_000 }, async t => {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'automontage-motion-kit-alias-'));
   t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
 
-  // Слой лежит ВНЕ движка (projects/<id>/motion-vNN — здесь смоделирован временной папкой).
+  // Слой лежит ВНЕ движка (projects/<id>/motion-vNN – здесь смоделирован временной папкой).
   const layerSrc = path.join(temporary, 'layer', 'src');
   fs.mkdirSync(layerSrc, { recursive: true });
   const entryPoint = path.join(layerSrc, 'index.jsx');
