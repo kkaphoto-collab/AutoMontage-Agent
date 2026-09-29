@@ -1,0 +1,236 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { writeJson } = require('../scripts/layer/common');
+const { buildReport, gate } = require('../scripts/qa/report');
+const { readProjectWords, runPreviewGates } = require('../scripts/qa/preview-gates');
+
+const SOURCE = 's'.repeat(64);
+const sha = (letter) => letter.repeat(64);
+
+// Слой kit: запись реестра, как её пишет layer import, и отчёт layer render настоящей формы (buildReport/gate).
+function addLayer(dir, { layer = 'motion-v01', render = sha('r'), canonical = sha('c'), gates, sourceSha = SOURCE, edit = (r) => r, report = true } = {}) {
+  const renderFile = `${layer}/renders/layer-01.mp4`;
+  const entry = {
+    layer, render: 1, renderFile, renderReport: `qa/layer-${layer}-render-01.json`, renderSha256: render, profile: 'avatar',
+    assetId: `id-${layer}`, reference: `assets/broll/video/id-${layer}/media.mp4`, canonicalSha256: canonical, createdAt: '2026-09-29T10:00:00.000Z',
+  };
+  const file = path.join(dir, 'qa', 'layer-imports.json');
+  const registry = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : { version: 1, imports: [] };
+  registry.imports.push(entry);
+  writeJson(file, registry);
+  if (report) {
+    const built = buildReport({
+      kind: 'layer-render', layer, profile: 'avatar',
+      gates: gates || [gate('G6', 'Длина слоя'), gate('G7', 'Голос в звуке слоя')],
+      inputs: [{ role: 'layer', path: renderFile, sha256: render }, { role: 'source', path: 'source/speaker.mp4', sha256: sourceSha }],
+    });
+    writeJson(path.join(dir, 'qa', `layer-${layer}-render-01.json`), edit(built));
+  }
+  return entry;
+}
+
+function project(t, { registered = false, ...layer } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'preview-gates-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  if (registered) addLayer(dir, layer);
+  return dir;
+}
+
+const videoScene = (canonical = sha('c'), id = 'id-motion-v01') => ({
+  scene: 'broll', start: 0, end: 10, brollMedia: { kind: 'video', src: `assets/broll/video/${id}/media.mp4`, sha256: canonical, trimStartSec: 0, fit: 'cover', audioMode: 'mix' },
+});
+const brief = { scenes: [videoScene()], music: { gainDb: -16 } };
+const words = [{ s: 1, e: 3 }, { s: 4, e: 6 }];
+const range = { fromSec: 0, toSec: 10 };
+const loud = () => ({ gapLu: 0.5, voiceLufs: -14, musicLufs: -14.5, blocks: 100 });
+const good = () => ({ gapLu: 12, voiceLufs: -14, musicLufs: -26, blocks: 100 });
+const base = (projectDir, extra = {}) => ({ projectDir, brief, hasMusic: true, words, range, sourceSha256: SOURCE,
+  finishedPath: 'finished.mp4', musicPath: 'music.mp3', mixArgs: ['--gain', '-16'], ...extra });
+const statuses = (result) => result.report.gates.map((g) => [g.id, g.status]);
+
+test('a kit layer with music at the voice level blocks the preview', (t) => {
+  let seen = null;
+  const result = runPreviewGates(base(project(t, { registered: true })), { measureImpl: (input) => { seen = input; return loud(); } });
+  assert.equal(result.block, true);
+  assert.deepEqual(statuses(result), [['L', 'pass'], ['G8', 'fail']]);
+  assert.equal(result.report.kind, 'preview');
+  assert.equal(result.report.profile, 'avatar');
+  assert.equal(result.report.layer, 'motion-v01');
+  // Замер получает настоящие входы preview: окна речи от начала диапазона и разобранные параметры музыки.
+  assert.deepEqual(seen.windows, [{ s: 1, e: 3 }, { s: 4, e: 6 }]);
+  assert.equal(seen.voicePath, 'finished.mp4');
+  assert.equal(seen.musicPath, 'music.mp3');
+  assert.equal(seen.durationSec, 10);
+  assert.equal(seen.mixOptions.gain, -16);
+  assert.ok(fs.existsSync(result.paths.jsonPath) && fs.existsSync(result.paths.textPath));
+});
+
+test('a kit layer with balanced music passes and is not blocked', (t) => {
+  const result = runPreviewGates(base(project(t, { registered: true })), { measureImpl: good });
+  assert.equal(result.block, false);
+  assert.deepEqual(statuses(result), [['L', 'pass'], ['G8', 'pass']]);
+});
+
+test('a kit layer whose render failed blocks even with good music', (t) => {
+  const dir = project(t, { registered: true, gates: [gate('G6', 'Длина слоя'), gate('G7', 'Голос в звуке слоя', { status: 'fail' })] });
+  const result = runPreviewGates(base(dir), { measureImpl: good });
+  assert.equal(result.block, true);
+  assert.deepEqual(statuses(result), [['L', 'fail'], ['G8', 'pass']]);
+  assert.match(result.report.gates[0].hint, /слой не прошёл проверки/u);
+});
+
+test('a hand-edited render report summary does not pass gate L', (t) => {
+  const dir = project(t, { registered: true, gates: [gate('G6', 'Длина слоя'), gate('G7', 'Голос в звуке слоя', { status: 'fail' })],
+    edit: (r) => ({ ...r, summary: { status: 'pass', fail: 0, warn: 0 } }) });
+  const result = runPreviewGates(base(dir), { measureImpl: good });
+  assert.equal(result.block, true);
+  assert.equal(result.report.gates[0].status, 'fail');
+  assert.match(result.report.gates[0].hint, /правили вручную/u);
+});
+
+test('a render report without G6 and G7 or with a missing report does not pass gate L', (t) => {
+  const partial = runPreviewGates(base(project(t, { registered: true, gates: [gate('G6', 'Длина слоя')] })), { measureImpl: good });
+  assert.equal(partial.block, true);
+  assert.match(partial.report.gates[0].hint, /нет G7/u);
+  const missing = runPreviewGates(base(project(t, { registered: true, report: false })), { measureImpl: good });
+  assert.equal(missing.block, true);
+  assert.match(missing.report.gates[0].hint, /нет отчёта layer render/u);
+});
+
+test('a layer rendered for another source does not pass gate L', (t) => {
+  const result = runPreviewGates(base(project(t, { registered: true, sourceSha: sha('9') })), { measureImpl: good });
+  assert.equal(result.block, true);
+  assert.match(result.report.gates[0].hint, /другого исходника/u);
+});
+
+test('a broken registry blocks: the project has kit layers but the barrier cannot trust them', (t) => {
+  const dir = project(t);
+  fs.mkdirSync(path.join(dir, 'qa'));
+  fs.writeFileSync(path.join(dir, 'qa', 'layer-imports.json'), '{broken');
+  const result = runPreviewGates(base(dir), { measureImpl: good });
+  assert.equal(result.block, true);
+  assert.equal(result.report.gates[0].id, 'L');
+  assert.match(result.report.gates[0].hint, /повреждён/u);
+});
+
+test('other projects only get warnings and are never blocked', (t) => {
+  const result = runPreviewGates(base(project(t)), { measureImpl: loud });
+  assert.equal(result.block, false);
+  assert.deepEqual(statuses(result), [['G8', 'warn']]);
+  assert.equal(result.report.profile, 'live');
+  assert.equal(result.report.layer, null);
+  assert.match(result.report.gates[0].hint, /только предупреждение/u);
+});
+
+test('every video scene is checked: one bad layer of two blocks and is named', (t) => {
+  const dir = project(t);
+  addLayer(dir, { layer: 'motion-v01', render: sha('1'), canonical: sha('a') });
+  addLayer(dir, { layer: 'motion-v02', render: sha('2'), canonical: sha('b'), report: false });
+  const twoLayers = { scenes: [videoScene(sha('a'), 'id-motion-v01'), { scene: 'fullscreen', start: 10, end: 12 }, videoScene(sha('b'), 'id-motion-v02')], music: { gainDb: -16 } };
+  let calls = 0;
+  const result = runPreviewGates(base(dir, { brief: twoLayers }), { measureImpl: () => { calls += 1; return good(); } });
+  assert.equal(result.block, true);
+  assert.deepEqual(statuses(result), [['L', 'fail'], ['G8', 'pass']]);
+  assert.match(result.report.gates[0].hint, /motion-v02/u);
+  assert.doesNotMatch(result.report.gates[0].hint, /motion-v01/u);
+  assert.equal(result.report.layer, 'motion-v01, motion-v02');
+  assert.equal(calls, 1);
+
+  addLayer(dir, { layer: 'motion-v02', render: sha('2'), canonical: sha('b') });
+  const fixed = runPreviewGates(base(dir, { brief: twoLayers }), { measureImpl: good });
+  assert.equal(fixed.block, false);
+  assert.deepEqual(statuses(fixed), [['L', 'pass'], ['G8', 'pass']]);
+});
+
+test('an unregistered video that looks like a kit layer render only warns to run layer import', (t) => {
+  const dir = project(t);
+  writeJson(path.join(dir, 'assets', 'broll', 'video', 'id-review', 'asset.json'), { label: 'layer-03.mp4' });
+  const viaReview = { scenes: [videoScene(sha('d'), 'id-review')], music: { gainDb: -16 } };
+  const result = runPreviewGates(base(dir, { brief: viaReview }), { measureImpl: loud });
+  assert.equal(result.block, false);
+  assert.deepEqual(statuses(result), [['L', 'warn'], ['G8', 'warn']]);
+  assert.match(result.report.gates[0].hint, /layer import/u);
+
+  // Рядом с проверенным слоем такая сцена тоже только предупреждение и не блокирует.
+  addLayer(dir);
+  const mixed = { scenes: [videoScene(), videoScene(sha('d'), 'id-review')], music: { gainDb: -16 } };
+  const both = runPreviewGates(base(dir, { brief: mixed }), { measureImpl: good });
+  assert.equal(both.block, false);
+  assert.deepEqual(statuses(both), [['L', 'warn'], ['G8', 'pass']]);
+
+  // Обычный сток B-roll без признаков слоя — без гейта L.
+  const plain = project(t);
+  writeJson(path.join(plain, 'assets', 'broll', 'video', 'id-stock', 'asset.json'), { label: 'city-night.mp4' });
+  const stock = runPreviewGates(base(plain, { brief: { scenes: [videoScene(sha('e'), 'id-stock')] } }), { measureImpl: good });
+  assert.deepEqual(statuses(stock), [['G8', 'pass']]);
+});
+
+test('a failed measurement stops a kit layer and only warns other projects', (t) => {
+  const boom = () => { throw new Error('ffmpeg упал'); };
+  const kit = runPreviewGates(base(project(t, { registered: true })), { measureImpl: boom });
+  assert.equal(kit.block, true);
+  assert.deepEqual(statuses(kit), [['L', 'pass'], ['G8', 'fail']]);
+  assert.match(kit.report.gates[1].hint, /замер не удался: ffmpeg упал/u);
+
+  const other = runPreviewGates(base(project(t)), { measureImpl: boom });
+  assert.equal(other.block, false);
+  assert.deepEqual(statuses(other), [['G8', 'warn']]);
+  assert.match(other.report.gates[0].hint, /замер не удался: ffmpeg упал/u);
+
+  // Замер старой формы гейт отклоняет — это тоже «замер не удался», а не пропуск.
+  const oldShape = runPreviewGates(base(project(t, { registered: true })), { measureImpl: () => ({ median: 12, p10: 9 }) });
+  assert.equal(oldShape.block, true);
+  assert.match(oldShape.report.gates[1].hint, /замер не удался: .*gapLu/u);
+});
+
+test('the gain advice stays inside the music.gainDb schema range', (t) => {
+  const nearFloor = { ...brief, music: { gainDb: -55 } };
+  const result = runPreviewGates(base(project(t, { registered: true }), { brief: nearFloor }), { measureImpl: loud });
+  assert.match(result.report.gates[1].hint, /до −60 дБ/u);
+});
+
+test('without music G8 is skipped and nothing is measured', (t) => {
+  const result = runPreviewGates(base(project(t, { registered: true }), { hasMusic: false, words: undefined, manifest: {} }),
+    { measureImpl: () => { throw new Error('не должен мерить'); } });
+  assert.equal(result.block, false);
+  assert.deepEqual(statuses(result), [['L', 'pass'], ['G8', 'skipped']]);
+});
+
+test('speech words come from the project transcript; a missing transcript stops a kit layer', (t) => {
+  const dir = project(t, { registered: true });
+  const manifest = { transcript: { words: 'transcript/words.json' } };
+  const missing = runPreviewGates(base(dir, { words: undefined, manifest }), { measureImpl: good });
+  assert.equal(missing.block, true);
+  assert.match(missing.report.gates[1].hint, /замер не удался: нет транскрипта/u);
+
+  writeJson(path.join(dir, 'transcript', 'words.json'), [
+    { start: 0, end: 5, text: 'раз два', words: [{ w: 'раз', s: 2, e: 2.6 }, { w: 'два', s: 2.7, e: 3.5 }, { w: 'битое', s: 'x', e: 1 }] },
+    { start: 8, end: 12, text: 'три', words: [{ w: 'три', s: 11, e: 12 }] },
+  ]);
+  assert.deepEqual(readProjectWords(dir, manifest), [{ s: 2, e: 2.6 }, { s: 2.7, e: 3.5 }, { s: 11, e: 12 }]);
+  let seen = null;
+  runPreviewGates(base(dir, { words: undefined, manifest, range: { fromSec: 2, toSec: 10 } }), { measureImpl: (input) => { seen = input; return good(); } });
+  assert.deepEqual(seen.windows, [{ s: 0, e: 1.5 }]);
+  assert.equal(seen.durationSec, 8);
+
+  // Нет речи в диапазоне — замер не нужен, G8 пропущен.
+  const silent = runPreviewGates(base(dir, { words: undefined, manifest, range: { fromSec: 5, toSec: 8 } }),
+    { measureImpl: () => { throw new Error('не должен мерить'); } });
+  assert.deepEqual(statuses(silent), [['L', 'pass'], ['G8', 'skipped']]);
+});
+
+test('two previews in the same millisecond write two separate reports', (t) => {
+  const dir = project(t, { registered: true });
+  const now = () => new Date('2026-09-29T12:00:00.000Z');
+  const first = runPreviewGates(base(dir), { measureImpl: loud, now });
+  const second = runPreviewGates(base(dir), { measureImpl: good, now });
+  assert.notEqual(first.paths.jsonPath, second.paths.jsonPath);
+  assert.equal(path.basename(first.paths.jsonPath), 'preview-20260929-120000-01.json');
+  assert.equal(path.basename(second.paths.jsonPath), 'preview-20260929-120000-02.json');
+  assert.equal(JSON.parse(fs.readFileSync(first.paths.jsonPath, 'utf8')).summary.status, 'fail');
+  assert.equal(JSON.parse(fs.readFileSync(second.paths.jsonPath, 'utf8')).summary.status, 'pass');
+  assert.equal(runPreviewGates(base(dir), { measureImpl: good, write: false }).paths, null);
+});

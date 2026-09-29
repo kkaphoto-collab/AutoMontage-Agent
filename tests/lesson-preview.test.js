@@ -186,6 +186,38 @@ test('preview command runs the real composition stages in order without final hi
   assert.equal(fs.existsSync(path.join(fixture.workspace.dir, 'final', 'preview-test.mp4')), false);
 });
 
+test('blocking preview gates stop publication and keep the previous preview', (t) => {
+  const fixture = makeProject(t, { music: true });
+  const current = path.join(fixture.workspace.dir, 'previews', 'current-preview.mp4');
+  fs.writeFileSync(current, 'previous-preview');
+  const beforeManifest = fs.readFileSync(path.join(fixture.workspace.dir, 'project.json'));
+  const calls = [];
+  let seen = null;
+  const blocked = { block: true, paths: { textPath: 'qa/preview-1.txt' },
+    report: { kind: 'preview', summary: { status: 'fail', fail: 1, warn: 0 }, gates: [] } };
+  const runPreviewGatesImpl = (input) => {
+    seen = { ...input, finishedExists: fs.existsSync(input.finishedPath), musicExists: fs.existsSync(input.musicPath) };
+    return blocked;
+  };
+  assert.throws(() => runPreview({ projectDir: fixture.workspace.dir, briefPath: fixture.published.relativePath, open: false },
+    { ...fakePreviewTools({ calls }), runPreviewGatesImpl }),
+  /preview не опубликован: проверки не пройдены \(qa\/preview-1\.txt\)/);
+  assert.deepEqual(calls, ['preview Remotion', 'preview finish', 'preview music mix']);
+  assert.equal(fs.readFileSync(current, 'utf8'), 'previous-preview');
+  assert.deepEqual(fs.readFileSync(path.join(fixture.workspace.dir, 'project.json')), beforeManifest);
+  assert.ok(!readProjectManifest(fixture.workspace.dir).currentPreview);
+  // Гейты видели настоящие дорожки preview после микса, промежуточные файлы потом убрал finally.
+  assert.equal(seen.projectDir, fixture.workspace.dir);
+  assert.equal(seen.hasMusic, true);
+  assert.equal(seen.finishedExists, true);
+  assert.equal(seen.musicExists, true);
+  assert.ok(seen.mixArgs.includes('--gain'));
+  assert.deepEqual([seen.range.fromSec, seen.range.toSec], [0, 4]);
+  assert.match(seen.sourceSha256, /^[a-f0-9]{64}$/u);
+  assert.equal(seen.brief.title, 'ПРЕДПРОСМОТР');
+  assert.equal(fs.existsSync(seen.finishedPath), false);
+});
+
 test('render, finish, and music failures preserve the previous current preview byte-for-byte', async (t) => {
   for (const failStage of ['render', 'finish', 'music']) {
     await t.test(failStage, () => {

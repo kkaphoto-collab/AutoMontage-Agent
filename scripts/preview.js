@@ -17,6 +17,8 @@ const { prepareMotionPreview } = require('./motion/workflow');
 const { prepareLessonPreview } = require('./lesson/preview');
 const { probeVideo } = require('./media-probe');
 const { runNodeTool, runTool } = require('./process');
+const { runPreviewGates } = require('./qa/preview-gates');
+const { formatReport } = require('./qa/report');
 const {
   planPreview,
   publishCurrentPreview,
@@ -134,6 +136,7 @@ function runPreview(options, dependencies = {}) {
   const publishCurrentPreviewImpl = dependencies.publishCurrentPreviewImpl
     || publishCurrentPreview;
   const openMediaFileImpl = dependencies.openMediaFileImpl || openMediaFile;
+  const runPreviewGatesImpl = dependencies.runPreviewGatesImpl || runPreviewGates;
   const now = dependencies.now || (() => new Date());
   const temporaryId = dependencies.temporaryId || randomUUID;
 
@@ -181,6 +184,7 @@ function runPreview(options, dependencies = {}) {
   });
   const stages = [planned.propsPath, planned.rawPath, planned.finishedPath, planned.mixedPath];
   let stagedOutput = planned.finishedPath;
+  let gateResult = null;
   try {
     withPreviewMediaBundleImpl({
       root: ROOT,
@@ -228,7 +232,23 @@ function runPreview(options, dependencies = {}) {
         ], { cwd: ROOT, stage: 'preview music mix' });
         stagedOutput = planned.mixedPath;
       }
+      // Барьер: по настоящим дорожкам этого preview (голос после finish.js, музыка из того же lease), пока
+      // lease жив. motion-reel сюда не входит — его brief не lesson и не собирается через layer brief.
+      if (kind !== 'motion-reel') {
+        gateResult = runPreviewGatesImpl({
+          projectDir, brief, manifest, hasMusic: Boolean(prepared.music), range: prepared.range, sourceSha256,
+          finishedPath: planned.finishedPath,
+          musicPath: prepared.music ? (lease.musicPath || prepared.music.sourcePath) : null,
+          mixArgs: prepared.music ? prepared.music.mixArgs : null,
+        }, { now });
+      }
     });
+
+    // Стоп — до полного декодирования: прошлый preview остаётся, промежуточные файлы убирает finally.
+    if (gateResult) console.log(formatReport(gateResult.report));
+    if (gateResult?.block) {
+      throw new Error(`preview не опубликован: проверки не пройдены (${gateResult.paths?.textPath || 'qa/'})`);
+    }
 
     runToolImpl('ffmpeg', [
       '-v', 'error', '-i', stagedOutput, '-f', 'null', '-',
