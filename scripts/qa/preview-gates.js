@@ -1,8 +1,10 @@
 // Барьер перед публикацией preview (D3, D4). Строгий только для слоёв kit – видео сцен, чей sha256 есть в
 // реестре qa/layer-imports.json (его пишет layer import): там стоп не даёт опубликовать preview. Для прочих
-// роликов G8 – только справка (skipped, без советов по music.gainDb): коридор live не откалиброван, а
-// утверждённые аватар-рецепты музыки читаются как ~38 LU (калибровка avatar, D-035), и совет «увеличьте
-// gainDb» по коридору live агент выполнил бы на клиентском ролике. Публикация таких роликов не блокируется.
+// роликов G8 – только справка (skipped, без советов по music.gainDb): без слоя kit профиль голоса
+// неизвестен (живая запись или аватар), коридор live не откалиброван, а утверждённые аватар-рецепты
+// читаются как ~38 LU (D-035) – совет «увеличьте gainDb» сделал бы музыку громче утверждённого
+// вкуса. Подсказка нейтральная: музыку ведёт утверждённый рецепт. Публикация таких роликов не
+// блокируется.
 const fs = require('node:fs');
 const path = require('node:path');
 const { parseMixOptions } = require('../mix-music');
@@ -174,7 +176,8 @@ function infoFromMeasured(measured) {
   if (typeof gapLu !== 'number' || Number.isNaN(gapLu)) return infoVoiceMusic('замер не удался: в замере нет gapLu');
   const value = gapLu === -Infinity || measured.voiceLufs === -Infinity ? 'голос в окнах речи не звучит'
     : gapLu === Infinity ? 'музыки под речью нет' : `разница голос/музыка ${r1(gapLu)} LU`;
-  return infoVoiceMusic(`${value}; коридор live не откалиброван – музыку по этой цифре не менять`);
+  return infoVoiceMusic(`${value}; без слоя kit G8 не оценивает баланс – `
+    + 'музыку ведёт утверждённый рецепт');
 }
 
 // Возвращает {report, block, enforced, paths, writeError}. block = true только для слоя kit со стоп-нарушением;

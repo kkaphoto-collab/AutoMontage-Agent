@@ -147,7 +147,7 @@ test('other projects get G8 for reference only: no stop, no warning, no gain adv
     assert.equal(result.report.profile, 'live');
     assert.equal(result.report.layer, null);
     assert.equal(result.report.gates[0].threshold, null);
-    assert.match(result.report.gates[0].hint, /^для справки: разница голос\/музыка [\d,]+ LU; коридор live не откалиброван – музыку по этой цифре не менять$/u);
+    assert.match(result.report.gates[0].hint, /^для справки: разница голос\/музыка [\d,]+ LU; без слоя kit G8 не оценивает баланс – музыку ведёт утверждённый рецепт$/u);
     assert.doesNotMatch(result.report.gates[0].hint, NO_ADVICE);
   }
 });
