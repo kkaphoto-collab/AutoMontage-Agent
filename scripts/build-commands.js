@@ -107,11 +107,44 @@ function remotionRenderCommand(resolved, {
   };
 }
 
+// Имя композиции слоя приходит из layer.json проекта и встаёт позиционным аргументом Remotion: значение
+// вида «--env-file=…» Remotion принял бы за флаг. Правило id Remotion: латинские буквы, цифры и «-»;
+// первый символ – буква или цифра.
+const COMPOSITION_ID = /^[A-Za-z0-9][A-Za-z0-9-]*$/u;
+
+function assertCompositionId(value, label = 'composition') {
+  if (typeof value === 'string' && COMPOSITION_ID.test(value)) return value;
+  const shown = typeof value === 'string' ? `«${value.slice(0, 60)}»` : String(value);
+  throw new Error(`${label} должен быть именем композиции Remotion: латинские буквы и цифры, дальше ещё «-» `
+    + `(получено ${shown})`);
+}
+
+// Рендер проектного motion-слоя: props не нужны (слой читает свой layer.json), звук эффектов сохраняется.
+function remotionLayerRenderCommand(resolved, { entry, composition, output, publicDir, concurrency = '50%' }) {
+  assertCompositionId(composition, 'layer.json: composition');
+  if (!(
+    (Number.isSafeInteger(concurrency) && concurrency > 0 && concurrency <= 256)
+    || (typeof concurrency === 'string'
+      && /^(?:[1-9]|[1-9]\d|100)%$/.test(concurrency))
+  )) {
+    throw new Error('Remotion concurrency is invalid');
+  }
+  return {
+    command: resolved.command,
+    args: [
+      ...resolved.argsPrefix, 'render', entry, composition, hostPath(output),
+      '--public-dir', hostPath(publicDir), '--codec=h264', '--log=error', `--concurrency=${concurrency}`, '--overwrite',
+    ],
+  };
+}
+
 module.exports = {
+  assertCompositionId,
   audioExtractionCommand,
   frameAnalysisCommand,
   paletteCommand,
   reframeCommand,
+  remotionLayerRenderCommand,
   remotionRenderCommand,
   videoProbeCommand,
 };

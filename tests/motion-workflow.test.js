@@ -18,6 +18,12 @@ function approve(f) {
 function final(f, approved, dependencies = {}) {
   return runMotion({ projectDir: f.workspace.dir, briefPath: approved.jsonPath, versionLabel: 'reviewed' }, { ...fakeMedia(), probeVideoImpl: () => ({ width: 320, height: 568, fps: 30, duration: 2 }), ...dependencies });
 }
+test('motion-reel preview does not run the preview gates barrier', (t) => {
+  const f = fixture(t);
+  const result = preview(f, { runPreviewGatesImpl: () => { throw new Error('motion-reel не должен звать барьер'); } });
+  assert.equal(result.metadata.kind, 'full');
+  assert.equal(fs.existsSync(path.join(f.workspace.dir, 'qa')), false);
+});
 test('motion option parser separates audio initialization from approved continuation', () => {
   assert.equal(parseMotionOptions(['voice.wav', '--project', 'Reel']).narrationPath, 'voice.wav');
   assert.equal(parseMotionOptions(['--project-dir', '.', '--brief', 'brief/approved.json']).briefPath, 'brief/approved.json');

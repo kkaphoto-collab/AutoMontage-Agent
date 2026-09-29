@@ -482,7 +482,12 @@ function createEditor(initialState, token) {
         );
         if (!response.ok) throw new Error('preview');
         const job = await response.json();
-        if (job.status === 'failed') throw new Error('preview');
+        if (job.status === 'failed') {
+          // Барьер проверок остановил preview: показываем его причину (без путей, её готовит сервер).
+          throw Object.assign(new Error('preview'), {
+            reason: job.error === 'PREVIEW_BLOCKED' && typeof job.reason === 'string' ? job.reason : null,
+          });
+        }
         if (job.status === 'complete') {
           state = prepareBrowserState(job.state, token);
           validation = {
@@ -493,9 +498,11 @@ function createEditor(initialState, token) {
           done = true;
         }
       }
-    } catch (_) {
+    } catch (error) {
       showEditError(
-        'Preview не готов. Предыдущий файл сохранён; обновите состояние и повторите.',
+        error?.reason
+          ? `Preview не опубликован: ${error.reason}. Предыдущий файл сохранён; исправьте и повторите.`
+          : 'Preview не готов. Предыдущий файл сохранён; обновите состояние и повторите.',
       );
     } finally {
       previewBusy = false;

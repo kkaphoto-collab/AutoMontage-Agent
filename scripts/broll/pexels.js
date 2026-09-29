@@ -70,7 +70,7 @@ function eligible(width, height, search) {
         : width === height)
   );
 }
-function normalizeCandidate(item, search) {
+function normalizeCandidate(item, search, preferSize = null, videoHosts = VIDEO_HOSTS) {
   if (!Number.isSafeInteger(item?.id) || item.id <= 0) return null;
   const sourcePage = safeUrl(item.url, PAGE_HOSTS, undefined, 500);
   const author =
@@ -140,14 +140,18 @@ function normalizeCandidate(item, search) {
         f &&
         Number.isSafeInteger(f.id) &&
         f.file_type === 'video/mp4' &&
-        safeUrl(f.link, VIDEO_HOSTS, /\.mp4$/i) &&
+        safeUrl(f.link, videoHosts, /\.mp4$/i) &&
         eligible(f.width, f.height, {}) &&
         f.width <= 4096 && f.height <= 4096 &&
         f.width * f.height <= 8847360,
     );
-    const selected = files
+    const fitting = files
       .filter((f) => eligible(f.width, f.height, search))
-      .sort((a, b) => b.width * b.height - a.width * a.height)[0];
+      .sort((a, b) => b.width * b.height - a.width * a.height);
+    // preferSize (слой motion-kit): самый маленький mp4, покрывающий кадр сторона к стороне; иначе самый большой.
+    const covers = (f) => Math.min(f.width, f.height) >= Math.min(preferSize.width, preferSize.height)
+      && Math.max(f.width, f.height) >= Math.max(preferSize.width, preferSize.height);
+    const selected = (preferSize && fitting.filter(covers).at(-1)) || fitting[0];
     if (!selected) return null;
     rendition = {
       id: String(selected.id),
@@ -196,11 +200,14 @@ function normalizeCandidate(item, search) {
     downloadUrl,
   };
 }
-function createPexelsProvider({ apiKey, request = requestRemote } = {}) {
+const validSize = (size) => size !== null && typeof size === 'object'
+  && [size.width, size.height].every((side) => Number.isSafeInteger(side) && side > 0 && side <= 32768);
+function createPexelsProvider({ apiKey, request = requestRemote, preferSize, videoHosts = VIDEO_HOSTS } = {}) {
   return {
     async search(input) {
       if (!apiKey) throw failure('BROLL_KEY_MISSING');
       const search = normalizeSearch(input);
+      if (preferSize !== undefined && !validSize(preferSize)) throw failure('BROLL_SEARCH_INVALID');
       const url = new URL(
         search.mediaKind === 'image'
           ? 'https://api.pexels.com/v1/search'
@@ -228,7 +235,7 @@ function createPexelsProvider({ apiKey, request = requestRemote } = {}) {
         const candidates = [],
           seen = new Set();
         for (const item of items.slice(0, 80)) {
-          const candidate = normalizeCandidate(item, search);
+          const candidate = normalizeCandidate(item, search, preferSize ?? null, videoHosts);
           if (
             candidate &&
             !JSON.stringify(candidate).includes(apiKey) &&

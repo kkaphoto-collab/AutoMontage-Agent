@@ -1,6 +1,6 @@
 {
   "name": "automontage-agent",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "description": "Движок автомонтажа видео для ИИ-агента (Claude Code/Codex). Кросс-платформенный: Windows/macOS/Linux.",
   "license": "MIT",
   "repository": {
@@ -39,6 +39,7 @@
     "@remotion/layout-utils": "^4.0.504",
     "@remotion/transitions": "^4.0.504",
     "ajv": "^8.20.0",
+    "esbuild": "0.28.1",
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "remotion": "^4.0.504"

@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { resolveRemotionCommand } = require('../scripts/env');
-const { remotionRenderCommand } = require('../scripts/build-commands');
+const { remotionLayerRenderCommand, remotionRenderCommand } = require('../scripts/build-commands');
 const { remotionChunkCommand } = require('../scripts/render-chunks');
 const { docPreviewCommand } = require('../scripts/generate-doc-preview');
 
@@ -64,6 +64,19 @@ const builders = {
     composition: 'LessonSeq', output: '/tmp/chunk.mp4', props: '/tmp/props.json', from: 0, to: 1,
   }),
   still: (resolved) => docPreviewCommand(resolved, '/tmp/still.png'),
+  layer: (resolved) => remotionLayerRenderCommand(resolved, {
+    entry: 'projects/p/motion-v01/src/index.jsx', composition: 'Layer', output: 'out.mp4', publicDir: 'projects/p/motion-v01/public',
+  }),
+};
+
+// entry/composition реальны только для final/preview/chunk (src/index.js + LessonSeq, still впереди
+// добавляет своё имя подкоманды) и для layer (свой слой, своя композиция) – у каждого builder свои.
+const POSITIONALS_BY_BUILDER = {
+  final: ['render', 'src/index.js', 'LessonSeq'],
+  preview: ['render', 'src/index.js', 'LessonSeq'],
+  chunk: ['render', 'src/index.js', 'LessonSeq'],
+  still: ['still', 'src/index.js', 'LessonSeq'],
+  layer: ['render', 'projects/p/motion-v01/src/index.jsx', 'Layer'],
 };
 
 test('installed Remotion loader reproduces root dotenv browser exposure without protection', (t) => {
@@ -84,7 +97,7 @@ for (const [name, build] of Object.entries(builders)) {
       assert.equal(result.leakedPrivate, false);
       assert.equal(result.publicProcess, 'public-process-value');
       if (filename === '.env') assert.equal(result.publicDotenv, 'public-dotenv-value');
-      assert.deepEqual(result.positionals.slice(0, 3), [name === 'still' ? 'still' : 'render', 'src/index.js', 'LessonSeq']);
+      assert.deepEqual(result.positionals.slice(0, 3), POSITIONALS_BY_BUILDER[name]);
       assert.ok(path.isAbsolute(result.envFile));
       assert.ok(fs.readFileSync(result.envFile, 'utf8').split('\n').every((line) => !line.trim() || line.trim().startsWith('#')));
     });
@@ -122,3 +135,27 @@ for (const filename of ['.env', '.env.local']) {
     assert.equal(argv[0], 'node_modules/@remotion/cli/remotion-cli.js');
   });
 }
+
+// layer.json – файл проекта: composition становится позиционным аргументом Remotion. Значение вида
+// «--env-file=…» Remotion прочитал бы как флаг и подключил бы в браузер рендера чужой env-файл.
+test('a layer composition that looks like a flag never reaches the Remotion command', (t) => {
+  const { readLayerJson } = require('../scripts/layer/common');
+  const resolved = { command: 'node', argsPrefix: ['cli.js', '--env-file=empty.env'] };
+  const command = (composition) => remotionLayerRenderCommand(resolved, {
+    entry: 'projects/p/motion-v01/src/index.jsx', composition, output: 'out.mp4', publicDir: 'projects/p/motion-v01/public',
+  });
+  const layerDir = fs.mkdtempSync(path.join(os.tmpdir(), 'automontage-layer-composition-'));
+  t.after(() => fs.rmSync(layerDir, { recursive: true, force: true }));
+  const writeLayer = (composition) => fs.writeFileSync(path.join(layerDir, 'layer.json'), JSON.stringify({ version: 1, composition, sfxMasterDb: -5 }));
+  for (const payload of ['--env-file=../../.env', '--gl=swiftshader', '--overwrite', '-q', 'Layer --props=x', '', 'Лейер', 'Layer_1', 42, undefined]) {
+    assert.throws(() => command(payload), /composition/u, String(payload));
+    writeLayer(payload);
+    assert.throws(() => readLayerJson(layerDir), /^Error: layer\.json: composition должен быть именем композиции Remotion/u, String(payload));
+  }
+  // Легитимные имена проходят и стоят ровно на месте композиции.
+  for (const name of ['Layer', 'Motion-Layer-2']) {
+    assert.deepEqual(command(name).args.slice(2, 5), ['render', 'projects/p/motion-v01/src/index.jsx', name]);
+    writeLayer(name);
+    assert.equal(readLayerJson(layerDir).composition, name);
+  }
+});

@@ -1,6 +1,22 @@
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { randomBytes } = require('node:crypto');
+const { StringDecoder } = require('node:string_decoder');
+const { hidePaths } = require('../qa/report');
+
+// Хвост stderr preview, в котором ищется причина остановки барьером.
+const STDERR_TAIL = 16384;
+const REASON_MAX = 400;
+
+// Барьер проверок (scripts/qa/preview-gates.js) останавливает preview строкой «preview не опубликован: …».
+// Только эта русская причина уходит в интерфейс, без абсолютных путей проекта и движка; любой другой
+// сбой остаётся голым PREVIEW_FAILED – сырой stderr в браузер не попадает.
+function barrierReason(stderr, { projectDir, root }) {
+  const match = /preview не опубликован: ([^\r\n]+)/u.exec(stderr);
+  if (!match) return null;
+  const text = hidePaths(hidePaths(match[1], projectDir), root).trim();
+  return text ? text.slice(0, REASON_MAX) : null;
+}
 
 function failure(code) {
   const error = new Error(code);
@@ -74,6 +90,8 @@ function createPreviewJobs({
     active = job;
     let child;
     let bytes = 0;
+    let stderrTail = '';
+    const stderrText = new StringDecoder('utf8');
     let timer;
     let killTimer;
     let resolveDone;
@@ -107,7 +125,11 @@ function createPreviewJobs({
       if (job.error) killTree('SIGKILL');
       clearTimeout(killTimer);
       job.status = !job.error && code === 0 ? 'complete' : 'failed';
-      if (job.status === 'failed') job.error ||= 'PREVIEW_FAILED';
+      if (job.status === 'failed' && !job.error) {
+        const reason = barrierReason(stderrTail, { projectDir, root });
+        if (reason) job.reason = reason;
+        job.error = reason ? 'PREVIEW_BLOCKED' : 'PREVIEW_FAILED';
+      }
       active = null;
       resolveDone();
     }
@@ -134,6 +156,7 @@ function createPreviewJobs({
       for (const stream of [child.stdout, child.stderr])
         stream?.on('data', (chunk) => {
           bytes += chunk.length;
+          if (stream === child.stderr) stderrTail = (stderrTail + stderrText.write(chunk)).slice(-STDERR_TAIL);
           if (bytes > maxOutputBytes) job.cancel('PREVIEW_OUTPUT_LIMIT');
         });
       child.once('error', () => {
@@ -162,6 +185,7 @@ function createPreviewJobs({
         jobId: id,
         status: job.status,
         ...(job.error ? { error: job.error } : {}),
+        ...(job.reason ? { reason: job.reason } : {}),
       };
     },
     close() {

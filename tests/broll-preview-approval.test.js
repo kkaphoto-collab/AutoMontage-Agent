@@ -229,6 +229,54 @@ test('preview jobs use fixed argv, reject stale/busy input and bound failed outp
   assert.equal(jobs.get(second.jobId).error, 'PREVIEW_CANCELLED');
 });
 
+// Барьер preview (scripts/qa/preview-gates.js) остановил preview: Review показывает его русскую причину, а не
+// голый PREVIEW_FAILED. Абсолютные пути проекта и движка в причину не попадают; прочие сбои – как раньше.
+test('a preview blocked by the QA barrier surfaces its Russian reason without paths', async () => {
+  const { EventEmitter } = require('node:events');
+  const { PassThrough } = require('node:stream');
+  const { createPreviewJobs } = require('../scripts/review/preview-jobs');
+  const base = {
+    entry: { revision: 1 }, baseHash: 'a', manifestHash: 'b', briefFilePath: '/test/brief.json',
+    brief: { status: 'draft', output: { fps: 25, durationInFrames: 100 }, scenes: [{ start: 0, end: 2 }] },
+  };
+  let child;
+  const jobs = createPreviewJobs({
+    root: '/engine/root', projectDir: '/srv/automontage/projects/client-x', getBase: () => base,
+    spawnImpl: () => {
+      child = new EventEmitter();
+      child.stdout = new PassThrough();
+      child.stderr = new PassThrough();
+      return child;
+    },
+  });
+  const input = { baseRevision: 1, baseHash: 'a', manifestHash: 'b', kind: 'full' };
+  const run = async (stderr, code = 1) => {
+    const { jobId } = jobs.start(input);
+    child.stdout.write('Проверки (preview): СТОП\n');
+    child.stderr.write(stderr);
+    await new Promise((resolve) => setImmediate(resolve));
+    child.emit('close', code);
+    await jobs.waitIdle();
+    return jobs.get(jobId);
+  };
+  const blocked = await run('❌ preview отменён: preview не опубликован: проверки не пройдены '
+    + '(/srv/automontage/projects/client-x/qa/preview-20260929-120000-01.txt)\n');
+  assert.equal(blocked.status, 'failed');
+  assert.equal(blocked.error, 'PREVIEW_BLOCKED');
+  assert.equal(blocked.reason, 'проверки не пройдены (qa/preview-20260929-120000-01.txt)');
+  const unwritten = await run('❌ preview отменён: preview не опубликован: отчёт проверок не записан '
+    + "(не удалось записать в qa/: qa/ должна быть папкой проекта, а не ссылкой или файлом – уберите её и верните настоящую папку qa/)\n");
+  assert.equal(unwritten.error, 'PREVIEW_BLOCKED');
+  assert.match(unwritten.reason, /^отчёт проверок не записан \(не удалось записать в qa\/: qa\/ должна быть папкой проекта/u);
+  // Любой другой сбой – прежний код без текста: сырой stderr в браузер не уходит.
+  const other = await run('❌ preview отменён: ENOENT /engine/root/node_modules/.bin/remotion\n');
+  assert.equal(other.error, 'PREVIEW_FAILED');
+  assert.equal(Object.hasOwn(other, 'reason'), false);
+  const ok = await run('', 0);
+  assert.equal(ok.status, 'complete');
+  assert.equal(Object.hasOwn(ok, 'reason'), false);
+});
+
 for (const stage of ['approval-json', 'approval-manifest'])
   test(`approval detects preview replacement during ${stage} staging and rolls back`, (t) => {
     const f = fixture(t);
