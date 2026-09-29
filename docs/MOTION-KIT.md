@@ -70,7 +70,8 @@ automontage preview --project-dir projects/<ролик> --brief brief/vNN-draft.
 automontage layer sheet --project-dir projects/<ролик>
 ```
 
-Каждая команда в конце печатает строку «Дальше: …» с готовой следующей командой.
+`layer new`, `layer render`, `layer import` и `layer brief` в конце печатают строку «Дальше: …»
+с готовой следующей командой.
 
 Что делает каждый шаг:
 
@@ -261,7 +262,7 @@ motion-vNN/
 | `autoShots(words, { endSec, maxSec: 2.2, minSec: 1.2, cycle })` | core | раскадровка по словам: план не длиннее `maxSec`, режет по концу слова, пресеты по кругу `W M W L W R` |
 | Пресеты камеры `W`, `M`, `L`, `R`, `top` | core (`DEFAULT_PRESETS`) | `W` общий план 1,0; `M` средний 1,18; `L`/`R` 1,12 со сдвигом лица влево/вправо; `top` лицо ниже, место под графику сверху. Сдвиги заданы для ширины 1080 и масштабируются |
 | `makeAnchors(words)` → `a.at('слово', { near, d, edge: 'start' \| 'end' })` | core | время слова речи; курсор идёт вперёд, повтор слова находит следующее вхождение |
-| `pickSound(sfxLibrary, 'pop')` | core | имя звука по роли или `null`, если такого звука в библиотеке нет |
+| `pickSound(sfxLibrary, 'pop')` | core | возвращает `'pop'`, если такой звук или роль есть в библиотеке, иначе `null`: `sfx: pickSound(sfxLibrary, 'pop')` не упадёт без библиотеки |
 | `safeRect(width, height)`, `captionLane(width, height)` | core | safe-зона кадра и полоса субтитров по умолчанию |
 | Входы `pop`, `fly`, `mask`, `cut` | `item.enter.kind` | появление элемента; `from: [dx, dy]` – откуда влетает |
 | `typed(text, frame, fromFrame, toFrame)` | core | набор текста по буквам |
