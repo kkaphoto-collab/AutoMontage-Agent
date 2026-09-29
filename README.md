@@ -440,6 +440,25 @@ Top-level `faceSrc`/`audioSrc` не являются источником дов
 не попадает в props. Baseline фиксируется до render callback, после него сверка строгая: даже
 восстановленный byte-for-byte файл с новым `ctime` закрывает сборку.
 
+### Motion-слой из деталей kit
+
+Слой Creative Motion собирается из готовых деталей движка (камера, карточки, звуки, сток,
+субтитры), а автоматические проверки ритма, safe-zone, звука и баланса голоса и музыки не
+пускают слабый preview в пульт:
+
+```bash
+automontage layer new --project-dir projects/<ролик>                 # motion-слой из деталей kit
+automontage layer check --project-dir projects/<ролик> --layer motion-v01
+automontage layer render --project-dir projects/<ролик> --layer motion-v01
+automontage layer import --project-dir projects/<ролик> --file projects/<ролик>/motion-v01/renders/layer-01.mp4
+automontage layer brief --project-dir projects/<ролик> --asset <reference> --title … --head-cream … --head-orange …
+automontage preview --project-dir projects/<ролик> --brief brief/vNN-draft.lesson.json
+automontage layer sheet --project-dir projects/<ролик>               # контакт-лист и кадры правок
+```
+
+`--title`, `--head-cream` и `--head-orange` – подписи для Markdown и пульта, в видео слоя их
+не видно. Подробно: [`docs/MOTION-KIT.md`](docs/MOTION-KIT.md).
+
 ### Пульт роликов: все ролики в одном окне
 
 Когда роликов много, откройте «Пульт роликов» – русский главный экран со всеми роликами из
@@ -760,6 +779,8 @@ Remotion (анимация плашек кодом), faster-whisper (распо�
 - [docs/TAKES.md](docs/TAKES.md) – монтаж одного ролика из нескольких дублей или разных записей.
 - [docs/MONTAGE-GUIDE.md](docs/MONTAGE-GUIDE.md) – простая инструкция от исходника до final MP4.
 - [docs/SCENE-CATALOG.md](docs/SCENE-CATALOG.md) – семь официальных сцен и их возможности.
+- [docs/MOTION-KIT.md](docs/MOTION-KIT.md) – motion-слой из деталей kit, проверки G1–G12 и что
+  делать, если проверка остановила работу.
 - [ARCHITECTURE.md](ARCHITECTURE.md) – модули, потоки данных и границы системы.
 - [TESTING.md](TESTING.md) – от быстрых тестов до проверки готового MP4.
 - [DECISIONS.md](DECISIONS.md) – решения, которые не нужно заново переигрывать в каждой сессии.
