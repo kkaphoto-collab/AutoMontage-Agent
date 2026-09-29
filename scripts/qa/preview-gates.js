@@ -60,7 +60,8 @@ function entryProblem(projectDir, entry, sourceSha256) {
   const problem = renderReportProblem(report, { layer: entry.layer });
   if (problem) return `${entry.layer}: ${problem}`;
   // Тот же приговор, что в layer import и layer brief, но по sha256 исходника, который preview уже посчитал.
-  if (sourceSha256 !== undefined) assertReportSource(report, { projectDir, sourceSha256 });
+  // projectDir не передаём: барьер preview не должен класть абсолютный путь проекта в отчёт и консоль.
+  if (sourceSha256 !== undefined) assertReportSource(report, { sourceSha256 });
   return null;
 }
 

@@ -103,9 +103,14 @@ test('a render report without G6 and G7 or with a missing report does not pass g
 });
 
 test('a layer rendered for another source does not pass gate L', (t) => {
-  const result = runPreviewGates(base(project(t, { registered: true, sourceSha: sha('9') })), { measureImpl: good });
+  const dir = project(t, { registered: true, sourceSha: sha('9') });
+  const result = runPreviewGates(base(dir), { measureImpl: good });
   assert.equal(result.block, true);
   assert.match(result.report.gates[0].hint, /другого исходника/u);
+  // Барьер preview не кладёт абсолютный путь проекта в отчёт: подсказка называет команду без --project-dir.
+  assert.match(result.report.gates[0].hint, /создайте новый слой: automontage layer new → layer render → layer import/u);
+  assert.doesNotMatch(result.report.gates[0].hint, /--project-dir/u);
+  assert.doesNotMatch(result.report.gates[0].hint, new RegExp(dir.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')));
 });
 
 test('a broken registry blocks: the project has kit layers but the barrier cannot trust them', (t) => {
@@ -201,7 +206,7 @@ test('an unregistered video that looks like a kit layer render only warns to run
   assert.deepEqual(statuses(stock), [['G8', 'skipped']]);
 });
 
-test('a failed measurement stops a kit layer and only warns other projects', (t) => {
+test('a failed measurement stops a kit layer and is reference-only for other projects', (t) => {
   const boom = () => { throw new Error('ffmpeg упал'); };
   const kit = runPreviewGates(base(project(t, { registered: true })), { measureImpl: boom });
   assert.equal(kit.block, true);
