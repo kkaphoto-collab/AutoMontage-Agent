@@ -93,10 +93,12 @@ test('motion layer brief and creative motion start with the kit and its gates', 
     'automontage layer new', 'automontage layer check', '70/130/250/420', '2,5 с', 'muted',
     'public/SOURCE.md', 'hook: \'enumeration\'', 'waivers',
     // Кадр слоя без защищённого env-файла отдал бы браузеру Remotion значения из .env движка.
-    '--env-file=config/remotion-public.env', 'cover: true', 'automontage inbox --accept', '/api/approve',
+    '--env-file=config/remotion-public.env', 'cover: true', 'automontage inbox --accept',
   ]) {
     assert.ok(brief.includes(rule), rule);
   }
+  // Не просто упоминание /api/approve, а запрет: утверждает только владелец.
+  assert.match(brief, /не утверждай[^\n]*\n?[^\n]*не вызывай API пульта \(`\/api\/approve`\)/u);
   assert.doesNotMatch(brief, /\/Users\/|\/home\/|projects\/20\d\d/u);
   assert.doesNotMatch(brief, /\u2014/u);
   const creative = read('skills/reel-turnkey/references/creative-motion.md');
