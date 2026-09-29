@@ -572,9 +572,15 @@ node --test tests/broll-discovery.test.js tests/broll-review-security.test.js te
 node --test tests/broll-preview-approval.test.js
 node --test tests/broll-render-env-security.test.js tests/env.test.js
 npm run test:review-ui
+npx remotion browser ensure
 node --test --test-concurrency=1 tests/broll-preview-e2e.test.js tests/video-broll-e2e.test.js tests/custom-face-media-real.test.js
 node scripts/broll/live-acceptance.js
 ```
+
+`npx remotion browser ensure` заранее скачивает браузер Remotion. Без него на свежей установке
+первый настоящий preview качает браузер внутри ожидания теста, и скорость сети решает исход теста.
+`tests/broll-preview-e2e.test.js` ждёт само preview-задание, а не галочку в интерфейсе: сбой
+preview сразу роняет тест с кодом ошибки и хвостом вывода `preview.js`.
 
 Нужна полная сборка FFmpeg с WebP/H.264/VP8/Opus/AAC, а для нативного OCR - Tesseract с локальным
 `eng` language pack. На Ubuntu CI устанавливает `ffmpeg tesseract-ocr tesseract-ocr-eng`.

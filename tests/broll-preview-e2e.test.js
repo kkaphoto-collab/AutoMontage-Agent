@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+const { execFileSync, spawn } = require('node:child_process');
 const { chromium } = require('playwright');
 const { expect } = require('playwright/test');
 const {
@@ -11,7 +11,17 @@ const {
   readProjectManifest,
 } = require('../scripts/project/workspace');
 const { startReviewServer } = require('../scripts/review/server');
+const { resolveRemotionCommand } = require('../scripts/env');
 const ROOT = path.resolve(__dirname, '..');
+// Ждём само preview-задание, а не косвенный признак в интерфейсе: сбой виден сразу и с причиной.
+const PREVIEW_JOB_TIMEOUT_MS = 180000;
+function outputTail(file) {
+  try {
+    return fs.readFileSync(file, 'utf8').slice(-4000);
+  } catch (_) {
+    return '(вывода нет)';
+  }
+}
 function run(command, args) {
   return execFileSync(command, args, {
     cwd: ROOT,
@@ -37,6 +47,10 @@ test(
       `${Date.now()}-${process.pid}`,
     );
     fs.mkdirSync(dir, { recursive: true });
+    // Свежая установка качает браузер Remotion при первом рендере. Делаем это здесь, до
+    // ожидания preview: иначе скорость сети съедает таймаут первого preview-задания.
+    const remotion = resolveRemotionCommand(ROOT);
+    run(remotion.command, [...remotion.argsPrefix, 'browser', 'ensure']);
     const source = path.join(dir, 'source.mp4');
     const clip = path.join(dir, 'clip.mp4');
     const poster = path.join(dir, 'poster.jpg');
@@ -139,11 +153,24 @@ test(
       downloadUrl: 'https://videos.pexels.com/clip.mp4',
     };
     let fullDownloads = 0;
+    // Настоящий spawn preview.js; тест лишь сохраняет его вывод, чтобы показать его при сбое.
+    const previewLogs = [];
+    const previewSpawnImpl = (command, args, options) => {
+      const child = spawn(command, args, options);
+      const logFile = path.join(dir, `preview-job-${previewLogs.length + 1}.log`);
+      previewLogs.push(logFile);
+      const log = fs.createWriteStream(logFile);
+      child.stdout?.on('data', (chunk) => log.write(chunk));
+      child.stderr?.on('data', (chunk) => log.write(chunk));
+      child.once('close', (code, signal) => log.end(`\n[preview.js: ${signal || code}]\n`));
+      return child;
+    };
     const session = await startReviewServer({
       root: ROOT,
       projectDir: workspace.dir,
       editable: true,
       open: false,
+      previewSpawnImpl,
       brollProvider: {
         search: async () => ({ candidates: [candidate], nextPage: null }),
       },
@@ -166,14 +193,53 @@ test(
     page.on('dialog', (dialog) => dialog.accept());
     const errors = [];
     page.on('pageerror', (error) => errors.push(error.message));
+    const previewJobs = new Map();
+    page.on('response', async (response) => {
+      if (new URL(response.url()).pathname !== '/api/broll/preview-job') return;
+      try {
+        const { state: _state, ...job } = await response.json();
+        previewJobs.set(job.jobId, job);
+      } catch (_) {
+        /* ответ без JSON разберёт ожидание ниже по таймауту */
+      }
+    });
+    async function runPreview(buttonName) {
+      const started = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === '/api/broll/preview' &&
+          response.request().method() === 'POST',
+      );
+      await page.getByRole('button', { name: buttonName, exact: true }).click();
+      const response = await started;
+      const body = await response.json();
+      assert.equal(response.status(), 202, `preview не запущен: ${JSON.stringify(body)}`);
+      try {
+        await expect
+          .poll(() => previewJobs.get(body.jobId)?.status ?? 'running', {
+            timeout: PREVIEW_JOB_TIMEOUT_MS,
+          })
+          .not.toBe('running');
+      } catch (error) {
+        throw new Error(
+          `preview-задание не завершилось за ${PREVIEW_JOB_TIMEOUT_MS / 1000} с; вывод preview.js:\n${outputTail(previewLogs.at(-1))}`,
+          { cause: error },
+        );
+      }
+      const job = previewJobs.get(body.jobId);
+      assert.equal(
+        job.status,
+        'complete',
+        `preview-задание ${job.error}${job.reason ? `: ${job.reason}` : ''}; вывод preview.js:\n${outputTail(previewLogs.at(-1))}`,
+      );
+    }
     await page.goto(session.url);
     await expect(page.locator('main')).toHaveAttribute('data-review-ready', '');
     await expect(
       page.getByRole('button', { name: 'Утвердить', exact: true }),
     ).toBeDisabled();
     // Pending intent must use the real draft placeholder, never approval.
-    await page.getByRole('button', {name:'Полный preview',exact:true}).click();
-    await expect(page.getByLabel('Я посмотрел полный preview')).toBeEnabled({timeout:180000});
+    await runPreview('Полный preview');
+    await expect(page.getByLabel('Я посмотрел полный preview')).toBeEnabled({timeout:15000});
     const pendingHeaders = {Authorization:`Bearer ${session.token}`,Origin:session.origin};
     const pendingState = await (await page.request.get(session.origin+'/api/state',{headers:pendingHeaders})).json();
     const pendingApproval = await page.request.post(session.origin+'/api/broll/approve',{headers:pendingHeaders,data:{baseRevision:pendingState.session.baseRevision,baseHash:pendingState.session.baseHash,manifestHash:pendingState.session.manifestHash,confirmPreviewViewed:true}});
@@ -207,22 +273,18 @@ test(
       readProjectManifest(workspace.dir).briefs.at(-1).status,
       'draft',
     );
-    await page
-      .getByRole('button', { name: 'Preview фрагмента', exact: true })
-      .click();
+    await runPreview('Preview фрагмента');
     await expect(
       page.getByRole('button', { name: 'Полный preview', exact: true }),
-    ).toBeEnabled({ timeout: 180000 });
+    ).toBeEnabled({ timeout: 15000 });
     assert.equal(
       readProjectManifest(workspace.dir).currentPreview?.kind,
       'excerpt',
     );
     await expect(page.getByLabel('Я посмотрел полный preview')).toBeDisabled();
-    await page
-      .getByRole('button', { name: 'Полный preview', exact: true })
-      .click();
+    await runPreview('Полный preview');
     await expect(page.getByLabel('Я посмотрел полный preview')).toBeEnabled({
-      timeout: 180000,
+      timeout: 15000,
     });
     assert.equal(
       readProjectManifest(workspace.dir).currentPreview.kind,
