@@ -110,10 +110,17 @@ test('motion layer brief and creative motion start with the kit and its gates', 
   const checklist = read('skills/reel-turnkey/references/qa-checklist.md');
   assert.match(checklist, /2,5 секунды/);
   assert.match(checklist, /automontage layer check/);
-  // Правило 12–18 dB осталось только для живой записи и роликов без слоя kit; для аватара –
-  // откалиброванный коридор G8 по утверждённому эталону (D-035).
-  assert.match(checklist, words('Живая запись и ролики без слоя kit: под речью музыка примерно на 12–18 dB ниже голоса'));
-  assert.match(creative, words('«12–18 dB, 8–10 dB по просьбе» относится к живой записи и роликам без слоя kit'));
+  // Правило баланса делится по типу голоса, а не по слою kit: живая запись – 12–18 dB по qa:preview,
+  // голос аватара (со слоем kit и без него) – баланс утверждённого эталона, ~38 LU по G8 (D-035).
+  const turnkey = read('skills/reel-turnkey/SKILL.md');
+  assert.match(checklist, words('Живая запись (свой голос с микрофона): под речью музыка примерно на 12–18 dB ниже голоса'));
+  assert.match(checklist, words('Голос аватара (ElevenLabs или HeyGen), со слоем kit и без него: баланс как в утверждённом эталоне'));
+  assert.match(creative, words('«12–18 dB, 8–10 dB по просьбе» относится только к живой записи'));
+  assert.match(turnkey, words('Голос аватара (ElevenLabs или HeyGen), со слоем kit и без него: ориентир – утверждённый эталон'));
+  for (const [name, text] of [['checklist', checklist], ['creative', creative], ['turnkey', turnkey]]) {
+    // Аватар-ролик без слоя kit не должен попасть под 12–18 dB: музыка стала бы тише утверждённого вкуса.
+    assert.doesNotMatch(text, /без\s+слоя\s+kit[^.]{0,60}12–18\s+dB|12–18\s+dB[^.]{0,80}без\s+слоя\s+kit/u, name);
+  }
   for (const [name, text] of [['brief', brief], ['creative', creative], ['checklist', checklist]]) {
     assert.match(text, words('откалиброван по утверждённому эталонному preview'), name);
     assert.match(text, words('35–41 LU, стоп ниже 3 LU или выше 46 LU'), name);
