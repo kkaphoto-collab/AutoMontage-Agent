@@ -141,6 +141,61 @@ test('project paths reject dangling final and intermediate symlinks before creat
   assert.equal(fs.existsSync(outsideDirectory), false);
 });
 
+test('a project path that vanishes mid-check resolves as absent and a swapped-in symlink is still refused', (t) => {
+  const fixture = makeFixture(t);
+  const workspace = createOrOpenProject({
+    projectDir: path.join(fixture.dir, 'project'),
+    name: 'Vanishing path',
+    sourcePath: fixture.sourcePath,
+    now: new Date('2026-08-05T12:00:00Z'),
+  });
+  const outsideFile = path.join(fixture.dir, 'outside-secret.json');
+  fs.writeFileSync(outsideFile, 'outside');
+  // Чужой процесс удаляет файл ровно между existsSync и realpathSync проверки.
+  function vanishingFileSystem(candidate, swapInSymlink) {
+    let fired = false;
+    return new Proxy(fs, {
+      get(target, key) {
+        if (key !== 'realpathSync') return Reflect.get(target, key);
+        return (filename, ...args) => {
+          if (!fired && path.resolve(String(filename)) === candidate) {
+            fired = true;
+            target.unlinkSync(candidate);
+            if (swapInSymlink) {
+              target.symlinkSync(outsideFile, candidate);
+              throw Object.assign(new Error(`ENOENT: ${candidate}`), { code: 'ENOENT' });
+            }
+          }
+          return target.realpathSync(filename, ...args);
+        };
+      },
+    });
+  }
+
+  const legitimate = path.join(workspace.dir, '.lease-like.lock');
+  fs.writeFileSync(legitimate, 'owner');
+  assert.equal(
+    resolveProjectPath(workspace.dir, '.lease-like.lock', {
+      mustExist: false,
+      type: 'file',
+      fileSystem: vanishingFileSystem(legitimate, false),
+    }),
+    legitimate,
+  );
+
+  const swapped = path.join(workspace.dir, '.swapped.lock');
+  fs.writeFileSync(swapped, 'owner');
+  assert.throws(
+    () => resolveProjectPath(workspace.dir, '.swapped.lock', {
+      mustExist: false,
+      type: 'file',
+      fileSystem: vanishingFileSystem(swapped, true),
+    }),
+    /symbolic link/i,
+  );
+  assert.equal(fs.readFileSync(outsideFile, 'utf8'), 'outside');
+});
+
 test('manifest write ignores a predictable temp symlink and publishes a regular manifest', (t) => {
   const fixture = makeFixture(t);
   const workspace = createOrOpenProject({

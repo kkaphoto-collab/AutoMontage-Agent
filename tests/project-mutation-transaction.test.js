@@ -177,6 +177,49 @@ test('a live process mutation lease blocks a second process without changing own
   assert.deepEqual(await waitForExit(child), { code: 0, signal: null });
 });
 
+test('two real processes contending for the lease only ever get the lease or PROJECT_MANIFEST_CONFLICT', { timeout: 30_000 }, async (t) => {
+  const workspace = makeProject(t, 'Lease contention');
+  const workerPath = path.join(path.dirname(workspace.dir), 'lease-contender.js');
+  // Каждый процесс сотни раз берёт и сразу отпускает lease. Lease-файл то появляется, то исчезает
+  // прямо во время проверки пути: наружу может выйти только конфликт, но не сырой ENOENT.
+  fs.writeFileSync(workerPath, String.raw`
+const { acquireProjectMutationLease } = require(process.argv[2]);
+const projectDir = process.argv[3];
+const counts = { acquired: 0, conflicts: 0 };
+const unexpected = [];
+const end = Date.now() + 2000;
+while (Date.now() < end && unexpected.length === 0) {
+  try {
+    acquireProjectMutationLease(projectDir).release();
+    counts.acquired += 1;
+  } catch (error) {
+    if (error && error.code === 'PROJECT_MANIFEST_CONFLICT') counts.conflicts += 1;
+    else unexpected.push(String(error && (error.code || error.message)));
+  }
+}
+process.send({ type: 'result', counts, unexpected }, () => process.exit(0));
+`);
+  const children = [0, 1].map(() => fork(
+    workerPath,
+    [require.resolve('../scripts/project/workspace'), workspace.dir],
+    { stdio: ['ignore', 'ignore', 'inherit', 'ipc'] },
+  ));
+  t.after(() => {
+    for (const child of children) {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+    }
+  });
+  const results = await Promise.all(children.map((child) => waitForMessage(child, 'result')));
+  for (const { counts, unexpected } of results) {
+    assert.deepEqual(unexpected, [], `неожиданные ошибки lease: ${unexpected.join(', ')}`);
+    assert.ok(counts.acquired > 0, 'каждый процесс хоть раз получил lease');
+  }
+  assert.ok(
+    results.some(({ counts }) => counts.conflicts > 0),
+    'процессы действительно конкурировали за lease',
+  );
+});
+
 test('a hard process exit leaves a provably dead lease that the next mutation reclaims', async (t) => {
   const workspace = makeProject(t, 'Dead owner');
   const workerPath = writeLeaseWorker(path.dirname(workspace.dir));
