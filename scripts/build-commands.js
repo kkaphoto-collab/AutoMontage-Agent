@@ -107,8 +107,20 @@ function remotionRenderCommand(resolved, {
   };
 }
 
+// Имя композиции слоя приходит из layer.json проекта и встаёт позиционным аргументом Remotion: значение
+// вида «--env-file=…» Remotion принял бы за флаг. Первый символ – буква или цифра, дальше ещё «_» и «-».
+const COMPOSITION_ID = /^[A-Za-z0-9][A-Za-z0-9_-]*$/u;
+
+function assertCompositionId(value, label = 'composition') {
+  if (typeof value === 'string' && COMPOSITION_ID.test(value)) return value;
+  const shown = typeof value === 'string' ? `«${value.slice(0, 60)}»` : String(value);
+  throw new Error(`${label} должен быть именем композиции Remotion: латинские буквы и цифры, дальше ещё «_» и «-» `
+    + `(получено ${shown})`);
+}
+
 // Рендер проектного motion-слоя: props не нужны (слой читает свой layer.json), звук эффектов сохраняется.
 function remotionLayerRenderCommand(resolved, { entry, composition, output, publicDir, concurrency = '50%' }) {
+  assertCompositionId(composition, 'layer.json: composition');
   if (!(
     (Number.isSafeInteger(concurrency) && concurrency > 0 && concurrency <= 256)
     || (typeof concurrency === 'string'
@@ -126,6 +138,7 @@ function remotionLayerRenderCommand(resolved, { entry, composition, output, publ
 }
 
 module.exports = {
+  assertCompositionId,
   audioExtractionCommand,
   frameAnalysisCommand,
   paletteCommand,

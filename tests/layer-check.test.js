@@ -99,6 +99,15 @@ test('BAD CASE: a bad sfxMasterDb in layer.json exits 2 and names the field', { 
   assert.equal(report().profile, 'avatar');
 });
 
+test('BAD CASE: a composition in layer.json that looks like a Remotion flag exits 2 before any build', { skip: !hasFfmpeg }, async (t) => {
+  const { layerDir, runCheck, report, editLayer } = await scaffold(t);
+  fs.rmSync(path.join(layerDir, 'out'), { recursive: true, force: true });
+  editLayer((layer) => { layer.composition = '--env-file=../../.env'; });
+  assert.equal(await runCheck(), 2);
+  assert.match(report().error, /layer\.json: composition должен быть именем композиции Remotion/u);
+  assert.ok(!fs.existsSync(path.join(layerDir, 'out', 'manifest.json')));
+});
+
 test('BAD CASE: a plan.js that imports node:fs is refused at the boundary with exit 2', { skip: !hasFfmpeg }, async (t) => {
   const { runCheck, report, writePlan } = await scaffold(t);
   writePlan(`import fs from 'node:fs';\n${STATIC_PLAN.replace('return {', 'fs.existsSync("x"); return {')}`);

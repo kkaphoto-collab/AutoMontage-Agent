@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const { assertCompositionId } = require('../build-commands');
 const { loadKitCore } = require('../motion-kit-node');
 const { readProjectManifest, resolveProjectPath } = require('../project/workspace');
 const { hashFile, writeJsonAtomic } = require('../pult/files');
@@ -97,6 +98,7 @@ function readLayerJson(layerDir) {
   if (layer === null || typeof layer !== 'object' || Array.isArray(layer)) {
     throw new Error('layer.json должен быть объектом');
   }
+  assertCompositionId(layer.composition, 'layer.json: composition');
   loadKitCore().assertMasterDb(layer.sfxMasterDb);
   return layer;
 }
