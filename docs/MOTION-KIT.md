@@ -185,8 +185,8 @@ motion-vNN/
             exit: { frames: 5, dir: 'down' | 'up' }, life: { parallax: 8 }, bleed,
             sfx: 'pop' | { name, vol, leadFrames } | null,
             type: { from, to, sfx }, props: { … } }],
-  inserts: [{ id, kind: 'stock' | 'screen' | 'donor' | 'scene', from, to, src, cover, kb: [1.03, 1.1], sfx }],
   // bleed: true – элемент нарочно выходит за край кадра (фон, декор); G5 его не проверяет
+  inserts: [{ id, kind: 'stock' | 'screen' | 'donor' | 'scene', from, to, src, cover, kb: [1.03, 1.1], sfx }],
   sfx: [{ at, name, vol, prio }],         // звуки вне элементов
   captions: false | { chunk: { … }, lane: { x, y, w, h }, hide: [{ from, to }] },
   waivers: [{ gate: 'G1' | 'G4' | 'G11', reason }],
