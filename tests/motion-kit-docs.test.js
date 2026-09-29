@@ -13,5 +13,9 @@ test('motion kit is documented for people and agents', () => {
   assert.match(read('README.md'), /automontage layer new --project-dir/);
   assert.match(read('.env.example'), /^AUTOMONTAGE_SFX_DIR=$/m);
   assert.match(read('ASSETS.md'), /AUTOMONTAGE_SFX_DIR/);
+  // Слепое пятно G5: сдвиг из кода сцены внутри KitBox манифест не видит (пробный слой, moveTo).
+  assert.match(guide, /Слепое пятно: манифест берёт движение только из анимации kit/);
+  assert.match(guide, /`KitBox` не обрезает детей/);
+  assert.match(guide, /G5 зелёный, а в кадре текст за safe-зоной/);
   assert.doesNotMatch(guide, /\/Users\/|projects\/20\d\d/);
 });

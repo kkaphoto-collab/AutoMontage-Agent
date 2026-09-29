@@ -99,6 +99,10 @@ test('motion layer brief and creative motion start with the kit and its gates', 
   ]) {
     assert.ok(brief.includes(rule), rule);
   }
+  // Слепое пятно G5: манифест знает только движение kit, сдвиг из кода сцены и текст внутри
+  // media/bleed гейт не видит – субагент двигает текст полями плана и проверяет кадрами.
+  assert.match(brief, words('код сцены не сдвигает текст за пределы `box`: движение – через `enter`/`exit` и поля плана'));
+  assert.match(brief, words('текст внутри `media`/`bleed` гейт не проверяет – проверяй кадрами и `layer sheet`'));
   // Не просто упоминание /api/approve, а запрет: утверждает только владелец.
   assert.match(brief, /не утверждай[^\n]*\n?[^\n]*не вызывай API пульта \(`\/api\/approve`\)/u);
   assert.doesNotMatch(brief, /\/Users\/|\/home\/|projects\/20\d\d/u);
@@ -110,6 +114,7 @@ test('motion layer brief and creative motion start with the kit and its gates', 
   const checklist = read('skills/reel-turnkey/references/qa-checklist.md');
   assert.match(checklist, /2,5 секунды/);
   assert.match(checklist, /automontage layer check/);
+  assert.match(checklist, words('Сдвиг, который добавляет код сцены внутри `KitBox`'));
   // Правило баланса делится по типу голоса, а не по слою kit: живая запись – 12–18 dB по qa:preview,
   // голос аватара (со слоем kit и без него) – баланс утверждённого эталона, ~38 LU по G8 (D-035).
   const turnkey = read('skills/reel-turnkey/SKILL.md');
