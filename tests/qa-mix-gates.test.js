@@ -225,6 +225,33 @@ test('voice and music PCM of slightly different lengths are fitted to the previe
   assert.deepEqual(measure(frames + 500, frames), exact);
 });
 
+// Голос кончился раньше, чем окна речи транскрипта: хвост замера – тишина, поэтому G8 честно говорит
+// «голос не звучит» (стоп), а не пропускает гейт как «в диапазоне preview нет речи». Тишина добавляет 0
+// к обеим суммам: в окнах, где голос звучит, разрыв gapLu не меняется, меняются только blocks и LUFS.
+test('speech windows after the end of the voice track read as a silent voice, not as no speech', () => {
+  const pcm = (count, value) => {
+    const bytes = Buffer.alloc(count * 2 * 4);
+    for (let i = 0; i < count * 2; i += 1) bytes.writeFloatLE(value, i * 4);
+    return bytes;
+  };
+  const measure = (windows) => measureVoiceMusic({ voicePath: 'v.mp4', musicPath: 'm.mp3', durationSec: 2, windows,
+    mixOptions: parseMixOptions([]),
+    spawnImpl: (command, args) => ({ status: 0, stderr: Buffer.alloc(0),
+      stdout: args.includes('-filter_complex') ? pcm(48000, 0.1) : pcm(48000, 0.4) }) });
+  const after = measure([{ s: 1.2, e: 1.9 }]);
+  assert.equal(after.blocks, 14);
+  assert.equal(after.gapLu, -Infinity);
+  const g = gateVoiceMusic(after, avatar, { gainDb: -16 });
+  assert.equal(g.status, 'fail');
+  assert.equal(g.value, 'голос не звучит');
+  // Окно поперёк конца голоса: разрыв тот же, что по звучащей части, выросли только blocks и упали LUFS.
+  const voiced = measure([{ s: 0.5, e: 1 }]);
+  const across = measure([{ s: 0.5, e: 1.5 }]);
+  assert.ok(Math.abs(across.gapLu - voiced.gapLu) < 1e-9, `${across.gapLu} против ${voiced.gapLu}`);
+  assert.equal(across.blocks, 2 * voiced.blocks);
+  assert.ok(Math.abs(across.voiceLufs - (voiced.voiceLufs - 10 * Math.log10(2))) < 1e-9);
+});
+
 test('measureVoiceMusic refuses missing music options, a bad duration and an empty decode', () => {
   const { spawnImpl } = spawnSpy();
   const base = { voicePath: 'v.mp4', musicPath: 'm.mp3', mixOptions: parseMixOptions([]), durationSec: 10, windows: [], spawnImpl };
