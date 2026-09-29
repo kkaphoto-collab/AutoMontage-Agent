@@ -90,15 +90,17 @@ test('the music stem is measured with the same ffmpeg inputs as the preview musi
   const output = ['-ac', '2', '-ar', '48000', '-f', 'f32le', '-acodec', 'pcm_f32le', '-'];
   const stem = calls.find((call) => call.args.includes('-filter_complex')).args;
   // Входы и их опции (порядок, -stream_loop, абсолютные пути) – один в один; граф – stem без
-  // изменений, к которому дописано только K-взвешивание на 48 кГц во float.
+  // изменений, к которому дописаны только 48 кГц во float, ровно 0,3 × 48000 = 14400 кадров (тишина
+  // после конца, как apad микса) и K-взвешивание.
+  const fit = 'aresample=48000,aformat=sample_fmts=fltp,apad,atrim=end_sample=14400';
   assert.deepEqual(inputs(stem), inputs(production));
   assert.equal(stem[stem.indexOf('-filter_complex') + 1],
-    `${buildMusicFilter(mixOptions, { stem: 'music' })};[aout]aresample=48000,aformat=sample_fmts=fltp,${K_WEIGHTING}[k]`);
-  assert.deepEqual(stem.slice(stem.indexOf('-map')), ['-map', '[k]', '-t', '0.3', ...output]);
-  // Голос проходит тот же формат, что ветка [v] в графе микса, и то же K-взвешивание.
+    `${buildMusicFilter(mixOptions, { stem: 'music' })};[aout]${fit},${K_WEIGHTING}[k]`);
+  assert.deepEqual(stem.slice(stem.indexOf('-map')), ['-map', '[k]', ...output]);
+  // Голос проходит тот же формат, что ветка [v] в графе микса, ту же длину и то же K-взвешивание.
   const voice = calls.find((call) => !call.args.includes('-filter_complex')).args;
   assert.deepEqual(voice.slice(voice.indexOf('-i')), ['-i', path.resolve('stage/finished.mp4'), '-map', '0:a:0', '-vn',
-    '-af', `${MIX_AUDIO_FORMAT},aresample=48000,aformat=sample_fmts=fltp,${K_WEIGHTING}`, '-t', '0.3', ...output]);
+    '-af', `${MIX_AUDIO_FORMAT},${fit},${K_WEIGHTING}`, ...output]);
   assert.ok(buildMusicFilter(mixOptions).split(';')[1].startsWith(`[0:a]${MIX_AUDIO_FORMAT},asplit=2[v]`));
   assert.ok(calls.every((call) => call.command === 'ffmpeg'));
 });
@@ -125,7 +127,12 @@ test('K weighting reproduces ffmpeg ebur128 across the band', { skip: !hasFfmpeg
 
 // Главное обещание замера: музыка в нём – ровно то, что микс preview прибавляет к голосу, с ducking
 // и зацикленной музыкой. Настоящая команда mix-music, только звук без потерь (PCM в MOV вместо AAC),
-// чтобы сравнить по сэмплам: микс = голос + музыка замера (K-взвешивание линейно).
+// чтобы сравнить по сэмплам: микс = голос + музыка замера (K-взвешивание линейно). Замер всегда ровно
+// durationSec × 48000 кадров. Сам файл микса у ffmpeg 6 и 7 на 273 кадра короче: -shortest в их
+// муксере обрезает звук чуть раньше конца видео (у ffmpeg 8+ – ровно по концу). Это хвост файла
+// preview, а не граф микса, поэтому сравниваем по длине файла и держим недостачу в пределах 10 мс;
+// у такого обрезанного файла последняя 1 мс не сравнивается: у передискретизации 44,1 → 48 кГц на
+// обрыве нет следующих сэмплов, и крайний кадр расходится до 1e-3.
 test('the measured music is exactly what the preview mix adds to the voice', { skip: !hasFfmpeg }, (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-mix-equal-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -152,13 +159,70 @@ test('the measured music is exactly what the preview mix adds to the voice', { s
   const [voicePcm, musicPcm] = captured.map(floats);
   const mixedPcm = floatPcmFromFfmpeg(['-i', mixed, '-map', '0:a:0', '-vn', '-af', `aresample=48000,${K_WEIGHTING}`, '-t', '6'],
     { sampleRate: 48000, channels: 2 });
-  for (const pcm of [voicePcm, musicPcm, mixedPcm]) assert.equal(pcm.length, 6 * 48000 * 2);
+  for (const pcm of [voicePcm, musicPcm]) assert.equal(pcm.length, 6 * 48000 * 2);
+  assert.ok(mixedPcm.length <= 6 * 48000 * 2 && mixedPcm.length >= (6 - 0.01) * 48000 * 2, `микс ${mixedPcm.length / 2} кадров`);
+  const compared = mixedPcm.length === voicePcm.length ? mixedPcm.length : mixedPcm.length - 48 * 2;
   let worst = 0;
-  for (let i = 0; i < mixedPcm.length; i += 1) worst = Math.max(worst, Math.abs(mixedPcm[i] - voicePcm[i] - musicPcm[i]));
+  for (let i = 0; i < compared; i += 1) worst = Math.max(worst, Math.abs(mixedPcm[i] - voicePcm[i] - musicPcm[i]));
   assert.ok(worst < 5e-4, `микс отличается от голоса + музыки замера на ${worst}`);
   // Сценарий действительно проверяет sidechain: под речью (0,5 с) музыка заметно тише, чем в паузе (3,5 с).
   const powers = blockPowers(musicPcm);
   assert.ok(10 * Math.log10(powers[70] / powers[10]) > 8, `ducking: ${powers[10]} под речью, ${powers[70]} в паузе`);
+});
+
+// Голос короче диапазона preview (дорожка кончилась раньше видео): в миксе после конца голоса тишина
+// (amix duration=first, sidechain музыки кончается вместе с голосом, дальше apad). Замер обязан быть
+// той же длины durationSec × 48000 с тишиной в хвосте, а не короче: иначе окна речи в хвосте молча
+// выпадали, и длина зависела от версии ffmpeg (6 и 7 не срезают хвостовое заполнение AAC: +193 кадра).
+test('a voice shorter than the preview range is padded with silence to the exact preview length', { skip: !hasFfmpeg }, (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-mix-short-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const voice = path.join(dir, 'finished.mp4');
+  const music = path.join(dir, 'music.wav');
+  runTool('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=black:s=64x64:r=25:d=6',
+    '-f', 'lavfi', '-i', 'sine=frequency=220:sample_rate=48000:duration=5.5',
+    '-map', '0:v', '-map', '1:a', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-ac', '2', voice]);
+  runTool('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=880:sample_rate=44100:duration=2.3', '-ac', '2', music]);
+  const captured = [];
+  const spawnImpl = (command, args, options) => {
+    const result = spawnSync(command, args, options);
+    captured.push(result.stdout);
+    return result;
+  };
+  const result = measureVoiceMusic({ voicePath: voice, musicPath: music, durationSec: 6, windows: [{ s: 0, e: 6 }], spawnImpl,
+    mixOptions: parseMixOptions(['--gain', '-12', '--threshold', '1', '--ratio', '1', '--duration', '6']) });
+  for (const bytes of captured) assert.equal(bytes.length, 6 * 48000 * 2 * 4);
+  assert.equal(result.blocks, 120);
+  const floats = (bytes) => Float32Array.from({ length: bytes.length / 4 }, (_, i) => bytes.readFloatLE(i * 4));
+  for (const pcm of captured.map(floats)) {
+    const powers = blockPowers(pcm);
+    assert.ok(powers[117] < 1e-6 * powers[50], `после конца голоса тишина: ${powers[117]} против ${powers[50]}`);
+  }
+});
+
+// Страховка поверх ffmpeg: дорожки разной длины (другая сборка ffmpeg, подмена spawn) выравниваются
+// по durationSec × 48000 кадров – лишнее отрезается, недостающее считается тишиной, как apad микса.
+test('voice and music PCM of slightly different lengths are fitted to the preview length', () => {
+  const frames = 48000;
+  const pcm = (count, value) => {
+    const bytes = Buffer.alloc(count * 2 * 4);
+    for (let i = 0; i < count * 2; i += 1) bytes.writeFloatLE(value, i * 4);
+    return bytes;
+  };
+  const measure = (voiceFrames, musicFrames) => measureVoiceMusic({ voicePath: 'v.mp4', musicPath: 'm.mp3', durationSec: 1,
+    windows: [{ s: 0, e: 1 }], mixOptions: parseMixOptions([]),
+    spawnImpl: (command, args) => ({ status: 0, stderr: Buffer.alloc(0),
+      stdout: args.includes('-filter_complex') ? pcm(musicFrames, 0.1) : pcm(voiceFrames, 0.4) }) });
+  const exact = measure(frames, frames);
+  assert.equal(exact.blocks, 20);
+  assert.ok(Math.abs(exact.gapLu - 20 * Math.log10(4)) < 1e-6, `${exact.gapLu}`);
+  // Музыка на 273 кадра короче (5,7 мс): все 20 блоков на месте, в последнем недостача – тишина.
+  const shortMusic = measure(frames, frames - 273);
+  assert.equal(shortMusic.blocks, 20);
+  const expected = 10 * Math.log10((20 * 0.16) / (19 * 0.01 + 0.01 * (2400 - 273) / 2400));
+  assert.ok(Math.abs(shortMusic.gapLu - expected) < 1e-6, `${shortMusic.gapLu} против ${expected}`);
+  // Голос длиннее диапазона: лишнее не попадает в замер.
+  assert.deepEqual(measure(frames + 500, frames), exact);
 });
 
 test('measureVoiceMusic refuses missing music options, a bad duration and an empty decode', () => {

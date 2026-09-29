@@ -6,7 +6,7 @@
 // под речью должны тянуть разрыв вверх – это то, что в среднем слышно под голосом. На музыке с
 // паузами он поэтому расходится с gated ebur128; при калибровке это не ошибка, которую надо исправлять.
 const path = require('node:path');
-const { BLOCK_SEC, floatPcmFromFfmpeg, formatSeconds } = require('./audio');
+const { BLOCK_SEC, floatPcmFromFfmpeg } = require('./audio');
 const { gate } = require('./report');
 const { MIX_AUDIO_FORMAT, buildMusicFilter, mixMusicInputArgs } = require('../mix-music');
 const { hostPath } = require('../process');
@@ -82,12 +82,26 @@ function loudnessGap(voicePowers, musicPowers, windows) {
   };
 }
 
+// Ровно frames кадров: лишнее отрезается, недостающее – тишина (как apad микса preview). Страховка
+// поверх apad/atrim в ffmpeg: разная длина дорожек не должна молча выкидывать блоки из окон речи.
+function fitFrames(samples, frames, channels = CHANNELS) {
+  const size = frames * channels;
+  if (samples.length === size) return samples;
+  if (samples.length > size) return samples.subarray(0, size);
+  const out = new Float32Array(size);
+  out.set(samples.subarray(0, Math.floor(samples.length / channels) * channels));
+  return out;
+}
+
 // voicePath – голос после finish.js. Музыка идёт через те же входы (mixMusicInputArgs: порядок,
 // -stream_loop -1, пути) и тот же граф, что в mix-music.js, в режиме stem: 'music'; к его выходу
 // дописано только K-взвешивание. Голос проходит тот же aformat, что ветка [v] микса. Remotion и
 // finish.js отдают стерео, так что это страховка: моно-голос микс сыграл бы стерео-копией −3 дБ на
 // канал, и без aformat разрыв читался бы на 3 дБ больше настоящего. Оба сигнала выровнены по сэмплам
-// от начала, как их сводит sidechain/amix в самом preview.
+// от начала, как их сводит sidechain/amix в самом preview. Длина – ровно durationSec × 48000 кадров
+// счётом сэмплов (apad + atrim=end_sample), а не -t: ffmpeg 6 и 7 не срезают хвостовое заполнение AAC,
+// и голос короче диапазона давал бы замер разной длины на разных версиях. После конца голоса в миксе
+// тишина (amix duration=first, sidechain музыки кончается с голосом, затем apad) – ею и дополняем.
 function measureVoiceMusic({ voicePath, musicPath, mixOptions, durationSec, windows, spawnImpl }) {
   if (!mixOptions || typeof mixOptions !== 'object') {
     throw new Error('measureVoiceMusic: нужны mixOptions из parseMixOptions (параметры музыки preview)');
@@ -96,23 +110,23 @@ function measureVoiceMusic({ voicePath, musicPath, mixOptions, durationSec, wind
     throw new Error('measureVoiceMusic: durationSec должен быть конечным положительным числом');
   }
   if (!Array.isArray(windows)) throw new Error('measureVoiceMusic: windows должен быть массивом окон речи');
-  const duration = formatSeconds(durationSec);
+  const frames = Math.round(durationSec * RATE);
   // fltp до K-взвешивания: иначе s16-вход идёт через biquad в s16p и полка +4 дБ обрезает пики.
-  const weighting = `aresample=${RATE},aformat=sample_fmts=fltp,${K_WEIGHTING}`;
+  const weighting = `aresample=${RATE},aformat=sample_fmts=fltp,apad,atrim=end_sample=${frames},${K_WEIGHTING}`;
   const decode = (inputArgs) => floatPcmFromFfmpeg(inputArgs, {
     sampleRate: RATE, channels: CHANNELS, spawnImpl,
-    maxBuffer: Math.ceil(durationSec * RATE) * CHANNELS * 4 + 1024 * 1024,
+    maxBuffer: frames * CHANNELS * 4 + 1024 * 1024,
   });
-  const voice = decode(['-i', hostPath(voicePath), '-map', '0:a:0', '-vn', '-af', `${MIX_AUDIO_FORMAT},${weighting}`, '-t', duration]);
+  const voice = decode(['-i', hostPath(voicePath), '-map', '0:a:0', '-vn', '-af', `${MIX_AUDIO_FORMAT},${weighting}`]);
   const music = decode([
     ...mixMusicInputArgs(voicePath, musicPath),
-    '-filter_complex', `${buildMusicFilter(mixOptions, { stem: 'music' })};[aout]${weighting}[k]`, '-map', '[k]', '-t', duration,
+    '-filter_complex', `${buildMusicFilter(mixOptions, { stem: 'music' })};[aout]${weighting}[k]`, '-map', '[k]',
   ]);
   // Пустой PCM – «ffmpeg ничего не отдал», а не «музыки нет»: иначе G8 тихо пропустился бы. Только имена
   // файлов: сообщение становится подсказкой G8 в отчёте preview.
   if (!voice.length) throw new Error(`нет звука голоса в ${path.basename(voicePath)}`);
   if (!music.length) throw new Error(`нет звука музыки после sidechain: ${path.basename(musicPath)}`);
-  return loudnessGap(blockPowers(voice), blockPowers(music), windows);
+  return loudnessGap(blockPowers(fitFrames(voice, frames)), blockPowers(fitFrames(music, frames)), windows);
 }
 
 function gapWords(gapLu) {
