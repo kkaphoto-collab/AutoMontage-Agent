@@ -1,7 +1,8 @@
 // Пороги гейтов. avatar – голос HeyGen/ElevenLabs и слой kit; live – живая запись с микрофона.
 // Коридор avatar.voiceMusic откалиброван по утверждённому эталонному preview (D-035).
-// live.voiceMusic – стартовые значения без калибровки; уточнить по утверждённому живому ролику
-// (D-035).
+// live.voiceMusic – стартовые значения без калибровки (calibrated: false): G8 за его пределами только
+// предупреждает, без стопа и без совета по music.gainDb; уточнить по утверждённому живому ролику
+// (D-035, D-038).
 
 // Гейт получает профиль по ссылке: без глубокой заморозки один гейт мог бы тихо поменять порог
 // (например rhythm.stopSec) для следующего гейта той же проверки.
@@ -44,9 +45,11 @@ const BASE = deepFreeze({
 // voiceMusic – коридор G8 в LU (разрыв громкости BS.1770 голос − музыка на участках речи).
 // avatar: замер утверждённого эталонного preview тем же путём, что G8, R = 37,95 → 38 LU (29.09.2026,
 // решение владельца «по эталону»): предупреждение вне R ± 3, стоп < 3 или > R + 8 (D-035).
+// live: старое правило qa:preview 12–18 дБ, переписанное в LU, – шкалы разные (эталон avatar ≈9 дБ
+// qa:preview ≈38 LU G8), поэтому calibrated: false и стопа по коридору нет.
 const PROFILES = deepFreeze({
   avatar: { ...BASE, voiceMusic: { stopLow: 3, warnLow: 35, target: 38, warnHigh: 41, stopHigh: 46 } },
-  live: { ...BASE, voiceMusic: { stopLow: 6, warnLow: 12, target: 15, warnHigh: 18, stopHigh: 24 } },
+  live: { ...BASE, voiceMusic: { stopLow: 6, warnLow: 12, target: 15, warnHigh: 18, stopHigh: 24, calibrated: false } },
 });
 
 const WAIVABLE = Object.freeze(['G1', 'G4', 'G11']);

@@ -166,6 +166,21 @@ test('other previews longer than 10 minutes are not measured; kit layers still a
   assert.equal(kit.block, true);
 });
 
+test('a kit layer with the live profile only warns on G8: the live corridor is not calibrated', (t) => {
+  const gap30 = () => ({ gapLu: 30, voiceLufs: -14, musicLufs: -44, blocks: 100 });
+  const live = runPreviewGates(base(project(t, { registered: true, profile: 'live' })), { measureImpl: gap30 });
+  assert.equal(live.report.profile, 'live');
+  assert.equal(live.enforced, true);
+  assert.equal(live.block, false);
+  assert.deepEqual(statuses(live), [['L', 'pass'], ['G8', 'warn']]);
+  assert.match(live.report.gates[1].hint, /коридор live не откалиброван/u);
+  assert.doesNotMatch(live.report.gates[1].hint, NO_ADVICE);
+  // Для avatar стоп на месте: тот же слой с музыкой вровень с голосом блокируется.
+  const avatar = runPreviewGates(base(project(t, { registered: true })), { measureImpl: loud });
+  assert.equal(avatar.block, true);
+  assert.deepEqual(statuses(avatar), [['L', 'pass'], ['G8', 'fail']]);
+});
+
 test('every video scene is checked: one bad layer of two blocks and is named', (t) => {
   const dir = project(t);
   addLayer(dir, { layer: 'motion-v01', render: sha('1'), canonical: sha('a') });
@@ -312,11 +327,13 @@ test('layers with different profiles: G8 uses the profile of the first layer in 
   addLayer(dir, { layer: 'motion-v01', render: sha('1'), canonical: sha('a'), profile: 'live' });
   addLayer(dir, { layer: 'motion-v02', render: sha('2'), canonical: sha('b'), profile: 'avatar' });
   const scenes = [videoScene(sha('a'), 'id-motion-v01'), videoScene(sha('b'), 'id-motion-v02')];
-  // Цель avatar различает профили: в коридоре avatar – pass, выше стоп-границы live – fail.
+  // Цель avatar различает профили: в коридоре avatar – pass, выше стоп-границы live – предупреждение
+  // (коридор live не откалиброван и не останавливает).
   assert.ok(AVATAR_TARGET > getProfile('live').voiceMusic.stopHigh);
   const first = runPreviewGates(base(dir, { brief: { scenes, music: { gainDb: -16 } } }), { measureImpl: good });
   assert.equal(first.report.profile, 'live');
-  assert.deepEqual(statuses(first), [['L', 'pass'], ['G8', 'fail']]);
+  assert.deepEqual(statuses(first), [['L', 'pass'], ['G8', 'warn']]);
+  assert.equal(first.block, false);
   const swapped = runPreviewGates(base(dir, { brief: { scenes: [...scenes].reverse(), music: { gainDb: -16 } } }), { measureImpl: good });
   assert.equal(swapped.report.profile, 'avatar');
   assert.deepEqual(statuses(swapped), [['L', 'pass'], ['G8', 'pass']]);

@@ -308,6 +308,28 @@ test('the avatar corridor is calibrated on the approved reference preview', () =
   assert.equal(at(46.1).status, 'fail');
 });
 
+// Коридор live не откалиброван (D-035: шкалы старого qa:preview и G8 расходятся на десятки единиц):
+// выход из него – предупреждение без совета по music.gainDb, стоп остаётся только у avatar.
+test('the uncalibrated live corridor never stops and gives no gain advice', () => {
+  const live = getProfile('live');
+  assert.equal(live.voiceMusic.calibrated, false);
+  assert.notEqual(avatar.voiceMusic.calibrated, false);
+  const at = (gapLu) => gateVoiceMusic({ gapLu, voiceLufs: -14, musicLufs: -14 - gapLu, blocks: 100 }, live, { gainDb: -12 });
+  for (const gapLu of [30, 2, 20, -1]) {
+    const g = at(gapLu);
+    assert.equal(g.status, 'warn', `${gapLu} LU`);
+    assert.match(g.hint, /коридор live не откалиброван/u);
+    assert.doesNotMatch(g.hint, /music\.gainDb|увеличьте|уменьшите/u);
+  }
+  assert.equal(at(15).status, 'pass');
+  assert.equal(at(30).value, 30);
+  // Поломки звука – не вопрос коридора: они по-прежнему стоп.
+  assert.equal(gateVoiceMusic({ gapLu: -Infinity, voiceLufs: -Infinity, musicLufs: -20, blocks: 100 }, live).status, 'fail');
+  assert.equal(gateVoiceMusic({ gapLu: Infinity, voiceLufs: -14, musicLufs: -Infinity, blocks: 100 }, live).status, 'fail');
+  // Тот же разрыв на avatar – стоп, как раньше.
+  assert.equal(gateVoiceMusic({ gapLu: 2, voiceLufs: -14, musicLufs: -16, blocks: 100 }, avatar).status, 'fail');
+});
+
 // Схема brief ограничивает music.gainDb диапазоном −60…0 дБ: совет не выводит за край, а когда края
 // не хватает – предлагает трек громче/тише или мягче/сильнее ducking.
 test('G8 advice never pushes music.gainDb outside −60…0 dB', () => {
