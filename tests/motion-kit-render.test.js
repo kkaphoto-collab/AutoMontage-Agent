@@ -263,26 +263,26 @@ const SEAM_FIXTURE = `
 import { AbsoluteFill, Composition, registerRoot } from 'remotion';
 import { SpeakerLayer, compileCamera } from '@automontage/motion-kit';
 
-const CFG = { fps: 25, width: 1080, height: 1920, durationInFrames: 10 };
+const CFG = { fps: 25, width: 1080, height: 1920, durationInFrames: 100 };
 const PRESETS = { low: { s: 1.1, dy: -260, fill: true } };
 
-function Layer({ preset }) {
+function Layer({ preset, src }) {
   const track = compileCamera({ face: { x: 540, y: 787 }, presets: PRESETS, shots: [{ at: 0, preset, drift: 'none' }] }, CFG);
   return (
     <AbsoluteFill style={{ backgroundColor: '#000' }}>
-      <SpeakerLayer src="speaker.mp4" track={track} />
+      <SpeakerLayer src={src} track={track} />
     </AbsoluteFill>
   );
 }
 
 registerRoot(() => (
-  <Composition id="Layer" component={Layer} defaultProps={{ preset: 'L' }} {...CFG} />
+  <Composition id="Layer" component={Layer} defaultProps={{ preset: 'L', src: 'speaker.mp4' }} {...CFG} />
 ));
 `;
 
-test('fill presets (L, R, top, custom dy) blend the sharp speaker into the fill without a hard seam in real stills', {
-  skip: process.env.AUTOMONTAGE_TEST_MOTION_RENDER !== '1', timeout: 300_000,
-}, async (t) => {
+// Общая часть кадров спикера: бандл фикстуры, однотонные исходники (speaker.mp4 в размер кадра и
+// tall.mp4 другой пропорции, 1080×1350), кадр → яркость по пикселям и средние профили.
+async function speakerStills(t) {
   const fs = require('node:fs');
   const path = require('node:path');
   const os = require('node:os');
@@ -298,9 +298,10 @@ test('fill presets (L, R, top, custom dy) blend the sharp speaker into the fill 
   fs.mkdirSync(srcDir, { recursive: true });
   fs.mkdirSync(publicDir, { recursive: true });
   fs.writeFileSync(path.join(srcDir, 'index.jsx'), SEAM_FIXTURE);
-  execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=0xD0B090:s=1080x1920:r=25:d=1',
-    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', path.join(publicDir, 'speaker.mp4')], { shell: false });
-
+  for (const [file, size] of [['speaker.mp4', '1080x1920'], ['tall.mp4', '1080x1350']]) {
+    execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', `color=c=0xD0B090:s=${size}:r=25:d=4`,
+      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', path.join(publicDir, file)], { shell: false });
+  }
   const serveUrl = await bundle({
     entryPoint: path.join(srcDir, 'index.jsx'), publicDir, outDir: path.join(work, 'bundle'),
     webpackOverride: (config) => withMotionKitAlias(config),
@@ -310,6 +311,14 @@ test('fill presets (L, R, top, custom dy) blend the sharp speaker into the fill 
 
   const gray = (file) => execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-i', file,
     '-f', 'rawvideo', '-pix_fmt', 'gray', 'pipe:1'], { shell: false, maxBuffer: 16 * 1024 * 1024 });
+  let n = 0;
+  const still = async ({ preset, src = 'speaker.mp4', frame = 0 }) => {
+    const inputProps = { preset, src };
+    const composition = await selectComposition({ serveUrl, id: 'Layer', inputProps, puppeteerInstance: browser });
+    const output = path.join(work, `still-${n += 1}.png`);
+    await renderStill({ serveUrl, composition, frame, output, inputProps, imageFormat: 'png', puppeteerInstance: browser, logLevel: 'error' });
+    return gray(output);
+  };
   // across: 'x' – профиль по столбцам (шов вертикальный), 'y' – по строкам (шов горизонтальный);
   // усредняем по полосе в середине другой оси, чтобы не задеть углы кадра.
   const profile = (pixels, across) => {
@@ -322,14 +331,17 @@ test('fill presets (L, R, top, custom dy) blend the sharp speaker into the fill 
     }
     return out;
   };
+  return { still, profile };
+}
 
+test('fill presets (L, R, top, custom dy) blend the sharp speaker into the fill without a hard seam in real stills', {
+  skip: process.env.AUTOMONTAGE_TEST_MOTION_RENDER !== '1', timeout: 300_000,
+}, async (t) => {
+  const { still, profile } = await speakerStills(t);
   const cases = [['L', 'x', 1079], ['R', 'x', 0], ['top', 'y', 0], ['low', 'y', 1919]];
   const report = [];
   for (const [preset, across, edge] of cases) {
-    const composition = await selectComposition({ serveUrl, id: 'Layer', inputProps: { preset }, puppeteerInstance: browser });
-    const output = path.join(work, `${preset}.png`);
-    await renderStill({ serveUrl, composition, frame: 0, output, inputProps: { preset }, imageFormat: 'png', puppeteerInstance: browser, logLevel: 'error' });
-    const p = profile(gray(output), across);
+    const p = profile(await still({ preset }), across);
     let maxStep = 0;
     let at = 0;
     for (let i = 1; i < p.length; i += 1) if (Math.abs(p[i] - p[i - 1]) > maxStep) { maxStep = Math.abs(p[i] - p[i - 1]); at = i; }
@@ -340,5 +352,20 @@ test('fill presets (L, R, top, custom dy) blend the sharp speaker into the fill 
   for (const r of report) {
     assert.ok(r.center - r.edge >= 20, `${r.preset}: заливка у края не видна (центр ${r.center}, край ${r.edge}) – кадр ничего не проверяет`);
     assert.ok(r.maxStep <= 4, `${r.preset}: жёсткий шов – соседние ${r.preset === 'L' || r.preset === 'R' ? 'столбцы' : 'строки'} ${r.at - 1}/${r.at} отличаются на ${r.maxStep} уровней`);
+  }
+});
+
+// Ревью мягкого края: вложенный блок маски без стиля на планах без заливки ломал cover-кадрирование –
+// height: 100% видео считался от блока с высотой auto, и исходник другой пропорции (1080×1350 в
+// кадре 1080×1920) оставлял снизу чёрную полосу ~570 px. Видео обязано закрывать весь кадр.
+test('a speaker file of another aspect is still cover-cropped to the whole frame on shots without fill', {
+  skip: process.env.AUTOMONTAGE_TEST_MOTION_RENDER !== '1', timeout: 300_000,
+}, async (t) => {
+  const { still, profile } = await speakerStills(t);
+  for (const preset of ['W', 'M', 'L']) {
+    const rows = profile(await still({ preset, src: 'tall.mp4' }), 'y');
+    const darkest = Math.min(...rows);
+    t.diagnostic(`${preset}: самая тёмная строка ${darkest.toFixed(1)}, строка 1919 ${rows[1919].toFixed(1)}`);
+    assert.ok(darkest >= 170, `${preset}: в кадре чёрная полоса – самая тёмная строка ${darkest.toFixed(1)} (строка ${rows.indexOf(darkest)})`);
   }
 });

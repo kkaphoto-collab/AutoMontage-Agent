@@ -68,14 +68,15 @@ export function SpeakerLayer({ src, track, lastFrame, trimBefore = 0 }) {
   const held = Number.isFinite(lastFrame)
     ? <Freeze frame={lastFrame} active={frame > lastFrame}>{video}</Freeze>
     : video;
-  // Вложенный блок маски стоит всегда (без стиля вне заливки): дерево одно и то же на любом плане,
-  // и смена плана с заливкой не размонтирует видео.
+  // Вложенный блок маски стоит всегда: дерево одно и то же на любом плане, и смена плана с заливкой
+  // не размонтирует видео. Он всегда растянут на всю копию (absolute, inset 0): без этого height: 100%
+  // видео считался бы от блока с высотой auto, и исходник другой пропорции терял бы cover-кадрирование.
   const mask = speakerEdgeMask(state, track);
   return (
     <AbsoluteFill style={{ opacity: state.opacity }}>
       {state.fill ? <div style={speakerFillStyle(track)}>{held}</div> : null}
       <div style={{ ...speakerTransform(state, track), ...mask?.x }}>
-        <div style={mask ? { position: 'absolute', inset: 0, ...mask.y } : undefined}>{held}</div>
+        <div style={{ position: 'absolute', inset: 0, ...mask?.y }}>{held}</div>
       </div>
     </AbsoluteFill>
   );

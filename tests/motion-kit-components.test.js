@@ -225,6 +225,22 @@ test('SpeakerLayer puts the soft-edge masks only on the sharp copy of a fill sho
   assert.doesNotMatch(render(React.createElement(kitAt(10).SpeakerLayer, { src: 'speaker.mp4', track, lastFrame: 200 })), /mask/);
 });
 
+// Ревью мягкого края: вложенный блок маски обязан всегда растягиваться на весь кадр копии, иначе
+// height: 100% видео считается от блока с высотой auto и cover-кадрирование пропадает (исходник
+// другой пропорции оставлял чёрную полосу на плане без заливки).
+test('SpeakerLayer always stretches the inner mask block over the whole copy, with and without fill', () => {
+  const cfg = { fps: 25, width: 1080, height: 1920, durationInFrames: 250 };
+  const track = kitAt(0).compileCamera({ face: { x: 540, y: 787 }, shots: [{ at: 0, preset: 'W' }, { at: 2, preset: 'L' }] }, cfg);
+  for (const frame of [10, 60]) {
+    const html = render(React.createElement(kitAt(frame).SpeakerLayer, { src: 'speaker.mp4', track, lastFrame: 200 }));
+    const styles = [...html.matchAll(/<div style="([^"]*)"/g)].map((m) => m[1]);
+    const inner = styles.at(-1);
+    assert.match(inner, /^position:absolute;inset:0/, `frame ${frame}: ${html}`);
+    assert.doesNotMatch(inner, /transform/, `frame ${frame}: последний блок – вложенный, а не сама копия`);
+    assert.doesNotMatch(html, /<div>/, `frame ${frame}: блок без стиля ломает cover-кадрирование`);
+  }
+});
+
 test('speakerTransform stays pure geometry (no opacity) and only adds blur/brightness once they are visually meaningful', () => {
   const kit = kitAt(0);
   const track = { width: 1080, height: 1920, face: { x: 540, y: 787 } };
@@ -274,8 +290,8 @@ test('SpeakerLayer fades the fill and main copies together via the group opacity
   const styles = [...html.matchAll(/<div style="([^"]*)"/g)].map((m) => m[1]);
   // Ровно один styled div на каждую копию (fill + main) плюс внешняя группа; Freeze-обёртки стиля
   // не несут. opacity должна стоять только на внешней группе – по копиям делать нечего.
-  // На плане с заливкой у резкой копии есть ещё вложенный блок маски по y (speakerEdgeMask).
-  assert.equal(styles.length, state.fill ? 4 : 2, `unexpected number of styled divs: ${html}`);
+  // У резкой копии всегда есть вложенный блок (на плане с заливкой – с маской по y, speakerEdgeMask).
+  assert.equal(styles.length, state.fill ? 4 : 3, `unexpected number of styled divs: ${html}`);
   assert.match(styles[0], /opacity:0\.5/);
   for (const inner of styles.slice(1)) assert.doesNotMatch(inner, /opacity/);
 });
