@@ -82,7 +82,7 @@ async function run(options, deps = {}) {
     const manifest = buildManifest(layerDir);
     const manifestPath = path.join(layerDir, 'out', 'manifest.json');
     writeJson(manifestPath, manifest);
-    inputs = [{ path: relative(projectDir, manifestPath), sha256: sha256File(manifestPath) }];
+    inputs = [{ role: 'manifest', path: relative(projectDir, manifestPath), sha256: sha256File(manifestPath) }];
     const gates = runTimelineGates(manifest, profile);
     warnShortStock(gates, manifest, layerDir, deps.probeVideo);
     // Исключение, которое ничего не сняло (гейт прошёл или дал только warn), показываем автору.

@@ -193,7 +193,8 @@ function renderClaimed({ projectDir, layerName, sourcePath, profile, profileName
   }
 
   // inputs пишутся и при ошибке: слой первым (по его sha256 layer import находит этот отчёт), исходник и
-  // манифест, по которому судил G7 (его sha256 сверяется с отчётом layer check).
+  // манифест, по которому судил G7: sha256 байтов, прочитанных сразу после layer check этого запуска.
+  // С отчётом layer check он не сверяется – рядом стоит вход того же вида, сравнить можно по ним.
   const inputs = [];
   try {
     if (fs.lstatSync(claim.out, { throwIfNoEntry: false })?.isFile()) {

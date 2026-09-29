@@ -59,7 +59,7 @@ test('the fresh template passes every stop gate and writes manifest and report',
   assert.deepEqual(json.gates.map((g) => g.id), ['G1', 'G2', 'G3', 'G4', 'G5', 'G9', 'G10', 'G11']);
   assert.deepEqual(json.unusedWaivers, []);
   // Отчёт привязан к своему манифесту: путь от папки проекта и sha256 записанного файла.
-  assert.deepEqual(json.inputs, [{ path: 'motion-v01/out/manifest.json', sha256: hashFile(manifestFile) }]);
+  assert.deepEqual(json.inputs, [{ role: 'manifest', path: 'motion-v01/out/manifest.json', sha256: hashFile(manifestFile) }]);
   assert.match(reportText(), /^Проверки \(план слоя\): /);
   assert.ok(out.some((line) => line.includes(path.join(projectDir, 'qa', 'layer-motion-v01-check.txt'))), out.join('\n'));
 });
