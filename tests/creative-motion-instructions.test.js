@@ -86,3 +86,27 @@ test('all public adapters advertise the autonomous route chooser', () => {
     assert.equal(read(`${prefix}/skills/motion-reel/SKILL.md`), canonicalMotion);
   }
 });
+
+test('motion layer brief and creative motion start with the kit and its gates', () => {
+  const brief = read('skills/reel-turnkey/references/motion-layer-brief.md');
+  for (const rule of [
+    'automontage layer new', 'automontage layer check', '70/130/250/420', '2,5 с', 'muted',
+    'public/SOURCE.md', 'hook: \'enumeration\'', 'waivers',
+    // Кадр слоя без защищённого env-файла отдал бы браузеру Remotion значения из .env движка.
+    '--env-file=config/remotion-public.env', 'cover: true', 'automontage inbox --accept', '/api/approve',
+  ]) {
+    assert.ok(brief.includes(rule), rule);
+  }
+  assert.doesNotMatch(brief, /\/Users\/|\/home\/|projects\/20\d\d/u);
+  assert.doesNotMatch(brief, /\u2014/u);
+  const creative = read('skills/reel-turnkey/references/creative-motion.md');
+  assert.match(creative, /automontage layer new/);
+  assert.match(creative, /audioMode: "mix"/);
+  assert.match(creative, /motion-layer-brief\.md/);
+  const checklist = read('skills/reel-turnkey/references/qa-checklist.md');
+  assert.match(checklist, /2,5 секунды/);
+  assert.match(checklist, /automontage layer check/);
+  // Правило владельца о музыке остаётся рядом с G8, чья заглушка ждёт калибровки.
+  assert.match(checklist, /12–18 dB ниже голоса/u);
+  assert.match(checklist, /G8[\s\S]*заглушк/u);
+});
