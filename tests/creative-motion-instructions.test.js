@@ -116,3 +116,44 @@ test('motion layer brief and creative motion start with the kit and its gates', 
     assert.match(text, /ради заглушки не меня/u, name);
   }
 });
+
+test('reel skills start motion layers from the kit and gate them before the pult', () => {
+  for (const file of ['skills/motion-reel/SKILL.md', 'skills/reel-from-donor/SKILL.md', 'skills/reel-turnkey/SKILL.md']) {
+    const text = read(file);
+    assert.match(text, /automontage layer new/, file);
+    assert.match(text, /automontage layer check/, file);
+    assert.match(text, /motion-layer-brief\.md/, file);
+    const block = text.split('## Motion-слой из kit')[1]?.split('\n## ')[0];
+    assert.ok(block, `${file}: нет блока «Motion-слой из kit»`);
+    for (const step of ['automontage layer render', 'automontage layer import', 'automontage layer brief',
+      'automontage preview', 'automontage layer sheet', 'automontage layer stock', 'docs/MOTION-KIT.md']) {
+      assert.ok(block.includes(step), `${file}: ${step}`);
+    }
+    // Отчёты preview бывают с ⚠️: в пульт не пускает только ❌, а не «зелёный» итог.
+    assert.match(block, /без ❌/u, file);
+    assert.doesNotMatch(text, /зелёными отчётами/u, file);
+    // layer sheet работает с текущим preview, а не с рендером слоя.
+    assert.match(block, /layer sheet[^\n]*\n?[^\n]*текущего preview/u, file);
+    // Заглушка G8 до калибровки: brief без музыки, громкость музыки ради неё не трогают.
+    assert.match(block, /без `--music`/u, file);
+    assert.match(block, /ради заглушки не\s+меня/u, file);
+    assert.match(block, /music\.gainDb[^\n]*не выполняй/u, file);
+    // Утверждает только владелец.
+    assert.match(block, /Утверждает только владелец[\s\S]{0,40}«Утверждаю» в пульте[\s\S]{0,20}«утверждаю»\s+в\s+чате/u, file);
+    assert.doesNotMatch(block, /\u2014/u, file);
+    assert.doesNotMatch(block, /\/Users\/|\/home\/|projects\/20\d\d/u, file);
+  }
+
+  const motion = read('skills/motion-reel/SKILL.md');
+  // Ролик только из озвучки остаётся на встроенном MotionReel; kit – для аватара или спикера в кадре.
+  assert.match(motion, /без видео спикера[^\n]*\n?[^\n]*встроенным `MotionReel`, как раньше/u);
+  assert.match(motion, /kit нужен, когда в кадре есть аватар или спикер/iu);
+  // Известный пробел D-038: preview motion-reel барьер гейтов не проверяет.
+  assert.match(motion, /барьер[\s\S]{0,80}D-038/u);
+
+  // Слой kit несёт звук эффектов: mix, а немой по умолчанию только слой без kit.
+  const turnkey = read('skills/reel-turnkey/SKILL.md');
+  assert.match(turnkey, /Слой kit подключается с `audioMode: "mix"`/u);
+  assert.match(turnkey, /--audio mute/u);
+  assert.doesNotMatch(turnkey, /`brollMedia` с `audioMode: mute`/u);
+});

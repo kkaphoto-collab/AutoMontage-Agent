@@ -201,6 +201,7 @@ project-local motion pack по `references/creative-motion.md`. Использу
 (если локальной библиотеки звуков нет, brief слоя собирай с `--audio mute`). Другой
 project-local слой по умолчанию немой: `audioMode: "mute"`. Слою со своим текстом добавь
 `overlay: "none"`, чтобы движок не затемнял его и не рисовал поверх чип, заголовок и окно спикера.
+Слой поверх спикера или аватара собирай из motion-kit: раздел «Motion-слой из kit» ниже.
 
 Для внешней темы используй её id вместо `lesson-neutral`. Результат должен содержать:
 
@@ -360,6 +361,34 @@ node scripts/build.js <project-dir>/input/source.mp4 --template lesson \
 8. Для пакета: одну таблицу всех финалов, обложек и SHA-256, чтобы проверялась именно QA-версия.
 
 Для Telegram советуй отправлять ролик как файл, чтобы мессенджер не сжимал вертикаль.
+
+## Motion-слой из kit
+
+Слой с аватаром или живым спикером в кадре собирай из motion-kit. Пути – от корня движка;
+весь путь, команды и гейты – `docs/MOTION-KIT.md`.
+
+1. `automontage layer new --project-dir projects/<папка>` создаёт `motion-vNN/`. Субагенту слоя
+   отдай одно задание: `skills/reel-turnkey/references/motion-layer-brief.md` с этой папкой.
+2. `automontage layer check --project-dir projects/<папка> --layer motion-vNN` – после каждой
+   правки плана, за секунды: ритм, safe-zone, спикер в хуке, звуки, сток, чужое видео. Сток под
+   вставку – `automontage layer stock` (без `PEXELS_API_KEY` клип кладут вручную).
+3. `automontage layer render` – ждёт свободную машину, проверяет длину слоя и голос в его звуке.
+4. `automontage layer import` → `automontage layer brief` → `automontage preview`. Preview
+   проверяет баланс голоса и музыки; при стопе он не публикуется, в пульте остаётся прошлый.
+5. `automontage layer sheet --project-dir projects/<папка>` – контакт-лист текущего preview и
+   кадры вокруг новых правок пульта к нему. Команда только предупреждает.
+
+В пульт уходит только preview, у которого отчёты `layer check`, `layer render` и `preview` в
+`qa/` без ❌. Каждое ⚠️ прочитай; исключения (`waivers`) – только с причиной.
+
+Коридор G8 – заглушка до калибровки: preview слоя kit с музыкой G8 остановит. До калибровки
+собирай brief слоя без `--music` или покажи число владельцу. Громкость музыки ради заглушки не
+меняй, подсказку G8 про `music.gainDb` не выполняй.
+
+Правку из пульта вноси в тот же слой (новый слой – только при новом исходнике), затем снова
+`layer check` → `layer render` → `layer import` → `layer brief` → `automontage preview` и
+`automontage inbox --accept`. Утверждает только владелец: «Утверждаю» в пульте или «утверждаю»
+в чате.
 
 ## Пульт роликов
 

@@ -168,6 +168,40 @@ approved-копия может попасть в `renders/` и `final/`; receipt
 Отдай ссылку на локальный файл из `manifest.final` (обычно `final/<slug>.mp4`), длительность
 и краткий QA-итог.
 
+## Motion-слой из kit
+
+Ролик только из озвучки без видео спикера собирается встроенным `MotionReel`, как раньше.
+Kit нужен, когда в кадре есть аватар или спикер: такой ролик веди по
+`skills/reel-turnkey/SKILL.md` и подключай слой через `automontage layer brief`. Не ставь слой
+kit media-сценой motion brief: preview motion-reel барьер гейтов не проверяет (известный
+пробел, D-038 в `DECISIONS.md`).
+
+Слой с аватаром или живым спикером в кадре собирай из motion-kit. Пути – от корня движка;
+весь путь, команды и гейты – `docs/MOTION-KIT.md`.
+
+1. `automontage layer new --project-dir projects/<папка>` создаёт `motion-vNN/`. Субагенту слоя
+   отдай одно задание: `skills/reel-turnkey/references/motion-layer-brief.md` с этой папкой.
+2. `automontage layer check --project-dir projects/<папка> --layer motion-vNN` – после каждой
+   правки плана, за секунды: ритм, safe-zone, спикер в хуке, звуки, сток, чужое видео. Сток под
+   вставку – `automontage layer stock` (без `PEXELS_API_KEY` клип кладут вручную).
+3. `automontage layer render` – ждёт свободную машину, проверяет длину слоя и голос в его звуке.
+4. `automontage layer import` → `automontage layer brief` → `automontage preview`. Preview
+   проверяет баланс голоса и музыки; при стопе он не публикуется, в пульте остаётся прошлый.
+5. `automontage layer sheet --project-dir projects/<папка>` – контакт-лист текущего preview и
+   кадры вокруг новых правок пульта к нему. Команда только предупреждает.
+
+В пульт уходит только preview, у которого отчёты `layer check`, `layer render` и `preview` в
+`qa/` без ❌. Каждое ⚠️ прочитай; исключения (`waivers`) – только с причиной.
+
+Коридор G8 – заглушка до калибровки: preview слоя kit с музыкой G8 остановит. До калибровки
+собирай brief слоя без `--music` или покажи число владельцу. Громкость музыки ради заглушки не
+меняй, подсказку G8 про `music.gainDb` не выполняй.
+
+Правку из пульта вноси в тот же слой (новый слой – только при новом исходнике), затем снова
+`layer check` → `layer render` → `layer import` → `layer brief` → `automontage preview` и
+`automontage inbox --accept`. Утверждает только владелец: «Утверждаю» в пульте или «утверждаю»
+в чате.
+
 ## Пульт роликов
 
 - В начале работы выполни `automontage inbox` и сначала обработай входящие этого ролика.
