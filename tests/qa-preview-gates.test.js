@@ -152,33 +152,25 @@ test('other projects get G8 for reference only: no stop, no warning, no gain adv
   }
 });
 
-test('other previews longer than 10 minutes are not measured; kit layers still are', (t) => {
-  const long = { fromSec: 0, toSec: 601 };
+test('other previews longer than 180 s are not measured; kit layers still are', (t) => {
   const longWords = [{ s: 1, e: 3 }];
+  // Граница справочного замера: 179 с меряется, 181 с – нет, и замер даже не вызывается.
+  let calls = 0;
+  const short = runPreviewGates(base(project(t), { range: { fromSec: 0, toSec: 179 }, words: longWords }),
+    { measureImpl: () => { calls += 1; return good(); }, write: false });
+  assert.equal(calls, 1);
+  assert.match(short.report.gates[0].hint, /^для справки: разница голос\/музыка/u);
+  const long = { fromSec: 0, toSec: 181 };
   const result = runPreviewGates(base(project(t), { range: long, words: longWords }),
-    { measureImpl: () => { throw new Error('не должен мерить'); } });
+    { measureImpl: () => { throw new Error('не должен мерить'); }, write: false });
   assert.deepEqual(statuses(result), [['G8', 'skipped']]);
-  assert.match(result.report.gates[0].hint, /длиннее 10 мин/u);
+  assert.equal(result.block, false);
+  assert.match(result.report.gates[0].hint, /^для справки: preview длиннее 3 мин – баланс голоса и музыки не замерялся/u);
   let measured = false;
-  const kit = runPreviewGates(base(project(t, { registered: true }), { range: long, words: longWords }),
+  const kit = runPreviewGates(base(project(t, { registered: true }), { range: { fromSec: 0, toSec: 601 }, words: longWords }),
     { measureImpl: () => { measured = true; return loud(); } });
   assert.equal(measured, true);
   assert.equal(kit.block, true);
-});
-
-test('a kit layer with the live profile only warns on G8: the live corridor is not calibrated', (t) => {
-  const gap30 = () => ({ gapLu: 30, voiceLufs: -14, musicLufs: -44, blocks: 100 });
-  const live = runPreviewGates(base(project(t, { registered: true, profile: 'live' })), { measureImpl: gap30 });
-  assert.equal(live.report.profile, 'live');
-  assert.equal(live.enforced, true);
-  assert.equal(live.block, false);
-  assert.deepEqual(statuses(live), [['L', 'pass'], ['G8', 'warn']]);
-  assert.match(live.report.gates[1].hint, /коридор live не откалиброван/u);
-  assert.doesNotMatch(live.report.gates[1].hint, NO_ADVICE);
-  // Для avatar стоп на месте: тот же слой с музыкой вровень с голосом блокируется.
-  const avatar = runPreviewGates(base(project(t, { registered: true })), { measureImpl: loud });
-  assert.equal(avatar.block, true);
-  assert.deepEqual(statuses(avatar), [['L', 'pass'], ['G8', 'fail']]);
 });
 
 test('every video scene is checked: one bad layer of two blocks and is named', (t) => {

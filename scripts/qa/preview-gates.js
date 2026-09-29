@@ -17,8 +17,10 @@ const { buildReport, gate, writeReport } = require('./report');
 
 const LAYER_TITLE = 'Слой прошёл layer render и импорт';
 const VOICE_MUSIC_TITLE = 'Голос и музыка';
-// Без слоя kit замер – только справка, а PCM обеих дорожек в памяти ~80 МБ на минуту: дольше 10 минут не меряем.
-const INFO_MAX_SEC = 600;
+// Без слоя kit замер – только справка, а это два полных декодирования во float (~80 МБ на минуту в памяти)
+// внутри lease preview, у задачи preview в Review тайм-аут 10 минут. Поэтому справку меряем только для
+// роликов до 3 минут (Reels сохраняют своё число), длинный lesson пропускается с пометкой.
+const INFO_MAX_SEC = 180;
 const REBUILD = 'пересоберите слой: layer render → layer import → layer brief';
 // Имя файла, которое пишет layer render (renders/layer-NN.mp4). Импорт через Review сохраняет его в asset.json
 // (label) – так дёшево и без хеширования видно слой kit, минувший layer import.
@@ -224,7 +226,8 @@ function runPreviewGates({ projectDir, brief, manifest, hasMusic, words, range, 
     if (!layer.strict && !hasMusic) {
       gates.push(infoVoiceMusic('в brief нет музыки'));
     } else if (!layer.strict && durationSec > INFO_MAX_SEC) {
-      gates.push(infoVoiceMusic('preview длиннее 10 мин – баланс голоса и музыки не замерялся (память ~80 МБ на минуту)'));
+      gates.push(infoVoiceMusic('preview длиннее 3 мин – баланс голоса и музыки не замерялся (справочный замер '
+        + 'держит в памяти ~80 МБ на минуту)'));
     } else {
       let measured = null;
       if (hasMusic) {
