@@ -7,6 +7,11 @@ test('a share exactly at the threshold is not empty, just below it is', () => {
   assert.equal(isEmptySample({ timeSec: 1, edgeShare: SHARE_THRESHOLD - 0.0001 }), true);
 });
 
+test('a realistic 0.05 % edge share is empty, a realistic 0.2 % edge share is content', () => {
+  assert.equal(isEmptySample({ timeSec: 1, edgeShare: 0.0005 }), true);
+  assert.equal(isEmptySample({ timeSec: 1, edgeShare: 0.002 }), false);
+});
+
 test('a null sample (unreadable frame) counts as empty', () => {
   const report = emptyFrameGate([null, { timeSec: 2, edgeShare: 0.5 }]);
   assert.equal(report.value, 1);
@@ -42,6 +47,8 @@ test('the gate id, title and threshold text mention both constants', () => {
   assert.equal(report.id, 'G12');
   assert.equal(report.title, 'Пустые кадры');
   assert.match(report.threshold, new RegExp(String(EDGE_THRESHOLD)));
-  assert.match(report.threshold, /0[.,]1%/);
+  // Число с запятой, как у остальных гейтов (scripts/qa/timeline-gates.js), а не с точкой.
+  assert.match(report.threshold, /0,1 %/);
+  assert.doesNotMatch(report.threshold, /0\.1/);
   assert.equal(report.unit, 'из 0');
 });

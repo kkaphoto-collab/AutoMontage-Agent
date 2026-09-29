@@ -23,8 +23,12 @@ const sheetTimes = (duration, n = 16) => Array.from({ length: n }, (_, i) => Num
 
 // ffmpeg понимает -ss только как обычную десятичную запись: String(1e-7) печатает экспоненциальную
 // форму («1e-7»), которую он отказывается разбирать. Math.max(0, …) — защита от -0 и микроскопических
-// отрицательных остатков после вычитания.
-const formatSeconds = (t) => Math.max(0, t).toFixed(3);
+// отрицательных остатков после вычитания. toFixed(3) сам по себе округляет к БЛИЖАЙШЕЙ миллисекунде,
+// то есть примерно в половине случаев — вверх: lastFrameSec вроде 3,9666667 с он превратил бы в
+// «3.967», уже позже настоящего последнего кадра — тот же самый отказ декодера, который мы чиним
+// этим же зажимом. Поэтому сначала округляем вниз (Math.floor) до миллисекунды и только потом
+// печатаем: секунды на выходе никогда не позже запрошенных.
+const formatSeconds = (t) => (Math.floor(Math.max(0, t) * 1000) / 1000).toFixed(3);
 
 // Ширина миниатюры: у портретного кадра — сама ширина 270 px; у альбомного длинная сторона (тоже
 // ширина) должна остаться читаемой, около 480 px — иначе 16:9 давал бы миниатюры вдвое ниже нужного.
@@ -163,11 +167,14 @@ async function run(options, deps = {}) {
   // файла, что играл браузер (scripts/pult/status.js: video.path === preview.filePath) — сдвигать на
   // currentPreview.fromSec не нужно и неверно для preview-фрагмента. Комментарий к другому видео,
   // к более старой версии того же файла на диске (sha256 не совпадает) или со временем за пределами
-  // текущей длины — не про этот ролик.
+  // длины КОНТЕЙНЕРА (или отрицательным) — не про этот ролик, отбрасываем совсем. Комментарий между
+  // концом видео-дорожки и концом контейнера (тот же рассинхрон звука и видео, из-за которого играет
+  // фраза «правка на самом конце») — не мимо, buildSheet сам сведёт его секунды к lastFrameSec.
+  const upperBoundSec = probe.containerDurationSec ?? probe.durationSec;
   const comments = readComments(projectDir)
     .filter((comment) => comment.status === 'new' && comment.video.path === current.filePath
       && (comment.video.sha256 === null || comment.video.sha256 === current.sha256)
-      && comment.timeSec >= 0 && comment.timeSec <= probe.durationSec)
+      && comment.timeSec >= 0 && comment.timeSec <= upperBoundSec)
     .map((comment) => ({ id: comment.id, timeSec: comment.timeSec }));
   const result = buildSheet({
     videoPath, width: probe.width, height: probe.height, duration: probe.durationSec, fps: probe.fps,

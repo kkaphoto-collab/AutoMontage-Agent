@@ -8,6 +8,7 @@ const { toolAvailable, runTool } = require('./helpers/media-fixtures');
 const { makeLayerProject } = require('./helpers/layer-project');
 const { writeProjectManifest } = require('../scripts/project/workspace');
 const { hashFile } = require('../scripts/pult/files');
+const { probeMediaPath } = require('../scripts/media-probe');
 const { acceptComment, addComment } = require('../scripts/pult/comments');
 const { safeRect } = require('../scripts/qa/safe-rect');
 const { buildSheet, frameEdgeShare, run, sheetTimes, thumbBox } = require('../scripts/layer/sheet');
@@ -105,6 +106,33 @@ test('a comment near the very end still gets its frame strip (lastFrameSec clamp
   assert.ok(fs.statSync(result.commentPaths[0]).size > 0);
 });
 
+// formatSeconds rounds to the NEAREST millisecond by construction of toFixed(3): for a lastFrameSec
+// like 3,9666667 с (30 fps, 4 с) that rounds UP to "3.967" — already past the real last frame, the
+// exact same silent-failure this whole clamp exists to avoid. It must round DOWN instead.
+test('a 30 fps 4 s clip with a comment at 3.98 s does not round -ss past the last real frame', { skip: !hasFfmpeg }, (t) => {
+  const dir = tmpDir(t);
+  const video = path.join(dir, 'preview.mp4');
+  plainVideo(video, { fps: 30, seconds: 4 });
+  const result = buildSheet({ videoPath: video, width: 108, height: 192, duration: 4, fps: 30, outDir: dir, name: 'sheet-30fps',
+    comments: [{ id: 'c-thirty01', timeSec: 3.98 }] });
+  assert.equal(result.commentPaths.length, 1);
+  assert.ok(fs.statSync(result.commentPaths[0]).size > 0);
+});
+
+test('a 30000/1001 fps 12 s clip with a comment at 11.99 s does not round -ss past the last real frame', { skip: !hasFfmpeg }, (t) => {
+  const dir = tmpDir(t);
+  const video = path.join(dir, 'preview.mp4');
+  const fps = 30000 / 1001;
+  plainVideo(video, { fps: '30000/1001', seconds: 12 });
+  // 29,97 кадра в секунду: запрошенные 12 с ffmpeg округляет до целого числа кадров (360), реальная
+  // длина видео-дорожки — 360/fps ≈ 12,012 с, не ровно 12 — берём её тем же способом, что run().
+  const duration = probeMediaPath(video, { stage: 'test probe' }).durationSec;
+  const result = buildSheet({ videoPath: video, width: 108, height: 192, duration, fps, outDir: dir, name: 'sheet-vfr12',
+    comments: [{ id: 'c-vfr01', timeSec: 11.99 }] });
+  assert.equal(result.commentPaths.length, 1);
+  assert.ok(fs.statSync(result.commentPaths[0]).size > 0);
+});
+
 test('a 10 fps 3 s clip produces a full sheet (short clip, low fps)', { skip: !hasFfmpeg }, (t) => {
   const dir = tmpDir(t);
   const video = path.join(dir, 'preview.mp4');
@@ -121,12 +149,12 @@ test('a one-frame clip produces a sheet instead of failing on every sample', { s
   assert.ok(fs.statSync(result.sheetPath).size > 0);
 });
 
-test('an audio track 0.5 s longer than the video does not push a near-end comment past the real content', { skip: !hasFfmpeg }, async (t) => {
+// Видео 4 с, звук 4,5 с: контейнер (format.duration) отдал бы 4,5 с — по видео-дорожке верно 4 с.
+function scaffoldLongerAudioProject(t) {
   const { projectDir, workspace } = makeLayerProject(t, { seconds: 6 });
   const previewRelative = 'previews/preview.mp4';
   const previewPath = path.join(projectDir, previewRelative);
   fs.mkdirSync(path.dirname(previewPath), { recursive: true });
-  // Видео 4 с, звук 4,5 с: контейнер (format.duration) отдал бы 4,5 с — по видео-дорожке верно 4 с.
   runTool('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=108x192:r=25:d=4',
     '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:d=4.5', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac',
     '-map', '0:v', '-map', '1:a', previewPath]);
@@ -136,10 +164,29 @@ test('an audio track 0.5 s longer than the video does not push a near-end commen
       width: 108, height: 192, fps: 25, generatedAt: new Date().toISOString(), sha256: hashFile(previewPath) },
   };
   writeProjectManifest(projectDir, nextManifest, { expectedManifest: workspace.manifest });
+  const addPreviewComment = (timeSec) => addComment(projectDir,
+    { timeSec, text: 'правка', video: { kind: 'preview', path: previewRelative, sha256: null } }, { captureFrame: null });
+  return { projectDir, addPreviewComment };
+}
+
+test('an audio track 0.5 s longer than the video does not push a near-end comment past the real content', { skip: !hasFfmpeg }, async (t) => {
+  const { projectDir, addPreviewComment } = scaffoldLongerAudioProject(t);
   // Правка на 3,99 с — почти у настоящего конца видео (4 с), а не у раздутого звуком конца контейнера.
-  addComment(projectDir, { timeSec: 3.99, text: 'конец', video: { kind: 'preview', path: previewRelative, sha256: null } }, { captureFrame: null });
-  const lines = [];
-  assert.equal(await run({ 'project-dir': projectDir }, { log: (line) => lines.push(line) }), 0);
+  addPreviewComment(3.99);
+  assert.equal(await run({ 'project-dir': projectDir }, { log: () => {} }), 0);
+  const commentFiles = fs.readdirSync(path.join(projectDir, 'qa')).filter((f) => f.includes('-comment-'));
+  assert.equal(commentFiles.length, 1, commentFiles.join(', '));
+});
+
+test('a comment between the video-stream end and the container end is kept and clamped, one past the container end is dropped', { skip: !hasFfmpeg }, async (t) => {
+  const { projectDir, addPreviewComment } = scaffoldLongerAudioProject(t);
+  // 4,03 с: за концом видео (4,0 с), но внутри контейнера (4,5 с, растянутого звуком) — это тот же
+  // ролик, просто правка попала в хвост, где звук ещё идёт, а видео уже кончилось; buildSheet сам
+  // сведёт секунды к lastFrameSec, поэтому такую правку не нужно отбрасывать.
+  addPreviewComment(4.03);
+  // 4,6 с — уже за пределами самого контейнера: это не про этот файл вовсе.
+  addPreviewComment(4.6);
+  assert.equal(await run({ 'project-dir': projectDir }, { log: () => {} }), 0);
   const commentFiles = fs.readdirSync(path.join(projectDir, 'qa')).filter((f) => f.includes('-comment-'));
   assert.equal(commentFiles.length, 1, commentFiles.join(', '));
 });
@@ -227,7 +274,7 @@ function magentaBox(sheetPath, thumbW) {
   return { left: minX, top: minY, right: maxX, bottom: maxY };
 }
 
-for (const [label, width, height] of [['portrait', 1080, 1920], ['landscape', 1920, 1080]]) {
+for (const [label, width, height, expectedThumbW] of [['portrait', 1080, 1920, 270], ['landscape', 1920, 1080, 480]]) {
   test(`safe-zone box sits where safeRect says it should (${label})`, { skip: !hasFfmpeg }, (t) => {
     const dir = tmpDir(t);
     const video = path.join(dir, 'preview.mp4');
@@ -235,6 +282,10 @@ for (const [label, width, height] of [['portrait', 1080, 1920], ['landscape', 19
     runTool('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', `color=c=black:s=${width}x${height}:d=1`, '-pix_fmt', 'yuv420p', video]);
     const result = buildSheet({ videoPath: video, width, height, duration: 1, fps: 25, outDir: dir, name: 'sheet-safe' });
     const { thumbW, box } = thumbBox(width, height);
+    // Пришпилено к конкретному числу, а не только к своей же формуле thumbWidth(): портрет — 270 px,
+    // альбом — 480 px (то есть лист 4×4 у альбома должен быть ровно 1920 px в ширину).
+    assert.equal(thumbW, expectedThumbW);
+    assert.equal(imageDims(result.sheetPath).width, expectedThumbW * 4);
     const found = magentaBox(result.sheetPath, thumbW);
     const tolerance = 3;
     assert.ok(Math.abs(found.left - box.x) <= tolerance, `left ${found.left} vs ${box.x}`);
@@ -377,6 +428,7 @@ test('run() prints G12 span seconds and the hint when the gate warns', { skip: !
   const lines = [];
   assert.equal(await run({ 'project-dir': projectDir }, { log: (line) => lines.push(line) }), 0);
   const block = lines.join('\n');
+  assert.match(block, /Проверки \(контакт-лист\)/, 'kind has a human title, not the bare "sheet" key');
   assert.match(block, /⚠️.*G12/);
   assert.match(block, /\d+:\d{2},\d{2}/, 'span seconds are printed in clock form');
   assert.match(block, /проверьте, не выпала ли графика/);

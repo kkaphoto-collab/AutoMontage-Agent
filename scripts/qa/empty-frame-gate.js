@@ -11,6 +11,10 @@ const EDGE_WIDTH = 135;
 const EDGE_THRESHOLD = 24;
 const SHARE_THRESHOLD = 0.001;
 
+// Тот же стиль числа, что у других гейтов (scripts/qa/timeline-gates.js: fmt/r2) — две цифры после
+// запятой, сама запятая вместо точки: «0,1», не «0.1».
+const ru = (value) => String(Math.round(value * 100) / 100).replace('.', ',');
+
 // sample — {timeSec, edgeShare} для прочитанного кадра или null, если ffmpeg не смог его декодировать
 // (тоже подозрительно — не гейта дело чинить битый кадр, но и не пропускать его как «всё в порядке»).
 function isEmptySample(sample) {
@@ -24,7 +28,7 @@ function emptyFrameGate(samples) {
     status: empty.length ? 'warn' : 'pass',
     value: empty.length,
     unit: `из ${list.length}`,
-    threshold: `доля пикселей с перепадом яркости > ${EDGE_THRESHOLD} не меньше ${(SHARE_THRESHOLD * 100).toFixed(1)}%`,
+    threshold: `доля пикселей с перепадом яркости > ${EDGE_THRESHOLD} не меньше ${ru(SHARE_THRESHOLD * 100)} %`,
     spans: empty
       .filter((sample) => sample && Number.isFinite(sample.timeSec))
       .slice(0, 5)

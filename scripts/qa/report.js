@@ -5,7 +5,7 @@ const { WAIVABLE } = require('./profiles');
 
 const ICONS = { pass: '✅', warn: '⚠️', fail: '❌', waived: '☑️', skipped: '⏭️' };
 const STATUSES = Object.keys(ICONS);
-const KIND_TITLES = { 'layer-check': 'план слоя', 'layer-render': 'рендер слоя', preview: 'preview' };
+const KIND_TITLES = { 'layer-check': 'план слоя', 'layer-render': 'рендер слоя', preview: 'preview', sheet: 'контакт-лист' };
 const REPORT_NAME = /^[a-z0-9][a-z0-9._-]{0,80}$/u;
 const NO_ERROR_TEXT = 'неизвестная ошибка';
 
