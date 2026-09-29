@@ -17,5 +17,7 @@ test('motion kit is documented for people and agents', () => {
   assert.match(guide, /Слепое пятно: манифест берёт движение только из анимации kit/);
   assert.match(guide, /`KitBox` не обрезает детей/);
   assert.match(guide, /G5 зелёный, а в кадре текст за safe-зоной/);
+  // Боковой пресет без заливки не вмещает панч от 10 %: засчитанный G1 панч – только на W.
+  assert.match(guide, /панчи, которые должны\s+считаться событием G1, ставьте на `W`/);
   assert.doesNotMatch(guide, /\/Users\/|projects\/20\d\d/);
 });
