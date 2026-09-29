@@ -7,8 +7,9 @@
 // бандл (outDir null) и на macOS/Linux кладёт в него симлинк на папку public (symlinkPublicDir в
 // @remotion/cli/dist/setup-cache.js), копирует её только на Windows. Отдельный флаг для этого не нужен.
 //
-// Обрыв (Ctrl+C, SIGKILL) уборку не даёт: во время Remotion остаётся пустая заявка layer-NN.raw.mp4 —
-// следующий рендер возьмёт NN+1; во время нормализации — ещё и недописанный layer-NN.mp4 без отчёта, его
+// Обрыв (Ctrl+C, SIGKILL) уборку не даёт: во время Remotion остаётся заявка layer-NN.raw.mp4 (в неё
+// же Remotion пишет сырой рендер, там может быть недописанное видео), следующий рендер возьмёт NN+1;
+// во время нормализации – ещё и недописанный layer-NN.mp4 без отчёта, его
 // sha256 нет ни в одном отчёте layer render, и layer import такой файл не примет. Оба файла можно удалить.
 const fs = require('node:fs');
 const path = require('node:path');
