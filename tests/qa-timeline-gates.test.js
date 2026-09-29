@@ -180,6 +180,39 @@ test('a cut shortly after a punch is not swallowed by the punch, and the plan en
   assert.ok(plans.some((p) => p.to === d.events[1].frame), JSON.stringify(plans));
 });
 
+// Проба Task 49: панч, который начинается на том же кадре, что и рез (M → W и наезд на слове),
+// считался дважды: рез на 13,44 с и второй «панч» на 13,72 с – когда окно панча в 6 кадров уже
+// не касалось реза, а пружина ещё росла от уровня сразу после реза. Лишнее событие делит план.
+const cutWithPunch = (fps, seconds, shot, punchAt = 2) => kit.buildManifest(kit.compileLayer({
+  captions: false, items: [],
+  camera: { face, shots: [{ at: 0, preset: 'M', drift: 'none' }, { at: 2, drift: 'none', ...shot }],
+    punches: [{ at: punchAt, until: seconds }] } }, { fps, width: 1080, height: 1920,
+  durationInFrames: Math.round(seconds * fps), words: [], sfxLibrary: { sounds: {} } }));
+
+test('REAL KIT: a punch that starts on a cut is one event, not a cut plus a late phantom punch', () => {
+  for (const fps of [25, 30, 50, 60]) {
+    for (const shot of [{ preset: 'W' }, { preset: 'W', dx: 120 }, { preset: 'L' }]) {
+      const d = detectCameraEvents(cutWithPunch(fps, 6, shot).camera, avatar.camera, 1, fps);
+      assert.deepEqual(d.events, [{ frame: 2 * fps, kind: 'cut' }], `fps=${fps} ${JSON.stringify(shot)}`);
+    }
+  }
+});
+
+test('BAD CASE: a long plan after a cut with a punch on it stops G1 instead of hiding behind the phantom punch', () => {
+  // план спикера 2,00–4,64 с = 2,64 с; раньше лишний «панч» на 2,28 с оставлял 2,36 с и только warn
+  const g = gateRhythm(cutWithPunch(25, 4.64, { preset: 'W' }), avatar);
+  assert.equal(g.status, 'fail');
+  assert.equal(g.value, 2.64);
+  assert.deepEqual([g.spans[0].fromSec, g.spans[0].toSec], [2, 4.64]);
+});
+
+test('a punch that starts a few frames after a cut stays its own event, dated at its own start', () => {
+  for (const [fps, at] of [[25, 2.2], [25, 2.4], [60, 2.04], [60, 2.2]]) {
+    const d = detectCameraEvents(cutWithPunch(fps, 6, { preset: 'W' }, at).camera, avatar.camera, 1, fps);
+    assert.deepEqual(d.events, [{ frame: 2 * fps, kind: 'cut' }, { frame: Math.round(at * fps), kind: 'punch' }], `fps=${fps} at=${at}`);
+  }
+});
+
 // П.4: панч сдвинут назад к настоящему началу роста (совпадает с punch.at из плана), а не к
 // кадру, где прирост впервые перевалил punchScale (обычно на 2–3 кадра позже).
 test('a punch event is backdated to the real start of its rise, matching punch.at', () => {
@@ -612,13 +645,18 @@ test('the eaten-punch lookahead window includes the flagged frame itself, not on
 });
 
 // hardIn не должен считать рез РОВНО на границе окна (b6) «резом внутри окна»: значение s[b6] уже
-// само отражает состояние ПОСЛЕ реза, поэтому сравнивать с ним панч можно как обычно.
+// само отражает состояние ПОСЛЕ реза, поэтому сравнивать с ним панч можно как обычно. Последний
+// сырой кадр реза – 51 (скачок виден и в окне 49–51), первый кадр панча без реза в окне – 57 с
+// b6 = 51. Подъём начинается после ровного кадра 52, а не прямо на резе: панч, выросший прямо из
+// реза, – одно событие с резом (проба Task 49). На 58 окно уже меньше 10 %, так что при `>=` в
+// hardIn панч пропал бы совсем.
 test('a cut exactly at the punch window boundary does not suppress the punch (exclusive bound)', () => {
+  const rise = { 52: 1.005, 53: 1.01, 54: 1.055, 55: 1.01, 56: 1.01, 57: 1.01 };
   const m = manifestFixture({ seconds: 4, camera: (f) => {
     if (f < 50) return { s: 1.0 };
-    if (f === 50) return { s: 1.5 };
-    const n = Math.min(f - 50, 6);
-    return { s: 1.5 * (1.02 ** n) };
+    let s = 1.5;
+    for (let g = 52; g <= Math.min(f, 57); g += 1) s *= rise[g];
+    return { s };
   } });
   const d = detectCameraEvents(m.camera, avatar.camera, 1, 25);
   assert.deepEqual(d.events.map((e) => e.kind), ['cut', 'punch']);

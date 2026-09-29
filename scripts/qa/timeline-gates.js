@@ -97,6 +97,29 @@ function detectCameraEvents(camera, t, scale, fps) {
   // проявляется не в САМОМ кадре f, а на кадр-два позже (пружина ещё не успела упереться в потолок
   // именно на f) – поэтому смотрим вперёд на всё окно панча, а не только на сам кадр. Это отдельная
   // проблема (гейт G3 задачи 22), не слабый джамп-кат – не показываем в G2.
+  // Панч, который начинается на резе (новый план сразу с наездом), – одно событие с резом. Окно
+  // панча перестаёт касаться реза раньше, чем пружина досчитает рост, и прирост от уровня сразу
+  // после реза давал второе, ложное событие через punchWindow + 1 кадр: оно делило план и прятало
+  // длинный план от стопа G1. Поэтому для кандидата в панч ищем последний рез/смену фокуса не
+  // дальше двух окон назад и начало подъёма после него: от самого крутого прироста назад, пока
+  // прирост ≥ 10 % пика (как в riseStart). Подъём дошёл до самого реза – панч принадлежит резу.
+  const lastHard = (f) => {
+    for (let i = events.length - 1; i >= 0 && events[i].frame >= f - 2 * punchWindow; i -= 1) {
+      if (events[i].kind === 'cut' || events[i].kind === 'focus') return events[i].frame;
+    }
+    return null;
+  };
+  const climbStart = (from, to) => {
+    let top = 0;
+    let peak = to;
+    for (let g = from + 1; g <= to; g += 1) {
+      const rise = camera.s[g] / camera.s[g - 1] - 1;
+      if (rise > top) { top = rise; peak = g; }
+    }
+    let g = peak;
+    while (g > from && camera.s[g] / camera.s[g - 1] - 1 >= 0.1 * top && camera.s[g - 1] < camera.s[g]) g -= 1;
+    return g;
+  };
   const eaten = (f) => {
     for (let g = f; g <= Math.min(n - 1, f + punchWindow); g += 1) {
       if (isEatenFrame(camera.requested, camera.s, g, t.eatenPunch)) return true;
@@ -118,7 +141,13 @@ function detectCameraEvents(camera, t, scale, fps) {
       // сразу: пружина панча держит это условие истинным несколько кадров подряд, и окно b6 у
       // каждого из них своё (может сползти на уже подросшую базу, если s успел выйти на плато).
       // Отодвигаем назад только ОДИН раз – уже после схлопывания – у первого сырого кадра пачки.
-      events.push({ frame: f, kind: 'punch' });
+      // Сразу после реза начало подъёма уже известно (climbStart от реза) – оно и есть дата панча.
+      const hard = lastHard(f);
+      if (hard === null) events.push({ frame: f, kind: 'punch' });
+      else {
+        const rise = climbStart(hard, f);
+        if (rise > hard) events.push({ frame: f, kind: 'punch', rise });
+      }
     } else {
       // Слабую смену показываем в G2, только если её видно: если в f или в опорном кадре b2 спикер
       // уже не резкий (away/blur/вставка), эту вибрацию масштаба или лица зритель не видит.
@@ -142,7 +171,7 @@ function detectCameraEvents(camera, t, scale, fps) {
   // после схлопывания у каждой пачки панча остаётся ровно один представитель, и riseStart честно
   // считает его собственное окно [f−punchWindow, f] заново.
   const kept = collapse(events).map((e) => (e.kind === 'punch'
-    ? { ...e, frame: riseStart(e.frame, Math.max(0, e.frame - punchWindow)) }
+    ? { frame: e.rise ?? riseStart(e.frame, Math.max(0, e.frame - punchWindow)), kind: 'punch' }
     : e));
   const nearEvent = (w) => events.some((e) => Math.abs(e.frame - w.frame) <= punchWindow);
   return { events: kept, weak: collapse(weak.filter((w) => !nearEvent(w))), sharp };
