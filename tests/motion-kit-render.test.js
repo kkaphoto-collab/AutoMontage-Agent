@@ -252,3 +252,94 @@ registerRoot(() => (
     'a FontLoader with no children next to Subtitles must fail the render, not silently race',
   );
 });
+
+// Проба Task 49: заливка краёв (fill) за резким спикером давала жёсткий шов – на боковых L/R
+// вертикальный, на пресетах со сдвигом dy горизонтальный: резкая копия обрывалась, дальше – полоса
+// размытой затемнённой копии ~110 px. Кадр однотонный, поэтому любой перепад в профиле яркости –
+// это шов, а не содержимое. Меряем средний профиль поперёк бывшего шва (по столбцам для L/R, по
+// строкам для dy) и требуем, чтобы соседние столбцы/строки отличались не больше чем на 4 уровня из
+// 255, а заливка при этом действительно была видна (край темнее центра хотя бы на 20 уровней).
+const SEAM_FIXTURE = `
+import { AbsoluteFill, Composition, registerRoot } from 'remotion';
+import { SpeakerLayer, compileCamera } from '@automontage/motion-kit';
+
+const CFG = { fps: 25, width: 1080, height: 1920, durationInFrames: 10 };
+const PRESETS = { low: { s: 1.1, dy: -260, fill: true } };
+
+function Layer({ preset }) {
+  const track = compileCamera({ face: { x: 540, y: 787 }, presets: PRESETS, shots: [{ at: 0, preset, drift: 'none' }] }, CFG);
+  return (
+    <AbsoluteFill style={{ backgroundColor: '#000' }}>
+      <SpeakerLayer src="speaker.mp4" track={track} />
+    </AbsoluteFill>
+  );
+}
+
+registerRoot(() => (
+  <Composition id="Layer" component={Layer} defaultProps={{ preset: 'L' }} {...CFG} />
+));
+`;
+
+test('fill presets (L, R, top, custom dy) blend the sharp speaker into the fill without a hard seam in real stills', {
+  skip: process.env.AUTOMONTAGE_TEST_MOTION_RENDER !== '1', timeout: 300_000,
+}, async (t) => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const os = require('node:os');
+  const { execFileSync } = require('node:child_process');
+  const { bundle } = require('@remotion/bundler');
+  const { openBrowser, renderStill, selectComposition } = require('@remotion/renderer');
+  const { withMotionKitAlias } = require('../scripts/remotion-webpack');
+
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'motion-kit-render-seam-'));
+  t.after(() => fs.rmSync(work, { recursive: true, force: true }));
+  const srcDir = path.join(work, 'src');
+  const publicDir = path.join(work, 'public');
+  fs.mkdirSync(srcDir, { recursive: true });
+  fs.mkdirSync(publicDir, { recursive: true });
+  fs.writeFileSync(path.join(srcDir, 'index.jsx'), SEAM_FIXTURE);
+  execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=0xD0B090:s=1080x1920:r=25:d=1',
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', path.join(publicDir, 'speaker.mp4')], { shell: false });
+
+  const serveUrl = await bundle({
+    entryPoint: path.join(srcDir, 'index.jsx'), publicDir, outDir: path.join(work, 'bundle'),
+    webpackOverride: (config) => withMotionKitAlias(config),
+  });
+  const browser = await openBrowser('chrome', { logLevel: 'error' });
+  t.after(() => browser.close({ silent: true }));
+
+  const gray = (file) => execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-i', file,
+    '-f', 'rawvideo', '-pix_fmt', 'gray', 'pipe:1'], { shell: false, maxBuffer: 16 * 1024 * 1024 });
+  // across: 'x' – профиль по столбцам (шов вертикальный), 'y' – по строкам (шов горизонтальный);
+  // усредняем по полосе в середине другой оси, чтобы не задеть углы кадра.
+  const profile = (pixels, across) => {
+    const [w, h] = [1080, 1920];
+    const out = [];
+    if (across === 'x') {
+      for (let x = 0; x < w; x += 1) { let sum = 0; for (let y = 700; y < 1300; y += 1) sum += pixels[y * w + x]; out.push(sum / 600); }
+    } else {
+      for (let y = 0; y < h; y += 1) { let sum = 0; for (let x = 300; x < 780; x += 1) sum += pixels[y * w + x]; out.push(sum / 480); }
+    }
+    return out;
+  };
+
+  const cases = [['L', 'x', 1079], ['R', 'x', 0], ['top', 'y', 0], ['low', 'y', 1919]];
+  const report = [];
+  for (const [preset, across, edge] of cases) {
+    const composition = await selectComposition({ serveUrl, id: 'Layer', inputProps: { preset }, puppeteerInstance: browser });
+    const output = path.join(work, `${preset}.png`);
+    await renderStill({ serveUrl, composition, frame: 0, output, inputProps: { preset }, imageFormat: 'png', puppeteerInstance: browser, logLevel: 'error' });
+    if (process.env.AUTOMONTAGE_TEST_KEEP_STILLS) fs.copyFileSync(output, path.join(process.env.AUTOMONTAGE_TEST_KEEP_STILLS, `seam-${preset}.png`));
+    const p = profile(gray(output), across);
+    let maxStep = 0;
+    let at = 0;
+    for (let i = 1; i < p.length; i += 1) if (Math.abs(p[i] - p[i - 1]) > maxStep) { maxStep = Math.abs(p[i] - p[i - 1]); at = i; }
+    const center = p[Math.floor(p.length / 2)];
+    report.push({ preset, maxStep: Number(maxStep.toFixed(2)), at, center: Number(center.toFixed(1)), edge: Number(p[edge].toFixed(1)) });
+  }
+  t.diagnostic(JSON.stringify(report));
+  for (const r of report) {
+    assert.ok(r.center - r.edge >= 20, `${r.preset}: заливка у края не видна (центр ${r.center}, край ${r.edge}) – кадр ничего не проверяет`);
+    assert.ok(r.maxStep <= 4, `${r.preset}: жёсткий шов – соседние ${r.preset === 'L' || r.preset === 'R' ? 'столбцы' : 'строки'} ${r.at - 1}/${r.at} отличаются на ${r.maxStep} уровней`);
+  }
+});

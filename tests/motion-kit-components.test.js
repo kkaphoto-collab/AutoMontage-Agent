@@ -167,6 +167,64 @@ test('speakerTransform framing matches what the gates read: face moves by exactl
   }
 });
 
+// Проба Task 49: на планах с заливкой (L/R, top, свой пресет с dy) резкая копия обрывалась жёстким
+// швом над размытой заливкой. Теперь у резкой копии мягкий край: маска по x на самой копии и по y на
+// вложенном блоке, каждая от прозрачного на самом краю копии до непрозрачного через featherPx
+// (× короткая сторона / 1080) пикселей кадра. Проверяем на каждом кадре: каждый край, оказавшийся
+// внутри кадра, растушёван не меньше чем на featherPx, и маска начинается с прозрачного ровно на краю.
+test('fill shots feather every edge of the sharp speaker that lands inside the frame; non-fill shots get no mask', () => {
+  const kit = kitAt(0);
+  for (const [width, height, face] of [[1080, 1920, { x: 540, y: 787 }], [1920, 1080, { x: 960, y: 443 }]]) {
+    const k = Math.min(width, height) / 1080;
+    const cfg = { fps: 25, width, height, durationInFrames: 500 };
+    const track = kit.compileCamera({
+      face, presets: { low: { s: 1.1, dy: -260, fill: true } },
+      shots: [{ at: 0, preset: 'W' }, { at: 2, preset: 'L' }, { at: 4, preset: 'R', drift: 'out' }, { at: 6, preset: 'top' },
+        { at: 8, preset: 'low' }, { at: 10, preset: 'M', dx: 400 }, { at: 12, preset: 'L', drift: 'none' }],
+      punches: [{ at: 4.5, until: 5.2 }],
+    }, cfg);
+    let feathered = 0;
+    for (let frame = 0; frame < 500; frame += 1) {
+      const state = kit.cameraAt(track, frame);
+      const mask = kit.speakerEdgeMask(state, track);
+      if (!state.fill) { assert.equal(mask, null, `${width}x${height}@${frame}: маска без заливки`); continue; }
+      const px = mask.feather.toFixed(3);
+      for (const [axis, to] of [['x', 'right'], ['y', 'bottom']]) {
+        const image = mask[axis].maskImage;
+        assert.ok(image.startsWith(`linear-gradient(to ${to}, transparent 0px, `), image);
+        assert.ok(image.includes(`, #000 ${px}px, #000 calc(100% - ${px}px), `), image);
+        assert.ok(image.endsWith(', transparent 100%)'), image);
+      }
+      // края резкой копии в px кадра (transform: translate(dx, dy) scale(s) вокруг точки лица)
+      const inside = {
+        left: face.x * (1 - state.s) + state.dx > 0.01,
+        right: face.x + state.dx + state.s * (width - face.x) < width - 0.01,
+        top: face.y * (1 - state.s) + state.dy > 0.01,
+        bottom: face.y + state.dy + state.s * (height - face.y) < height - 0.01,
+      };
+      if (!Object.values(inside).some(Boolean)) continue;
+      feathered += 1;
+      // маска масштабируется вместе с копией: ширина в px кадра = локальная ширина × s
+      assert.ok(mask.feather * state.s >= kit.CAMERA_DEFAULTS.fill.featherPx * k - 1e-6,
+        `${width}x${height}@${frame}: открытый край растушёван только на ${mask.feather * state.s} px`);
+    }
+    assert.ok(feathered > 100, `${width}x${height}: проверка не увидела ни одного открытого края (${feathered})`);
+  }
+});
+
+test('SpeakerLayer puts the soft-edge masks only on the sharp copy of a fill shot, never on the fill itself', () => {
+  const cfg = { fps: 25, width: 1080, height: 1920, durationInFrames: 250 };
+  const track = kitAt(0).compileCamera({ face: { x: 540, y: 787 }, shots: [{ at: 0, preset: 'W' }, { at: 2, preset: 'L' }] }, cfg);
+  const side = render(React.createElement(kitAt(60).SpeakerLayer, { src: 'speaker.mp4', track, lastFrame: 200 }));
+  const styles = [...side.matchAll(/<div style="([^"]*)"/g)].map((m) => m[1]);
+  assert.equal(styles.length, 4, side);
+  assert.doesNotMatch(styles[1], /mask/, 'заливка не растушёвывается');
+  assert.match(styles[2], /transform:translate\(.*mask-image:linear-gradient\(to right, transparent 0px/);
+  assert.match(styles[3], /mask-image:linear-gradient\(to bottom, transparent 0px/);
+  assert.doesNotMatch(side, /mask-composite/, 'intersect в Chrome оставлял светлую линию на краю копии');
+  assert.doesNotMatch(render(React.createElement(kitAt(10).SpeakerLayer, { src: 'speaker.mp4', track, lastFrame: 200 })), /mask/);
+});
+
 test('speakerTransform stays pure geometry (no opacity) and only adds blur/brightness once they are visually meaningful', () => {
   const kit = kitAt(0);
   const track = { width: 1080, height: 1920, face: { x: 540, y: 787 } };
@@ -216,7 +274,8 @@ test('SpeakerLayer fades the fill and main copies together via the group opacity
   const styles = [...html.matchAll(/<div style="([^"]*)"/g)].map((m) => m[1]);
   // Ровно один styled div на каждую копию (fill + main) плюс внешняя группа; Freeze-обёртки стиля
   // не несут. opacity должна стоять только на внешней группе – по копиям делать нечего.
-  assert.equal(styles.length, state.fill ? 3 : 2, `unexpected number of styled divs: ${html}`);
+  // На плане с заливкой у резкой копии есть ещё вложенный блок маски по y (speakerEdgeMask).
+  assert.equal(styles.length, state.fill ? 4 : 2, `unexpected number of styled divs: ${html}`);
   assert.match(styles[0], /opacity:0\.5/);
   for (const inner of styles.slice(1)) assert.doesNotMatch(inner, /opacity/);
 });

@@ -16,6 +16,8 @@ export const CAMERA_DEFAULTS = Object.freeze({
   punch: { damping: 14, stiffness: 180, mass: 0.6, releaseFrames: 10, k: 1.15 },
   blur: { px: 20, inFrames: 6, outFrames: 10, dimAt: 24, dim: 0.28 },
   away: { enterFrames: 8, exitFrames: 10, blurPx: 26 },
+  // Мягкий край резкой копии над заливкой (fill): px кадра для короткой стороны 1080.
+  fill: { featherPx: 96 },
 });
 
 const CLAMP = { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' };

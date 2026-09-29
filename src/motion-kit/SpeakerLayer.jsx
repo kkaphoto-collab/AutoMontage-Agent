@@ -1,5 +1,5 @@
 import { AbsoluteFill, Freeze, OffthreadVideo, staticFile, useCurrentFrame } from 'remotion';
-import { cameraAt } from './camera.js';
+import { CAMERA_DEFAULTS, cameraAt } from './camera.js';
 
 export function speakerTransform(state, track) {
   const filters = [];
@@ -29,10 +29,30 @@ export function speakerFillStyle(track) {
   };
 }
 
+// Мягкий край резкой копии на планах с заливкой: без него копия обрывалась жёстким швом над
+// размытой заливкой (вертикальным на L/R, горизонтальным при сдвиге dy). Маска растушёвывает все
+// четыре края копии на featherPx пикселей кадра по плавной кривой (smoothstep – без светлой полосы
+// на концах линейного перехода): край за пределами кадра дальше featherPx остаётся невидимым, а
+// открытый край плавно уходит в заливку. Маска живёт в координатах копии до scale(), поэтому её
+// ширина делится на s. Две маски – x на самой копии и y на вложенном блоке: mask-composite
+// intersect в Chrome оставлял на вертикальном краю копии светлую линию в 1 px. Гейты не меняются:
+// камера, масштаб и сдвиг лица те же.
+const SMOOTH = [[0.25, 0.156], [0.5, 0.5], [0.75, 0.844]];
+export function speakerEdgeMask(state, track) {
+  if (!state.fill) return null;
+  const feather = (CAMERA_DEFAULTS.fill.featherPx * track.k) / state.s;
+  const at = (t) => (feather * t).toFixed(3);
+  const stops = ['transparent 0px', ...SMOOTH.map(([t, a]) => `rgba(0,0,0,${a}) ${at(t)}px`), `#000 ${at(1)}px`,
+    `#000 calc(100% - ${at(1)}px)`, ...SMOOTH.map(([t, a]) => `rgba(0,0,0,${a}) calc(100% - ${at(t)}px)`).reverse(), 'transparent 100%'];
+  const ramp = (to) => `linear-gradient(to ${to}, ${stops.join(', ')})`;
+  return { feather, x: { maskImage: ramp('right') }, y: { maskImage: ramp('bottom') } };
+}
+
 // Аватар – один OffthreadVideo muted по глобальному таймкоду (голос идёт из мастер-видео).
 // SpeakerLayer обязан стоять на верхнем уровне композиции, а не внутри <Sequence>: useCurrentFrame
 // здесь – глобальный кадр исходника, тот же, что видит манифест гейтов.
-// Хвост после lastFrame заморожен; открытые края боковых планов залиты уменьшенной размытой копией.
+// Хвост после lastFrame заморожен; открытые края боковых планов залиты уменьшенной размытой копией,
+// а резкая копия уходит в заливку мягким краем (speakerEdgeMask).
 export function SpeakerLayer({ src, track, lastFrame, trimBefore = 0 }) {
   const frame = useCurrentFrame();
   const state = cameraAt(track, frame);
@@ -48,10 +68,15 @@ export function SpeakerLayer({ src, track, lastFrame, trimBefore = 0 }) {
   const held = Number.isFinite(lastFrame)
     ? <Freeze frame={lastFrame} active={frame > lastFrame}>{video}</Freeze>
     : video;
+  // Вложенный блок маски стоит всегда (без стиля вне заливки): дерево одно и то же на любом плане,
+  // и смена плана с заливкой не размонтирует видео.
+  const mask = speakerEdgeMask(state, track);
   return (
     <AbsoluteFill style={{ opacity: state.opacity }}>
       {state.fill ? <div style={speakerFillStyle(track)}>{held}</div> : null}
-      <div style={speakerTransform(state, track)}>{held}</div>
+      <div style={{ ...speakerTransform(state, track), ...mask?.x }}>
+        <div style={mask ? { position: 'absolute', inset: 0, ...mask.y } : undefined}>{held}</div>
+      </div>
     </AbsoluteFill>
   );
 }
