@@ -135,7 +135,7 @@ legacy/developer opt-in и не входит в стандартный путь 
 |---|---|---|
 | Claude Code или Codex | агент читает транскрипт и готовит монтажный лист | нет, используется текущая подписка |
 | faster-whisper | локальная расшифровка; модель может скачаться из Hugging Face при первом запуске | нет |
-| Pexels API | необязательный поиск готовых фото и видео в Review | `PEXELS_API_KEY` |
+| Pexels API | необязательный поиск готовых фото и видео в Review и `automontage layer stock` | `PEXELS_API_KEY` |
 | ElevenLabs API | необязательная платная озвучка motion по явному согласию | `ELEVENLABS_API_KEY`, приватный `ELEVENLABS_VOICE_ID` |
 | FFmpeg, Remotion, Tesseract | локальный монтаж, preview, render, нормализация и OCR | нет |
 | Anthropic/OpenAI API | только отдельные legacy/developer-скрипты или явно подтверждённая генерация | опционально, возможна оплата |
@@ -457,7 +457,9 @@ automontage layer sheet --project-dir projects/<ролик>               # ко
 ```
 
 `--title`, `--head-cream` и `--head-orange` – подписи для Markdown и пульта, в видео слоя их
-не видно. Подробно: [`docs/MOTION-KIT.md`](docs/MOTION-KIT.md).
+не видно. Звуковые эффекты слоя берутся из локальной библиотеки `AUTOMONTAGE_SFX_DIR`
+(по умолчанию `projects/.library/sfx`, см. [`.env.example`](.env.example)); без неё слой
+собирается без эффектов. Подробно: [`docs/MOTION-KIT.md`](docs/MOTION-KIT.md).
 
 ### Пульт роликов: все ролики в одном окне
 
