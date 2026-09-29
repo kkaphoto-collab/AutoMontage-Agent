@@ -18,11 +18,30 @@ const layerWords = require('../scripts/layer/words');
 const hasFfmpeg = toolAvailable('ffmpeg') && toolAvailable('ffprobe');
 const TEMPLATE = path.join(__dirname, '..', 'templates', 'motion-layer');
 
+// Вывод команд собирается через deps, а не в консоль теста. Строка в stdout процесса теста
+// попадает в канал раннера между сериализованными сообщениями; раннер Node 20 читает её байты как
+// длину следующего сообщения и падает (Unable to deserialize cloned data) – так упал CI.
+function quiet() {
+  const out = { log: [], warn: [] };
+  return { out, deps: { log: (line) => out.log.push(String(line)), warn: (line) => out.warn.push(String(line)) } };
+}
+
+// Ловит любой вывод команды мимо внедрённого логгера.
+function forbidConsole(t) {
+  const calls = [];
+  for (const method of ['log', 'info', 'warn', 'error']) {
+    t.mock.method(console, method, (...args) => calls.push(`${method}: ${args.join(' ')}`));
+  }
+  return calls;
+}
+
 test('layer new scaffolds a renderable layer that matches the source geometry', { skip: !hasFfmpeg }, async (t) => {
   const { projectDir } = makeLayerProject(t);
   process.env.AUTOMONTAGE_SFX_DIR = path.join(projectDir, 'no-library');
   t.after(() => { delete process.env.AUTOMONTAGE_SFX_DIR; });
-  assert.equal(await newLayer.run({ 'project-dir': projectDir }), 0);
+  const consoleCalls = forbidConsole(t);
+  const { deps, out } = quiet();
+  assert.equal(await newLayer.run({ 'project-dir': projectDir }, deps), 0);
   const dir = path.join(projectDir, 'motion-v01');
   const layer = JSON.parse(fs.readFileSync(path.join(dir, 'layer.json'), 'utf8'));
   assert.deepEqual([layer.fps, layer.width, layer.height, layer.durationInFrames, layer.profile], [25, 540, 960, 150, 'avatar']);
@@ -34,28 +53,31 @@ test('layer new scaffolds a renderable layer that matches the source geometry', 
     assert.ok(fs.existsSync(path.join(dir, file)), file);
   }
   assert.match(fs.readFileSync(path.join(dir, 'src/words.js'), 'utf8'), /"t":"Привет,"/);
-  assert.equal(await newLayer.run({ 'project-dir': projectDir }), 0);
+  assert.equal(await newLayer.run({ 'project-dir': projectDir }, deps), 0);
   assert.ok(fs.existsSync(path.join(projectDir, 'motion-v02')));
-  await assert.rejects(newLayer.run({ 'project-dir': projectDir, dir: 'motion-v01' }), /уже существует/);
+  await assert.rejects(newLayer.run({ 'project-dir': projectDir, dir: 'motion-v01' }, deps), /уже существует/);
+  // Весь вывод – через deps: в консоль теста ничего, отчёт – в log, пустая библиотека – без предупреждений.
+  assert.deepEqual(consoleCalls, []);
+  assert.match(out.log.join('\n'), /слой motion-v01: .*\n.*\n.*слой motion-v02: /);
+  assert.deepEqual(out.warn, []);
 });
 
 test('layer words re-applies spelling.json', { skip: !hasFfmpeg }, async (t) => {
   const { projectDir } = makeLayerProject(t);
   process.env.AUTOMONTAGE_SFX_DIR = path.join(projectDir, 'no-library');
   t.after(() => { delete process.env.AUTOMONTAGE_SFX_DIR; });
-  await newLayer.run({ 'project-dir': projectDir });
+  const consoleCalls = forbidConsole(t);
+  const { deps, out } = quiet();
+  await newLayer.run({ 'project-dir': projectDir }, deps);
   const dir = path.join(projectDir, 'motion-v01');
   fs.writeFileSync(path.join(dir, 'spelling.json'), JSON.stringify({ 'привет': 'Здравствуйте' }));
-  assert.equal(await layerWords.run({ 'project-dir': projectDir, layer: 'motion-v01' }), 0);
+  assert.equal(await layerWords.run({ 'project-dir': projectDir, layer: 'motion-v01' }, deps), 0);
   assert.match(fs.readFileSync(path.join(dir, 'src/words.js'), 'utf8'), /"t":"Здравствуйте,"/);
+  assert.deepEqual(consoleCalls, []);
+  assert.match(out.log.at(-1), /слов: \d+/);
 });
 
-// --- Контракт слоя подробнее; вывод команды собирается через deps, а не в консоль теста ---
-
-function quiet() {
-  const out = { log: [], warn: [] };
-  return { out, deps: { log: (line) => out.log.push(String(line)), warn: (line) => out.warn.push(String(line)) } };
-}
+// --- Контракт слоя подробнее ---
 
 function useSfxDir(t, dir) {
   process.env.AUTOMONTAGE_SFX_DIR = dir;
