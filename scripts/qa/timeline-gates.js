@@ -77,18 +77,26 @@ function detectCameraEvents(camera, t, scale, fps) {
   // прямо во время нарастания соседнего панча, мог бы дать вторую, ложную вспышку «панча» сразу
   // после самого реза.
   const hardIn = (a, b) => events.some((e) => (e.kind === 'cut' || e.kind === 'focus') && e.frame > a && e.frame <= b);
-  // Первый кадр настоящего роста внутри окна панча. Наивная версия («отматываем, пока строго
-  // растёт») ломалась на дрейфующих shots (drift: 'in'): камера там растёт почти на каждом кадре
-  // сама по себе, независимо от панча, и такая ходьба назад проваливалась на десятки кадров раньше
-  // настоящего начала панча (до 0,18 с на 74 из 144 дрейфующих случаев). Правильный критерий –
-  // не «растёт ли кадр вообще», а «растёт ли он заметно относительно САМОГО панча»: сначала находим
-  // top – наибольший однокадровый прирост во всём окне (это и есть пик пружины панча), затем
-  // отматываем назад, пока однокадровый прирост остаётся ≥ 10 % от top. Дрейф даёт прирост в разы
-  // меньше пика панча и обрывает отмотку сразу за настоящим стартом.
-  const riseStart = (to, from) => {
+  // Первый кадр настоящего роста на отрезке (from, to] – для даты панча (окно [f−punchWindow, f]) и
+  // для проверки «панч вырос прямо из реза» (отрезок от реза). Наивная версия («отматываем, пока
+  // строго растёт») ломалась на дрейфующих shots (drift: 'in'): камера там растёт почти на каждом
+  // кадре сама по себе, независимо от панча, и такая ходьба назад проваливалась на десятки кадров
+  // раньше настоящего начала панча (до 0,18 с на 74 из 144 дрейфующих случаев). Правильный критерий –
+  // не «растёт ли кадр вообще», а «растёт ли он заметно относительно САМОГО панча»: находим top –
+  // наибольший однокадровый прирост на отрезке (пик пружины панча) – и отматываем назад, пока
+  // однокадровый прирост остаётся ≥ 10 % от top. Дрейф даёт прирост в разы меньше пика
+  // панча и обрывает отмотку сразу за настоящим стартом. Дата панча отматывается от конца окна
+  // (кадра срабатывания); проверка «вырос из реза» – от пика (fromPeak): после реза к кадру
+  // срабатывания пружина может уже перевалить через вершину, и отмотка от конца остановилась бы на
+  // первом же убывающем кадре, не дойдя до реза.
+  const riseStart = (from, to, { fromPeak = false } = {}) => {
     let top = 0;
-    for (let g = from + 1; g <= to; g += 1) top = Math.max(top, camera.s[g] / camera.s[g - 1] - 1);
-    let g = to;
+    let peak = to;
+    for (let g = from + 1; g <= to; g += 1) {
+      const rise = camera.s[g] / camera.s[g - 1] - 1;
+      if (rise > top) { top = rise; peak = g; }
+    }
+    let g = fromPeak ? peak : to;
     while (g > from && camera.s[g] / camera.s[g - 1] - 1 >= 0.1 * top && camera.s[g - 1] < camera.s[g]) g -= 1;
     return g;
   };
@@ -102,23 +110,12 @@ function detectCameraEvents(camera, t, scale, fps) {
   // после реза давал второе, ложное событие через punchWindow + 1 кадр: оно делило план и прятало
   // длинный план от стопа G1. Поэтому для кандидата в панч ищем последний рез/смену фокуса не
   // дальше двух окон назад и начало подъёма после него: от самого крутого прироста назад, пока
-  // прирост ≥ 10 % пика (как в riseStart). Подъём дошёл до самого реза – панч принадлежит резу.
+  // прирост ≥ 10 % пика (riseStart). Подъём дошёл до самого реза – панч принадлежит резу.
   const lastHard = (f) => {
     for (let i = events.length - 1; i >= 0 && events[i].frame >= f - 2 * punchWindow; i -= 1) {
       if (events[i].kind === 'cut' || events[i].kind === 'focus') return events[i].frame;
     }
     return null;
-  };
-  const climbStart = (from, to) => {
-    let top = 0;
-    let peak = to;
-    for (let g = from + 1; g <= to; g += 1) {
-      const rise = camera.s[g] / camera.s[g - 1] - 1;
-      if (rise > top) { top = rise; peak = g; }
-    }
-    let g = peak;
-    while (g > from && camera.s[g] / camera.s[g - 1] - 1 >= 0.1 * top && camera.s[g - 1] < camera.s[g]) g -= 1;
-    return g;
   };
   const eaten = (f) => {
     for (let g = f; g <= Math.min(n - 1, f + punchWindow); g += 1) {
@@ -141,11 +138,11 @@ function detectCameraEvents(camera, t, scale, fps) {
       // сразу: пружина панча держит это условие истинным несколько кадров подряд, и окно b6 у
       // каждого из них своё (может сползти на уже подросшую базу, если s успел выйти на плато).
       // Отодвигаем назад только ОДИН раз – уже после схлопывания – у первого сырого кадра пачки.
-      // Сразу после реза начало подъёма уже известно (climbStart от реза) – оно и есть дата панча.
+      // Сразу после реза начало подъёма уже известно (riseStart от реза) – оно и есть дата панча.
       const hard = lastHard(f);
       if (hard === null) events.push({ frame: f, kind: 'punch' });
       else {
-        const rise = climbStart(hard, f);
+        const rise = riseStart(hard, f, { fromPeak: true });
         if (rise > hard) events.push({ frame: f, kind: 'punch', rise });
       }
     } else {
@@ -171,7 +168,7 @@ function detectCameraEvents(camera, t, scale, fps) {
   // после схлопывания у каждой пачки панча остаётся ровно один представитель, и riseStart честно
   // считает его собственное окно [f−punchWindow, f] заново.
   const kept = collapse(events).map((e) => (e.kind === 'punch'
-    ? { frame: e.rise ?? riseStart(e.frame, Math.max(0, e.frame - punchWindow)), kind: 'punch' }
+    ? { frame: e.rise ?? riseStart(Math.max(0, e.frame - punchWindow), e.frame), kind: 'punch' }
     : e));
   const nearEvent = (w) => events.some((e) => Math.abs(e.frame - w.frame) <= punchWindow);
   return { events: kept, weak: collapse(weak.filter((w) => !nearEvent(w))), sharp };

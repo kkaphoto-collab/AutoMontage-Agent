@@ -206,6 +206,34 @@ test('BAD CASE: a long plan after a cut with a punch on it stops G1 instead of h
   assert.deepEqual([g.spans[0].fromSec, g.spans[0].toSec], [2, 4.64]);
 });
 
+// Граница слияния закреплена на 25 fps: панч через 1 кадр после реза ещё растёт прямо из реза (кадр
+// реза и кадр панча соседние, между ними ровного кадра нет) – одно событие; через 2 кадра между резом
+// и подъёмом есть ровный кадр – это уже отдельный панч со своей датой.
+test('at 25 fps a punch 1 frame after a cut merges into it, 2 frames after stays a separate punch', () => {
+  const one = detectCameraEvents(cutWithPunch(25, 6, { preset: 'W' }, 2.04).camera, avatar.camera, 1, 25);
+  assert.deepEqual(one.events, [{ frame: 50, kind: 'cut' }]);
+  const two = detectCameraEvents(cutWithPunch(25, 6, { preset: 'W' }, 2.08).camera, avatar.camera, 1, 25);
+  assert.deepEqual(two.events, [{ frame: 50, kind: 'cut' }, { frame: 52, kind: 'punch' }]);
+});
+
+test('REAL KIT at 29.97 fps: a punch that starts on a cut is still one event', () => {
+  const fps = 29.97;
+  const d = detectCameraEvents(cutWithPunch(fps, 6, { preset: 'W' }).camera, avatar.camera, 1, fps);
+  assert.deepEqual(d.events, [{ frame: Math.round(2 * fps), kind: 'cut' }]);
+  const later = detectCameraEvents(cutWithPunch(fps, 6, { preset: 'W' }, 2.4).camera, avatar.camera, 1, fps);
+  assert.deepEqual(later.events, [{ frame: Math.round(2 * fps), kind: 'cut' }, { frame: Math.round(2.4 * fps), kind: 'punch' }]);
+});
+
+// Смена резкости – такое же «жёсткое» событие, как рез: размытие снято, и на том же кадре начинается
+// наезд – одно событие (смена фокуса); наезд через 5 кадров после неё – отдельный панч.
+test('a punch that grows right out of a focus change is one event; five frames later it is its own punch', () => {
+  const grow = (start) => (f) => ({ blur: f < 50 ? 20 : 0, s: f < start ? 1 : 1 + 0.15 * Math.min(1, (f - start) / 5) });
+  const same = detectCameraEvents(manifestFixture({ seconds: 4, camera: grow(50) }).camera, avatar.camera, 1, 25);
+  assert.deepEqual(same.events, [{ frame: 50, kind: 'focus' }]);
+  const later = detectCameraEvents(manifestFixture({ seconds: 4, camera: grow(55) }).camera, avatar.camera, 1, 25);
+  assert.deepEqual(later.events, [{ frame: 50, kind: 'focus' }, { frame: 55, kind: 'punch' }]);
+});
+
 test('a punch that starts a few frames after a cut stays its own event, dated at its own start', () => {
   for (const [fps, at] of [[25, 2.2], [25, 2.4], [60, 2.04], [60, 2.2]]) {
     const d = detectCameraEvents(cutWithPunch(fps, 6, { preset: 'W' }, at).camera, avatar.camera, 1, fps);
