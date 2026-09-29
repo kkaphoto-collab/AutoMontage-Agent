@@ -334,6 +334,22 @@ test('a failed G8 measurement never writes the project path into the preview rep
   }
 });
 
+// Ролик без видео-сцен и qa/ – ссылка: отчёт сквозь неё не пишется, но preview такого ролика публикуется
+// (барьер не строгий, сбой записи – только предупреждение).
+test('a symlinked qa/ gets no preview report written through it; a plain preview still publishes', (t) => {
+  const dir = project(t);
+  const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'preview-gates-qa-'));
+  t.after(() => fs.rmSync(elsewhere, { recursive: true, force: true }));
+  fs.symlinkSync(elsewhere, path.join(dir, 'qa'), 'dir');
+  const result = runPreviewGates(base(dir, { brief: { scenes: [], music: { gainDb: -16 } } }), { measureImpl: good });
+  assert.equal(result.enforced, false);
+  assert.equal(result.block, false);
+  assert.equal(result.paths, null);
+  assert.match(result.writeError, /qa\/ должна быть папкой проекта, а не ссылкой/u);
+  assert.equal(result.writeError.includes(dir), false);
+  assert.deepEqual(fs.readdirSync(elsewhere), []);
+});
+
 test('layers with different profiles: G8 uses the profile of the first layer in scene order', (t) => {
   const dir = project(t);
   addLayer(dir, { layer: 'motion-v01', render: sha('1'), canonical: sha('a'), profile: 'live' });

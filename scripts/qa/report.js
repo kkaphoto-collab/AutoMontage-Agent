@@ -119,10 +119,24 @@ function writeAtomic(file, text, fileSystem) {
   }
 }
 
+const QA_NOT_DIR = 'qa/ должна быть папкой проекта, а не ссылкой или файлом – уберите её и верните настоящую папку qa/';
+
+// Папка qa/ проекта – общий запрет для отчётов, реестра слоёв и контакт-листа: ссылка или файл на её месте –
+// ошибка, иначе отчёты писались бы в чужую папку, а реестр читался бы оттуда. Нет папки – null или, с
+// create, новая папка. lstat – настоящий fs: подмена fileSystem в тестах нужна только для записи.
+function projectQaDir(projectDir, { create = false, fileSystem = fs } = {}) {
+  const dir = path.join(projectDir, 'qa');
+  const stat = fs.lstatSync(dir, { throwIfNoEntry: false });
+  if (stat && (stat.isSymbolicLink() || !stat.isDirectory())) throw new Error(QA_NOT_DIR);
+  if (stat) return dir;
+  if (!create) return null;
+  fileSystem.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
 function writeReport(projectDir, name, report, fileSystem = fs) {
   if (!REPORT_NAME.test(name)) throw new Error(`имя отчёта «${name}» недопустимо`);
-  const dir = path.join(projectDir, 'qa');
-  fileSystem.mkdirSync(dir, { recursive: true });
+  const dir = projectQaDir(projectDir, { create: true, fileSystem });
   const jsonPath = path.join(dir, `${name}.json`);
   const textPath = path.join(dir, `${name}.txt`);
   writeAtomic(jsonPath, `${JSON.stringify(report, null, 2)}\n`, fileSystem);
@@ -130,4 +144,4 @@ function writeReport(projectDir, name, report, fileSystem = fs) {
   return { jsonPath, textPath };
 }
 
-module.exports = { applyWaivers, buildReport, exitCodeFor, formatReport, gate, summarize, writeReport };
+module.exports = { applyWaivers, buildReport, exitCodeFor, formatReport, gate, projectQaDir, summarize, writeReport };

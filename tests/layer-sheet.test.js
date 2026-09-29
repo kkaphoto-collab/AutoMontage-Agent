@@ -460,3 +460,14 @@ test('run() ignores already accepted comments', { skip: !hasFfmpeg }, async (t) 
   const qaDir = path.join(projectDir, 'qa');
   assert.deepEqual(fs.readdirSync(qaDir).filter((f) => f.includes('-comment-')), []);
 });
+
+// qa/ – ссылка на чужую папку: контакт-лист и кадры правок туда не пишутся (тот же отказ, что у реестра слоёв).
+test('run() refuses a symlinked qa/ and writes nothing through it', { skip: !hasFfmpeg }, async (t) => {
+  const { projectDir } = scaffoldProject(t);
+  const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'sheet-qa-link-'));
+  t.after(() => fs.rmSync(elsewhere, { recursive: true, force: true }));
+  fs.rmSync(path.join(projectDir, 'qa'), { recursive: true, force: true });
+  fs.symlinkSync(elsewhere, path.join(projectDir, 'qa'), 'dir');
+  await assert.rejects(run({ 'project-dir': projectDir }, { log: () => {}, warn: () => {} }), /qa\/ должна быть папкой проекта, а не ссылкой/u);
+  assert.deepEqual(fs.readdirSync(elsewhere), []);
+});

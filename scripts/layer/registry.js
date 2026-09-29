@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { readJsonIfExists } = require('../pult/files');
 const { inspectImportedAssetBundle } = require('../review/imported-assets');
-const { summarize } = require('../qa/report');
+const { projectQaDir, summarize } = require('../qa/report');
 const { sha256File, writeJson } = require('./common');
 
 const LABEL = 'qa/layer-imports.json';
@@ -12,17 +12,10 @@ const RENDER_REPORT = /^layer-.+-render-(\d+)\.json$/u;
 // projects/ не в Git, копии реестра нет: битый реестр удаляют и импортируют слои заново.
 const broken = (reason) => new Error(`${LABEL} повреждён (${reason}) – удалите qa/layer-imports.json и импортируйте слои заново`);
 
-// Папка qa/ проекта или null, если её ещё нет. Ссылка или файл на её месте – ошибка: иначе отчёты и
-// реестр читались бы из чужой папки, а запись реестра после импорта упала бы и оставила ассет без записи.
-function qaDir(projectDir) {
-  const dir = path.join(projectDir, 'qa');
-  const stat = fs.lstatSync(dir, { throwIfNoEntry: false });
-  if (!stat) return null;
-  if (stat.isSymbolicLink() || !stat.isDirectory()) {
-    throw new Error('qa/ должна быть папкой проекта, а не ссылкой или файлом – уберите её и повторите layer render');
-  }
-  return dir;
-}
+// Папка qa/ проекта или null, если её ещё нет. Ссылка или файл на её месте – ошибка (общий запрет
+// projectQaDir): иначе отчёты и реестр читались бы из чужой папки, а запись реестра после импорта упала бы
+// и оставила ассет без записи.
+const qaDir = (projectDir) => projectQaDir(projectDir);
 
 // Чтение без прохода по ссылке (readJsonIfExists): подменённый реестр не читается незаметно.
 function readRegistry(projectDir) {

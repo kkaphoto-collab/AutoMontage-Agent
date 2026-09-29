@@ -10,7 +10,7 @@ const { COMMENT_ID, readComments } = require('../pult/comments');
 const { probeMediaPath } = require('../media-probe');
 const { runTool } = require('../process');
 const { resolveProjectPath } = require('../project/workspace');
-const { buildReport, formatReport } = require('../qa/report');
+const { buildReport, formatReport, projectQaDir } = require('../qa/report');
 const { EDGE_THRESHOLD, EDGE_WIDTH, emptyFrameGate } = require('../qa/empty-frame-gate');
 const { safeRect } = require('../qa/safe-rect');
 const { projectFrom } = require('./common');
@@ -178,7 +178,7 @@ async function run(options, deps = {}) {
     .map((comment) => ({ id: comment.id, timeSec: comment.timeSec }));
   const result = buildSheet({
     videoPath, width: probe.width, height: probe.height, duration: probe.durationSec, fps: probe.fps,
-    outDir: path.join(projectDir, 'qa'), name: `sheet-${current.sha256.slice(0, 8)}`, comments, log: deps.warn || console.warn,
+    outDir: projectQaDir(projectDir, { create: true }), name: `sheet-${current.sha256.slice(0, 8)}`, comments, log: deps.warn || console.warn,
   });
   log(`Контакт-лист: ${result.sheetPath}`);
   result.commentPaths.forEach((p) => log(`Кадры правки: ${p}`));

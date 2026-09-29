@@ -147,6 +147,23 @@ test('reports land in <project>/qa and reject unsafe names', (t) => {
   assert.throws(() => writeReport(dir, 'x'.repeat(82), report), /имя отчёта/);
 });
 
+// qa/ – ссылка или файл: отчёт не пишется сквозь неё в чужую папку (тот же отказ, что у реестра слоёв).
+test('writeReport refuses a symlinked or file qa/ and writes nothing through it', (t) => {
+  const report = buildReport({ kind: 'layer-check', profile: 'avatar', gates: [] });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-report-link-'));
+  const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-report-elsewhere-'));
+  t.after(() => { fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(elsewhere, { recursive: true, force: true }); });
+  fs.symlinkSync(elsewhere, path.join(dir, 'qa'), 'dir');
+  assert.throws(() => writeReport(dir, 'layer-motion-v01-check', report), /^Error: qa\/ должна быть папкой проекта, а не ссылкой или файлом/u);
+  assert.deepEqual(fs.readdirSync(elsewhere), []);
+  fs.rmSync(path.join(dir, 'qa'));
+  fs.writeFileSync(path.join(dir, 'qa'), 'не папка');
+  assert.throws(() => writeReport(dir, 'layer-motion-v01-check', report), /qa\/ должна быть папкой проекта/u);
+  // Настоящая папка qa/ (и её отсутствие) – отчёт пишется как раньше.
+  fs.rmSync(path.join(dir, 'qa'));
+  assert.ok(fs.existsSync(writeReport(dir, 'layer-motion-v01-check', report).jsonPath));
+});
+
 // Если renameSync падает (диск, права, антивирус держит файл), временный файл не должен остаться
 // лежать в qa/ – иначе следующий запуск копит мусор рядом с настоящими отчётами.
 test('a failed rename cleans up its temp file instead of littering qa/', (t) => {

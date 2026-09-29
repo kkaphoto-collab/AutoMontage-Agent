@@ -13,7 +13,7 @@ const { resolveProjectPath } = require('../project/workspace');
 const { assertReportSource, findRenderReport, readRegistry, renderReportProblem } = require('../layer/registry');
 const { gateVoiceMusic, measureVoiceMusic, speechWindows } = require('./mix-gates');
 const { getProfile, PROFILES } = require('./profiles');
-const { buildReport, gate, writeReport } = require('./report');
+const { buildReport, gate, projectQaDir, writeReport } = require('./report');
 
 const LAYER_TITLE = 'Слой прошёл layer render и импорт';
 const VOICE_MUSIC_TITLE = 'Голос и музыка';
@@ -155,8 +155,7 @@ const stamp = (date) => `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}$
 // Первое свободное имя preview-<время>-NN: номер занимается созданием пустого JSON с флагом wx (два preview в
 // одну секунду не затрут отчёт друг друга), потом writeReport атомарно заменяет его настоящим отчётом.
 function writePreviewReport(projectDir, report, now) {
-  const dir = path.join(projectDir, 'qa');
-  fs.mkdirSync(dir, { recursive: true });
+  const dir = projectQaDir(projectDir, { create: true });
   const prefix = `preview-${stamp(now)}`;
   for (let n = 1; ; n += 1) {
     const name = `${prefix}-${pad(n)}`;
