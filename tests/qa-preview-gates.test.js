@@ -329,7 +329,8 @@ test('a failed G8 measurement never writes the project path into the preview rep
       const written = fs.readFileSync(file, 'utf8');
       assert.equal(written.includes(dir), false, `${registered ? 'слой kit' : 'без слоя'}: ${written}`);
       assert.equal(written.includes(os.tmpdir()), false);
-      assert.doesNotMatch(written, /Users/u);
+      // Путь Windows из stderr тоже сведён к имени файла: имени папки пользователя в отчёте нет.
+      assert.equal(written.includes('someone'), false);
     }
   }
 });
