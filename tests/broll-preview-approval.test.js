@@ -611,6 +611,84 @@ test(
   },
 );
 
+test(
+  'status polls of a running preview never take the project lease its publication needs',
+  { timeout: 20000 },
+  async (t) => {
+    const { startReviewServer } = require('../scripts/review/server');
+    const { spawn } = require('node:child_process');
+    const f = fixture(t);
+    fs.writeFileSync(path.join(f.workspace.dir, 'transcript/words.json'), '[]');
+    // Как публикация настоящего preview.js: берёт и отпускает project lease, пока браузер
+    // опрашивает задание. Конфликт с опросом сервера = preview сорван «stale snapshot».
+    const publisher = `
+      const { acquireProjectMutationLease } = require(${JSON.stringify(path.join(__dirname, '..', 'scripts', 'project', 'workspace.js'))});
+      const dir = ${JSON.stringify(f.workspace.dir)};
+      console.log('ready');
+      const end = Date.now() + 1500;
+      let conflicts = 0;
+      while (Date.now() < end) {
+        try { acquireProjectMutationLease(dir).release(); }
+        catch (error) { if (error.code !== 'PROJECT_MANIFEST_CONFLICT') throw error; conflicts += 1; }
+      }
+      process.exit(conflicts ? 3 : 0);
+    `;
+    let ready;
+    const started = new Promise((resolve) => {
+      ready = resolve;
+    });
+    const session = await startReviewServer({
+      projectDir: f.workspace.dir,
+      editable: true,
+      open: false,
+      runToolImpl: () => ({ status: 1 }),
+      previewSpawnImpl(command, args, options) {
+        const child = spawn(process.execPath, ['-e', publisher], options);
+        child.stdout.once('data', ready);
+        return child;
+      },
+    });
+    t.after(async () => {
+      await new Promise((resolve) => session.server.close(resolve));
+      await session.waitForActiveImports();
+    });
+    const headers = {
+      Authorization: `Bearer ${session.token}`,
+      Origin: session.origin,
+      'Content-Type': 'application/json',
+    };
+    const state = await (
+      await fetch(session.origin + '/api/state', { headers })
+    ).json();
+    const response = await fetch(session.origin + '/api/broll/preview', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        baseRevision: state.session.baseRevision,
+        baseHash: state.session.baseHash,
+        manifestHash: state.session.manifestHash,
+        kind: 'full',
+      }),
+    });
+    assert.equal(response.status, 202);
+    const { jobId } = await response.json();
+    await started;
+    let job;
+    let polls = 0;
+    do {
+      job = await (
+        await fetch(
+          `${session.origin}/api/broll/preview-job?id=${encodeURIComponent(jobId)}`,
+          { headers },
+        )
+      ).json();
+      polls += 1;
+    } while (job.status === 'running');
+    assert.ok(polls > 5, `опросов во время публикации: ${polls}`);
+    assert.equal(job.status, 'complete', `опрос задания сорвал публикацию: ${job.error}`);
+  },
+);
+
 test('final all-file barrier rejects a prior preview modified during the later source hash', (t) => {
   const f = fixture(t); const p = f.preview();
   const descriptors = new Map(); let sourceReads = 0; let mutated = false;

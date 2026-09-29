@@ -361,6 +361,9 @@ function descriptorForPublished(imported, assetFiles) {
 
 function cleanupIdleImportedStages({ projectDir, runtime, fileSystem }) {
   if (runtime.importController.busy) return;
+  // Идущий preview.js сам возьмёт project lease, чтобы опубликовать результат. Уборка из опроса
+  // статуса не должна держать этот lease в тот же миг: иначе публикация падает «stale snapshot».
+  if (runtime.previewJobs?.busy) return;
   let lease;
   try {
     lease = acquireProjectMutationLease(projectDir, { fileSystem });
