@@ -314,6 +314,26 @@ test('a report that cannot be written is still returned with a short reason', (t
   assert.match(closed.report.gates[0].hint, /^qa\/ – ссылка или файл/u);
 });
 
+// Ошибка замера (сырой stderr ffmpeg с полным путём, сообщения mix-gates) становится подсказкой G8 и уходит
+// в qa/preview-*.json и .txt: папки проекта и временных файлов там быть не должно – только имена файлов.
+test('a failed G8 measurement never writes the project path into the preview report', (t) => {
+  for (const registered of [true, false]) {
+    const dir = project(t, { registered });
+    const finished = path.join(dir, 'tmp', 'preview-stage', 'finished.mp4');
+    const boom = () => { throw new Error(`ffmpeg не смог отдать звук: ${finished}: No such file or directory; `
+      + `Error opening input file '${path.join(dir, 'music.mp3')}'. C:\\Users\\someone\\project\\voice.wav`); };
+    const result = runPreviewGates(base(dir, { finishedPath: finished }), { measureImpl: boom });
+    const hint = result.report.gates.find((g) => g.id === 'G8').hint;
+    assert.match(hint, /замер не удался: ffmpeg не смог отдать звук: finished\.mp4: No such file or directory/u);
+    for (const file of [result.paths.jsonPath, result.paths.textPath]) {
+      const written = fs.readFileSync(file, 'utf8');
+      assert.equal(written.includes(dir), false, `${registered ? 'слой kit' : 'без слоя'}: ${written}`);
+      assert.equal(written.includes(os.tmpdir()), false);
+      assert.doesNotMatch(written, /Users/u);
+    }
+  }
+});
+
 test('layers with different profiles: G8 uses the profile of the first layer in scene order', (t) => {
   const dir = project(t);
   addLayer(dir, { layer: 'motion-v01', render: sha('1'), canonical: sha('a'), profile: 'live' });

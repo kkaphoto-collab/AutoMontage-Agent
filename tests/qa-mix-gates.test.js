@@ -174,6 +174,10 @@ test('measureVoiceMusic refuses missing music options, a bad duration and an emp
   assert.throws(() => measureVoiceMusic({ ...base, spawnImpl: empty }), /нет звука голоса/);
   const noMusic = (command, args) => (args.includes('-filter_complex') ? empty() : spawnSpy().spawnImpl(command, args));
   assert.throws(() => measureVoiceMusic({ ...base, spawnImpl: noMusic }), /нет звука музыки после sidechain/);
+  // Сообщение уходит в подсказку G8 и отчёт preview: только имя файла, без папки проекта.
+  const deep = { ...base, voicePath: path.join(os.tmpdir(), 'project-x', 'stage', 'finished.mp4'), musicPath: path.join(os.tmpdir(), 'project-x', 'music.mp3') };
+  assert.throws(() => measureVoiceMusic({ ...deep, spawnImpl: empty }), (error) => error.message === 'нет звука голоса в finished.mp4');
+  assert.throws(() => measureVoiceMusic({ ...deep, spawnImpl: noMusic }), (error) => error.message === 'нет звука музыки после sidechain: music.mp3');
 });
 
 test('speech windows merge close words, drop blips and follow the preview range', () => {

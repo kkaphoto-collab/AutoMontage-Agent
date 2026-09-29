@@ -27,6 +27,21 @@ const REBUILD = 'пересоберите слой: layer render → layer impor
 const LAYER_RENDER_LABEL = /^layer-\d+(?:\.raw)?\.mp4$/iu;
 const IMPORTED_VIDEO = /^assets\/broll\/video\/[^/]+\/media\.mp4$/u;
 const message = (error) => error?.message ?? String(error);
+
+// Текст ошибки для подсказки гейта без абсолютных путей: сырой stderr ffmpeg и сообщения fs называют файл
+// полным путём (папка проекта, временная папка preview). Путь в кавычках и путь после пробела, скобки или
+// «=» заменяются именем файла (POSIX и Windows), остаток папки проекта – «…».
+const fileName = (file) => file.split(/[\\/]/u).filter(Boolean).pop() || file;
+function hidePaths(text, projectDir) {
+  let out = String(text)
+    .replace(/'([^']*[\\/][^']*)'|"([^"]*[\\/][^"]*)"/gu, (_, single, double) => `«${fileName(single ?? double)}»`)
+    .replace(/(^|[\s(=«])((?:[A-Za-z]:)?[\\/][^\s'"()«»]*)/gu, (_, before, file) => {
+      const tail = /[.,:;]+$/u.exec(file)?.[0] ?? '';
+      return `${before}${fileName(file.slice(0, file.length - tail.length))}${tail}`;
+    });
+  if (projectDir) out = out.split(projectDir).join('…');
+  return out;
+}
 const r1 = (value) => String(Math.round(value * 10) / 10).replace('.', ',');
 
 // Видео всех сцен brief (слоёв может быть несколько), без повторов по sha256.
@@ -105,7 +120,7 @@ function layerGate(projectDir, brief, sourceSha256) {
       const problem = entryProblem(projectDir, entry, sourceSha256);
       if (problem) problems.push(problem);
     } catch (error) {
-      problems.push(`${entry.layer}: ${message(error)}`);
+      problems.push(`${entry.layer}: ${hidePaths(message(error), projectDir)}`);
     }
   }
   if (!entries.length && !unregistered.length) return { gate: null, entries, strict: false };
@@ -242,9 +257,10 @@ function runPreviewGates({ projectDir, brief, manifest, hasMusic, words, range, 
         : infoFromMeasured(measured));
     }
   } catch (error) {
+    const reason = hidePaths(message(error), projectDir);
     gates.push(layer.strict
-      ? gate('G8', VOICE_MUSIC_TITLE, { status: 'fail', hint: `замер не удался: ${message(error)}` })
-      : infoVoiceMusic(`замер не удался: ${message(error)}`));
+      ? gate('G8', VOICE_MUSIC_TITLE, { status: 'fail', hint: `замер не удался: ${reason}` })
+      : infoVoiceMusic(`замер не удался: ${reason}`));
   }
   const inputs = previewInputs(projectDir, { sourcePath: sourcePath ?? manifest?.source?.localPath, sourceSha256,
     briefPath, briefSha256, entries: layer.entries });

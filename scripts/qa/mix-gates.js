@@ -5,6 +5,7 @@
 // ΣP музыки) в LU. Гейтинга НАМЕРЕННО нет: окна речи уже выбраны по транскрипту, а тихие места музыки
 // под речью должны тянуть разрыв вверх – это то, что в среднем слышно под голосом. На музыке с
 // паузами он поэтому расходится с gated ebur128; при калибровке это не ошибка, которую надо исправлять.
+const path = require('node:path');
 const { BLOCK_SEC, floatPcmFromFfmpeg, formatSeconds } = require('./audio');
 const { gate } = require('./report');
 const { MIX_AUDIO_FORMAT, buildMusicFilter, mixMusicInputArgs } = require('../mix-music');
@@ -107,9 +108,10 @@ function measureVoiceMusic({ voicePath, musicPath, mixOptions, durationSec, wind
     ...mixMusicInputArgs(voicePath, musicPath),
     '-filter_complex', `${buildMusicFilter(mixOptions, { stem: 'music' })};[aout]${weighting}[k]`, '-map', '[k]', '-t', duration,
   ]);
-  // Пустой PCM – «ffmpeg ничего не отдал», а не «музыки нет»: иначе G8 тихо пропустился бы.
-  if (!voice.length) throw new Error(`нет звука голоса в ${voicePath}`);
-  if (!music.length) throw new Error(`нет звука музыки после sidechain: ${musicPath}`);
+  // Пустой PCM – «ffmpeg ничего не отдал», а не «музыки нет»: иначе G8 тихо пропустился бы. Только имена
+  // файлов: сообщение становится подсказкой G8 в отчёте preview.
+  if (!voice.length) throw new Error(`нет звука голоса в ${path.basename(voicePath)}`);
+  if (!music.length) throw new Error(`нет звука музыки после sidechain: ${path.basename(musicPath)}`);
   return loudnessGap(blockPowers(voice), blockPowers(music), windows);
 }
 

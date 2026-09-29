@@ -284,6 +284,9 @@ test('a file with no audio stream throws a clear message naming the file', () =>
     stderr: Buffer.from("Stream map '' matches no streams.\nTo ignore this, add a trailing '?' to the map.\n"),
   });
   assert.throws(() => decodeAudio('clip.mp4', { spawnImpl: noAudio }), /в clip\.mp4 нет звуковой дорожки/);
+  // Абсолютный путь не попадает в сообщение (его читают отчёты гейтов): только имя файла.
+  const deep = path.join(os.tmpdir(), 'project-x', 'renders', 'clip.mp4');
+  assert.throws(() => decodeAudio(deep, { spawnImpl: noAudio }), (error) => error.message === 'в clip.mp4 нет звуковой дорожки');
 });
 
 // --- Ревью задачи 25, п.5: decodeAudio – формат секунд, валидация durationSec, пустой отрезок ---

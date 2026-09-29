@@ -3,6 +3,7 @@
 // лаг) и доля звука слоя вне известных вставок (G7, Task 26).
 const { spawnSync } = require('node:child_process');
 const os = require('node:os');
+const path = require('node:path');
 
 const SAMPLE_RATE = 8000;
 const BLOCK = 400; // 50 мс при 8 кГц
@@ -39,7 +40,8 @@ function ffmpegPcmBytes(inputArgs, outputArgs, { maxBuffer, spawnImpl }) {
     // звуковой дорожки; отдельное явное сообщение полезнее, чем сырой текст ffmpeg с именем опции.
     if (/matches no streams/.test(reason)) {
       const at = inputArgs.indexOf('-i');
-      const file = at >= 0 ? inputArgs[at + 1] : 'входном файле';
+      // Только имя файла: сообщение попадает в отчёты гейтов, абсолютный путь проекта там не нужен.
+      const file = at >= 0 ? path.basename(String(inputArgs[at + 1])) : 'входном файле';
       throw new Error(`в ${file} нет звуковой дорожки`);
     }
     throw new Error(`ffmpeg не смог отдать звук: ${reason}`);
