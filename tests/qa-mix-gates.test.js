@@ -16,6 +16,10 @@ const { getProfile } = require('../scripts/qa/profiles');
 
 const avatar = getProfile('avatar');
 const hasFfmpeg = toolAvailable('ffmpeg');
+// Явный тестовый коридор для проверок логики G8: они не зависят от откалиброванного числа профиля avatar.
+const corridor = { ...avatar, voiceMusic: { stopLow: 3, warnLow: 9, target: 12, warnHigh: 15, stopHigh: 20 } };
+// Замер утверждённого эталонного preview (Task 47, 29.09.2026): разрыв голоса и музыки под речью, LU.
+const REFERENCE_GAP_LU = 37.95;
 
 // Параметры музыки, как их собирает buildLessonMusicMixArgs для preview.
 const BRIEF_ARGS = ['--gain', '-22', '--start', '24', '--rate', '1.06', '--fade-in', '0.15', '--fade-out', '0.8',
@@ -251,7 +255,7 @@ test('music audible in a few blocks only reads as barely audible, never as loud'
   const music = Float64Array.from(voice, (p, b) => (b === 100 || b === 300 ? p : 0));
   const result = loudnessGap(voice, music, [{ s: 0, e: 20 }]);
   assert.ok(Math.abs(result.gapLu - 23.01) < 0.01, `разрыв ${result.gapLu}`);
-  const g = gateVoiceMusic(result, avatar);
+  const g = gateVoiceMusic(result, corridor);
   assert.equal(g.status, 'fail');
   assert.match(g.hint, /почти не слышно/);
   assert.doesNotMatch(g.hint, /громк/);
@@ -287,6 +291,21 @@ test('G8 statuses follow the profile corridor and speak in LU with commas', () =
   assert.match(gateVoiceMusic(null, profile, { hasMusic: false }).hint, /нет музыки/);
   // Замер старой формы ({ median }) – ошибка вызова, а не тихий pass.
   assert.throws(() => gateVoiceMusic({ median: 0.5, blocks: 100 }, profile), /gapLu/);
+});
+
+// Решение владельца 29.09.2026 «по эталону»: коридор avatar – замер утверждённого эталонного preview
+// ±3 LU (стоп < 3 или > эталон + 8). Просьба «музыку слышнее» снижает разрыв на 6–8 LU и даёт
+// предупреждение, а не стоп.
+test('the avatar corridor is calibrated on the approved reference preview', () => {
+  assert.deepEqual({ ...avatar.voiceMusic }, { stopLow: 3, warnLow: 35, target: 38, warnHigh: 41, stopHigh: 46 });
+  const at = (gapLu) => gateVoiceMusic({ gapLu, voiceLufs: -14.6, musicLufs: -14.6 - gapLu, blocks: 1605 }, avatar, { gainDb: -16 });
+  const reference = at(REFERENCE_GAP_LU);
+  assert.equal(reference.status, 'pass');
+  assert.equal(reference.hint, 'музыка на 38 LU тише голоса');
+  assert.equal(reference.threshold, '35–41 LU, стоп < 3 или > 46');
+  for (const louder of [6, 8]) assert.equal(at(REFERENCE_GAP_LU - louder).status, 'warn', `музыка слышнее на ${louder} LU`);
+  assert.equal(at(2.9).status, 'fail');
+  assert.equal(at(46.1).status, 'fail');
 });
 
 // Схема brief ограничивает music.gainDb диапазоном −60…0 дБ: совет не выводит за край, а когда края
@@ -346,7 +365,7 @@ test('the K-weighted gap matches the ebur128 loudness gap on a low and a bright 
   }
 });
 
-test('BAD CASE: music at the voice level stops the preview; a 12 LU gap passes', { skip: !hasFfmpeg }, (t) => {
+test('BAD CASE: music at the voice level stops the preview; a gap at the corridor target passes', { skip: !hasFfmpeg }, (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-mix-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const voice = path.join(dir, 'voice.wav');
@@ -356,12 +375,12 @@ test('BAD CASE: music at the voice level stops the preview; a 12 LU gap passes',
   const windows = [{ s: 0.5, e: 9.5 }];
   const measure = (gain) => measureVoiceMusic({ voicePath: voice, musicPath: music, durationSec: 10, windows,
     mixOptions: parseMixOptions(['--gain', String(gain), '--threshold', '1', '--ratio', '1', '--duration', '10']) });
-  const level = gateVoiceMusic(measure(0), avatar);
+  const level = gateVoiceMusic(measure(0), corridor);
   assert.equal(level.status, 'fail');
   assert.equal(level.unit, 'LU');
   assert.ok(Math.abs(level.value) < 1, `музыка вровень с голосом: ${level.value} LU`);
   assert.match(level.hint, /уменьшите music\.gainDb/);
-  const quiet = gateVoiceMusic(measure(-12), avatar);
+  const quiet = gateVoiceMusic(measure(-12), corridor);
   assert.equal(quiet.status, 'pass');
   assert.ok(Math.abs(quiet.value - 12) < 1, `разрыв 12 LU: ${quiet.value} LU`);
 });
@@ -376,8 +395,8 @@ test('inaudible music (gain −60) under ducking stops as barely audible, never 
   runTool('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'anoisesrc=color=pink:sample_rate=48000:duration=4:amplitude=0.5:seed=2', '-ac', '2', music]);
   const result = measureVoiceMusic({ voicePath: voice, musicPath: music, durationSec: 4, windows: [{ s: 0.1, e: 0.9 }, { s: 2.1, e: 2.9 }],
     mixOptions: parseMixOptions(['--gain', '-60', '--threshold', '0.0501', '--ratio', '6', '--duration', '4']) });
-  assert.ok(result.gapLu > avatar.voiceMusic.stopHigh, `разрыв ${result.gapLu} LU`);
-  const g = gateVoiceMusic(result, avatar);
+  assert.ok(result.gapLu > corridor.voiceMusic.stopHigh, `разрыв ${result.gapLu} LU`);
+  const g = gateVoiceMusic(result, corridor);
   assert.equal(g.status, 'fail');
   assert.match(g.hint, /почти не слышно/);
   assert.doesNotMatch(g.hint, /громк/);

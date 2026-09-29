@@ -1,5 +1,5 @@
 // Пороги гейтов. avatar – голос HeyGen/ElevenLabs и слой kit; live – живая запись с микрофона.
-// Коридор avatar.voiceMusic калибруется по утверждённому эталонному preview (см. DECISIONS).
+// Коридор avatar.voiceMusic откалиброван по утверждённому эталонному preview (D-035).
 // live.voiceMusic – стартовые значения без калибровки; уточнить по утверждённому живому ролику
 // (D-035).
 
@@ -41,10 +41,11 @@ const BASE = deepFreeze({
 
 // { ...BASE, voiceMusic: {...} } копирует только верхний уровень: вложенные объекты (rhythm,
 // camera, ...) остаются той же замороженной ссылкой из BASE, deepFreeze их не трогает повторно.
-// voiceMusic – коридор G8 в LU (разрыв громкости BS.1770 голос − музыка на участках речи). Оба
-// коридора – заглушки до калибровки по утверждённому эталонному preview (D8, D-035).
+// voiceMusic – коридор G8 в LU (разрыв громкости BS.1770 голос − музыка на участках речи).
+// avatar: замер утверждённого эталонного preview тем же путём, что G8, R = 37,95 → 38 LU (29.09.2026,
+// решение владельца «по эталону»): предупреждение вне R ± 3, стоп < 3 или > R + 8 (D-035).
 const PROFILES = deepFreeze({
-  avatar: { ...BASE, voiceMusic: { stopLow: 3, warnLow: 9, target: 12, warnHigh: 15, stopHigh: 20 } },
+  avatar: { ...BASE, voiceMusic: { stopLow: 3, warnLow: 35, target: 38, warnHigh: 41, stopHigh: 46 } },
   live: { ...BASE, voiceMusic: { stopLow: 6, warnLow: 12, target: 15, warnHigh: 18, stopHigh: 24 } },
 });
 

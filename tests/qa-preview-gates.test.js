@@ -6,6 +6,7 @@ const path = require('node:path');
 const { writeJson } = require('../scripts/layer/common');
 const { buildReport, gate } = require('../scripts/qa/report');
 const { readProjectWords, runPreviewGates } = require('../scripts/qa/preview-gates');
+const { getProfile } = require('../scripts/qa/profiles');
 
 const SOURCE = 's'.repeat(64);
 const sha = (letter) => letter.repeat(64);
@@ -46,7 +47,9 @@ const brief = { scenes: [videoScene()], music: { gainDb: -16 } };
 const words = [{ s: 1, e: 3 }, { s: 4, e: 6 }];
 const range = { fromSec: 0, toSec: 10 };
 const loud = () => ({ gapLu: 0.5, voiceLufs: -14, musicLufs: -14.5, blocks: 100 });
-const good = () => ({ gapLu: 12, voiceLufs: -14, musicLufs: -26, blocks: 100 });
+// Разрыв ровно в цели коридора avatar: тесты барьера не зависят от откалиброванного числа.
+const AVATAR_TARGET = getProfile('avatar').voiceMusic.target;
+const good = () => ({ gapLu: AVATAR_TARGET, voiceLufs: -14, musicLufs: -14 - AVATAR_TARGET, blocks: 100 });
 const base = (projectDir, extra = {}) => ({ projectDir, brief, hasMusic: true, words, range, sourceSha256: SOURCE,
   finishedPath: 'finished.mp4', musicPath: 'music.mp3', mixArgs: ['--gain', '-16'], ...extra });
 const statuses = (result) => result.report.gates.map((g) => [g.id, g.status]);
@@ -309,12 +312,12 @@ test('layers with different profiles: G8 uses the profile of the first layer in 
   addLayer(dir, { layer: 'motion-v01', render: sha('1'), canonical: sha('a'), profile: 'live' });
   addLayer(dir, { layer: 'motion-v02', render: sha('2'), canonical: sha('b'), profile: 'avatar' });
   const scenes = [videoScene(sha('a'), 'id-motion-v01'), videoScene(sha('b'), 'id-motion-v02')];
-  // 10 LU различает профили: в коридоре avatar (9–15) – pass, ниже коридора live (12–18) – warn.
-  const gap10 = () => ({ gapLu: 10, voiceLufs: -14, musicLufs: -24, blocks: 100 });
-  const first = runPreviewGates(base(dir, { brief: { scenes, music: { gainDb: -16 } } }), { measureImpl: gap10 });
+  // Цель avatar различает профили: в коридоре avatar – pass, выше стоп-границы live – fail.
+  assert.ok(AVATAR_TARGET > getProfile('live').voiceMusic.stopHigh);
+  const first = runPreviewGates(base(dir, { brief: { scenes, music: { gainDb: -16 } } }), { measureImpl: good });
   assert.equal(first.report.profile, 'live');
-  assert.deepEqual(statuses(first), [['L', 'pass'], ['G8', 'warn']]);
-  const swapped = runPreviewGates(base(dir, { brief: { scenes: [...scenes].reverse(), music: { gainDb: -16 } } }), { measureImpl: gap10 });
+  assert.deepEqual(statuses(first), [['L', 'pass'], ['G8', 'fail']]);
+  const swapped = runPreviewGates(base(dir, { brief: { scenes: [...scenes].reverse(), music: { gainDb: -16 } } }), { measureImpl: good });
   assert.equal(swapped.report.profile, 'avatar');
   assert.deepEqual(statuses(swapped), [['L', 'pass'], ['G8', 'pass']]);
 });
