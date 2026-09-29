@@ -324,7 +324,7 @@ test('a failed G8 measurement never writes the project path into the preview rep
       + `Error opening input file '${path.join(dir, 'music.mp3')}'. C:\\Users\\someone\\project\\voice.wav`); };
     const result = runPreviewGates(base(dir, { finishedPath: finished }), { measureImpl: boom });
     const hint = result.report.gates.find((g) => g.id === 'G8').hint;
-    assert.match(hint, /замер не удался: ffmpeg не смог отдать звук: finished\.mp4: No such file or directory/u);
+    assert.match(hint, /замер не удался: ffmpeg не смог отдать звук: tmp\/preview-stage\/finished\.mp4: No such file or directory/u);
     for (const file of [result.paths.jsonPath, result.paths.textPath]) {
       const written = fs.readFileSync(file, 'utf8');
       assert.equal(written.includes(dir), false, `${registered ? 'слой kit' : 'без слоя'}: ${written}`);

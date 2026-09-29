@@ -119,6 +119,24 @@ function writeAtomic(file, text, fileSystem) {
   }
 }
 
+// Текст ошибки для отчёта или интерфейса без абсолютных путей: сырой stderr ffmpeg и сообщения fs называют
+// файл полным путём (папка проекта, временная папка preview). Сначала папка проекта с разделителем убирается
+// (путь внутри проекта остаётся относительным, например qa/preview-….txt). Путь в кавычках и путь после пробела, скобки или
+// «=» заменяются именем файла (POSIX и Windows), остаток папки проекта – «…».
+const fileName = (file) => file.split(/[\\/]/u).filter(Boolean).pop() || file;
+function hidePaths(text, projectDir) {
+  let out = String(text);
+  if (projectDir) out = out.split(`${projectDir}${path.sep}`).join('').split(`${projectDir}/`).join('');
+  out = out
+    .replace(/'([^']*[\\/][^']*)'|"([^"]*[\\/][^"]*)"/gu, (_, single, double) => `«${fileName(single ?? double)}»`)
+    .replace(/(^|[\s(=«])((?:[A-Za-z]:)?[\\/][^\s'"()«»]*)/gu, (_, before, file) => {
+      const tail = /[.,:;]+$/u.exec(file)?.[0] ?? '';
+      return `${before}${fileName(file.slice(0, file.length - tail.length))}${tail}`;
+    });
+  if (projectDir) out = out.split(projectDir).join('…');
+  return out;
+}
+
 const QA_NOT_DIR = 'qa/ должна быть папкой проекта, а не ссылкой или файлом – уберите её и верните настоящую папку qa/';
 
 // Папка qa/ проекта – общий запрет для отчётов, реестра слоёв и контакт-листа: ссылка или файл на её месте –
@@ -144,4 +162,4 @@ function writeReport(projectDir, name, report, fileSystem = fs) {
   return { jsonPath, textPath };
 }
 
-module.exports = { applyWaivers, buildReport, exitCodeFor, formatReport, gate, projectQaDir, summarize, writeReport };
+module.exports = { applyWaivers, buildReport, exitCodeFor, formatReport, gate, hidePaths, projectQaDir, summarize, writeReport };

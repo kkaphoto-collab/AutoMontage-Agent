@@ -13,7 +13,7 @@ const { resolveProjectPath } = require('../project/workspace');
 const { assertReportSource, findRenderReport, readRegistry, renderReportProblem } = require('../layer/registry');
 const { gateVoiceMusic, measureVoiceMusic, speechWindows } = require('./mix-gates');
 const { getProfile, PROFILES } = require('./profiles');
-const { buildReport, gate, projectQaDir, writeReport } = require('./report');
+const { buildReport, gate, hidePaths, projectQaDir, writeReport } = require('./report');
 
 const LAYER_TITLE = 'Слой прошёл layer render и импорт';
 const VOICE_MUSIC_TITLE = 'Голос и музыка';
@@ -28,20 +28,6 @@ const LAYER_RENDER_LABEL = /^layer-\d+(?:\.raw)?\.mp4$/iu;
 const IMPORTED_VIDEO = /^assets\/broll\/video\/[^/]+\/media\.mp4$/u;
 const message = (error) => error?.message ?? String(error);
 
-// Текст ошибки для подсказки гейта без абсолютных путей: сырой stderr ffmpeg и сообщения fs называют файл
-// полным путём (папка проекта, временная папка preview). Путь в кавычках и путь после пробела, скобки или
-// «=» заменяются именем файла (POSIX и Windows), остаток папки проекта – «…».
-const fileName = (file) => file.split(/[\\/]/u).filter(Boolean).pop() || file;
-function hidePaths(text, projectDir) {
-  let out = String(text)
-    .replace(/'([^']*[\\/][^']*)'|"([^"]*[\\/][^"]*)"/gu, (_, single, double) => `«${fileName(single ?? double)}»`)
-    .replace(/(^|[\s(=«])((?:[A-Za-z]:)?[\\/][^\s'"()«»]*)/gu, (_, before, file) => {
-      const tail = /[.,:;]+$/u.exec(file)?.[0] ?? '';
-      return `${before}${fileName(file.slice(0, file.length - tail.length))}${tail}`;
-    });
-  if (projectDir) out = out.split(projectDir).join('…');
-  return out;
-}
 const r1 = (value) => String(Math.round(value * 10) / 10).replace('.', ',');
 
 // Видео всех сцен brief (слоёв может быть несколько), без повторов по sha256.
