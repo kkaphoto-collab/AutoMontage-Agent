@@ -353,6 +353,19 @@ test('fill presets (L, R, top, custom dy) blend the sharp speaker into the fill 
     assert.ok(r.center - r.edge >= 20, `${r.preset}: заливка у края не видна (центр ${r.center}, край ${r.edge}) – кадр ничего не проверяет`);
     assert.ok(r.maxStep <= 4, `${r.preset}: жёсткий шов – соседние ${r.preset === 'L' || r.preset === 'R' ? 'столбцы' : 'строки'} ${r.at - 1}/${r.at} отличаются на ${r.maxStep} уровней`);
   }
+
+  // Ревью: у top (s = 1) бока открывает только покачивание (кадр 60 – сдвиг ≈ 30 px вправо, за план
+  // до ≈ 31 px). Растушёвка боков – не шире этого: край остаётся мягким, а через 90 px от края кадра
+  // уже полностью резкая картинка. При прежних 96 px на всех сторонах столбец 90 был ещё
+  // полупрозрачным – там вместо настоящей картинки проступала размытая заливка.
+  const side = profile(await still({ preset: 'top', frame: 60 }), 'x');
+  let sideStep = 0;
+  for (let i = 1; i < side.length; i += 1) sideStep = Math.max(sideStep, Math.abs(side[i] - side[i - 1]));
+  const sideCenter = side[540];
+  t.diagnostic(JSON.stringify({ preset: 'top@60', maxStep: Number(sideStep.toFixed(2)), edge: side[0], col60: side[60], col90: side[90], center: sideCenter }));
+  assert.ok(sideCenter - side[0] >= 20, `top@60: у левого края не видно заливки (${side[0]} при центре ${sideCenter})`);
+  assert.ok(sideStep <= 4, `top@60: жёсткий шов на боку – шаг ${sideStep}`);
+  assert.ok(side[90] >= sideCenter - 1, `top@60: столбец 90 (${side[90]}) ещё не резкий – растушёвка боков шире покачивания`);
 });
 
 // Ревью мягкого края: вложенный блок маски без стиля на планах без заливки ломал cover-кадрирование –

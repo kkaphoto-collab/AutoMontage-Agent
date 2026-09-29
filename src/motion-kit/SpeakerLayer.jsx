@@ -29,23 +29,59 @@ export function speakerFillStyle(track) {
   };
 }
 
+// Зазор между краем кадра и краем резкой копии, px кадра (> 0 – с этой стороны видна заливка).
+function copyGaps(state, { face, width, height }) {
+  return {
+    left: face.x * (1 - state.s) + state.dx,
+    right: width - (face.x + state.dx + state.s * (width - face.x)),
+    top: face.y * (1 - state.s) + state.dy,
+    bottom: height - (face.y + state.dy + state.s * (height - face.y)),
+  };
+}
+
+// Наибольший зазор каждой стороны за весь план: сколько кадра эта сторона вообще открывает (сдвиг
+// пресета, покачивание, дрейф и панч). Кэш по дорожке и плану: Remotion считает кадры по одному.
+const reachCache = new WeakMap();
+function shotReach(track, index) {
+  let byShot = reachCache.get(track);
+  if (!byShot) { byShot = new Map(); reachCache.set(track, byShot); }
+  if (!byShot.has(index)) {
+    const shot = track.shots[index];
+    const reach = { left: -Infinity, right: -Infinity, top: -Infinity, bottom: -Infinity };
+    for (let f = shot.from; f < shot.to; f += 1) {
+      const gaps = copyGaps(cameraAt(track, f), track);
+      for (const side of Object.keys(reach)) reach[side] = Math.max(reach[side], gaps[side]);
+    }
+    byShot.set(index, reach);
+  }
+  return byShot.get(index);
+}
+
 // Мягкий край резкой копии на планах с заливкой: без него копия обрывалась жёстким швом над
-// размытой заливкой (вертикальным на L/R, горизонтальным при сдвиге dy). Маска растушёвывает все
-// четыре края копии на featherPx пикселей кадра по плавной кривой (smoothstep – без светлой полосы
-// на концах линейного перехода): край за пределами кадра дальше featherPx остаётся невидимым, а
-// открытый край плавно уходит в заливку. Маска живёт в координатах копии до scale(), поэтому её
-// ширина делится на s. Две маски – x на самой копии и y на вложенном блоке: mask-composite
-// intersect в Chrome оставлял на вертикальном краю копии светлую линию в 1 px. Гейты не меняются:
-// камера, масштаб и сдвиг лица те же.
+// размытой заливкой (вертикальным на L/R, горизонтальным при сдвиге dy). Каждая сторона копии
+// растушёвана по плавной кривой (smoothstep – без светлой полосы на концах линейного перехода) на
+// столько, сколько она открывает за план, но не больше featherPx и не меньше minFeatherPx: открытый
+// край плавно уходит в заливку, а край, который стоит на краю кадра и открывается только
+// покачиванием (бока top при s = 1), не заменяет настоящую картинку размытой заливкой на 96 px.
+// Маска живёт в координатах копии до scale(), поэтому её ширина делится на s. Две маски – x на
+// самой копии и y на вложенном блоке: mask-composite intersect в Chrome оставлял на вертикальном
+// краю копии светлую линию в 1 px. Гейты не меняются: камера, масштаб и сдвиг лица те же.
 const SMOOTH = [[0.25, 0.156], [0.5, 0.5], [0.75, 0.844]];
 export function speakerEdgeMask(state, track) {
   if (!state.fill) return null;
-  const feather = (CAMERA_DEFAULTS.fill.featherPx * track.k) / state.s;
-  const at = (t) => (feather * t).toFixed(3);
-  const stops = ['transparent 0px', ...SMOOTH.map(([t, a]) => `rgba(0,0,0,${a}) ${at(t)}px`), `#000 ${at(1)}px`,
-    `#000 calc(100% - ${at(1)}px)`, ...SMOOTH.map(([t, a]) => `rgba(0,0,0,${a}) calc(100% - ${at(t)}px)`).reverse(), 'transparent 100%'];
-  const ramp = (to) => `linear-gradient(to ${to}, ${stops.join(', ')})`;
-  return { feather, x: { maskImage: ramp('right') }, y: { maskImage: ramp('bottom') } };
+  const { featherPx, minFeatherPx } = CAMERA_DEFAULTS.fill;
+  const reach = shotReach(track, state.shot);
+  const feather = Object.fromEntries(Object.entries(reach).map(([side, px]) => [side,
+    Math.min(featherPx * track.k, Math.max(minFeatherPx * track.k, px)) / state.s]));
+  const px = (value) => `${value.toFixed(3)}px`;
+  const ramp = (to, head, tail) => `linear-gradient(to ${to}, ${['transparent 0px',
+    ...SMOOTH.map(([t, a]) => `rgba(0,0,0,${a}) ${px(head * t)}`), `#000 ${px(head)}`, `#000 calc(100% - ${px(tail)})`,
+    ...SMOOTH.map(([t, a]) => `rgba(0,0,0,${a}) calc(100% - ${px(tail * t)})`).reverse(), 'transparent 100%'].join(', ')})`;
+  return {
+    feather,
+    x: { maskImage: ramp('right', feather.left, feather.right) },
+    y: { maskImage: ramp('bottom', feather.top, feather.bottom) },
+  };
 }
 
 // Аватар – один OffthreadVideo muted по глобальному таймкоду (голос идёт из мастер-видео).

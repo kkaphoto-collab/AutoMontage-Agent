@@ -169,11 +169,25 @@ test('speakerTransform framing matches what the gates read: face moves by exactl
 
 // Проба Task 49: на планах с заливкой (L/R, top, свой пресет с dy) резкая копия обрывалась жёстким
 // швом над размытой заливкой. Теперь у резкой копии мягкий край: маска по x на самой копии и по y на
-// вложенном блоке, каждая от прозрачного на самом краю копии до непрозрачного через featherPx
-// (× короткая сторона / 1080) пикселей кадра. Проверяем на каждом кадре: каждый край, оказавшийся
-// внутри кадра, растушёван не меньше чем на featherPx, и маска начинается с прозрачного ровно на краю.
-test('fill shots feather every edge of the sharp speaker that lands inside the frame; non-fill shots get no mask', () => {
+// вложенном блоке, от прозрачного на самом краю копии до непрозрачного. Ширина растушёвки своя у
+// каждой стороны (ревью): столько, сколько эта сторона вообще открывает за план, но не больше
+// featherPx и не меньше minFeatherPx (× короткая сторона / 1080). Так открытый край всегда мягкий,
+// а край, который стоит на краю кадра и открывается только покачиванием (top, s = 1), не заменяет
+// настоящую картинку размытой заливкой на 96 px.
+const SIDES = ['left', 'right', 'top', 'bottom'];
+function copyGaps(state, { face, width, height }) {
+  // зазор между краем кадра и краем резкой копии, px кадра (> 0 – заливка видна)
+  return {
+    left: face.x * (1 - state.s) + state.dx,
+    right: width - (face.x + state.dx + state.s * (width - face.x)),
+    top: face.y * (1 - state.s) + state.dy,
+    bottom: height - (face.y + state.dy + state.s * (height - face.y)),
+  };
+}
+
+test('fill shots feather each side of the sharp speaker as wide as that side can open in the shot; non-fill shots get no mask', () => {
   const kit = kitAt(0);
+  const { featherPx, minFeatherPx } = kit.CAMERA_DEFAULTS.fill;
   for (const [width, height, face] of [[1080, 1920, { x: 540, y: 787 }], [1920, 1080, { x: 960, y: 443 }]]) {
     const k = Math.min(width, height) / 1080;
     const cfg = { fps: 25, width, height, durationInFrames: 500 };
@@ -183,32 +197,46 @@ test('fill shots feather every edge of the sharp speaker that lands inside the f
         { at: 8, preset: 'low' }, { at: 10, preset: 'M', dx: 400 }, { at: 12, preset: 'L', drift: 'none' }],
       punches: [{ at: 4.5, until: 5.2 }],
     }, cfg);
-    let feathered = 0;
+    // сколько каждая сторона открывает за план – независимым проходом по кадрам плана
+    const reach = track.shots.map((shot) => {
+      const out = { left: -Infinity, right: -Infinity, top: -Infinity, bottom: -Infinity };
+      for (let f = shot.from; f < shot.to; f += 1) {
+        const gaps = copyGaps(kit.cameraAt(track, f), track);
+        for (const side of SIDES) out[side] = Math.max(out[side], gaps[side]);
+      }
+      return out;
+    });
+    let open = 0;
     for (let frame = 0; frame < 500; frame += 1) {
       const state = kit.cameraAt(track, frame);
       const mask = kit.speakerEdgeMask(state, track);
       if (!state.fill) { assert.equal(mask, null, `${width}x${height}@${frame}: маска без заливки`); continue; }
-      const px = mask.feather.toFixed(3);
-      for (const [axis, to] of [['x', 'right'], ['y', 'bottom']]) {
+      const f = mask.feather;
+      for (const [axis, to, head, tail] of [['x', 'right', f.left, f.right], ['y', 'bottom', f.top, f.bottom]]) {
         const image = mask[axis].maskImage;
         assert.ok(image.startsWith(`linear-gradient(to ${to}, transparent 0px, `), image);
-        assert.ok(image.includes(`, #000 ${px}px, #000 calc(100% - ${px}px), `), image);
+        assert.ok(image.includes(`, #000 ${head.toFixed(3)}px, #000 calc(100% - ${tail.toFixed(3)}px), `), image);
         assert.ok(image.endsWith(', transparent 100%)'), image);
       }
-      // края резкой копии в px кадра (transform: translate(dx, dy) scale(s) вокруг точки лица)
-      const inside = {
-        left: face.x * (1 - state.s) + state.dx > 0.01,
-        right: face.x + state.dx + state.s * (width - face.x) < width - 0.01,
-        top: face.y * (1 - state.s) + state.dy > 0.01,
-        bottom: face.y + state.dy + state.s * (height - face.y) < height - 0.01,
-      };
-      if (!Object.values(inside).some(Boolean)) continue;
-      feathered += 1;
-      // маска масштабируется вместе с копией: ширина в px кадра = локальная ширина × s
-      assert.ok(mask.feather * state.s >= kit.CAMERA_DEFAULTS.fill.featherPx * k - 1e-6,
-        `${width}x${height}@${frame}: открытый край растушёван только на ${mask.feather * state.s} px`);
+      const gaps = copyGaps(state, track);
+      for (const side of SIDES) {
+        // маска масштабируется вместе с копией: ширина в px кадра = локальная ширина × s
+        const px = f[side] * state.s;
+        const where = `${width}x${height}@${frame} ${side}`;
+        if (gaps[side] > 0.01) {
+          open += 1;
+          assert.ok(px >= Math.min(featherPx * k, gaps[side]) - 1e-6, `${where}: открыт на ${gaps[side]} px, растушёван только на ${px} px`);
+        }
+        assert.ok(px <= Math.max(minFeatherPx * k, reach[state.shot][side]) + 1e-6, `${where}: растушёвка ${px} px шире, чем сторона вообще открывается (${reach[state.shot][side]} px)`);
+        assert.ok(px >= minFeatherPx * k - 1e-6 && px <= featherPx * k + 1e-6, `${where}: ${px} px вне [${minFeatherPx * k}, ${featherPx * k}]`);
+      }
+      // top при s = 1: бока открывает только покачивание (до 36 px), верх – сдвиг 380 px
+      if (track.shots[state.shot].preset === 'top') {
+        assert.ok(f.left * state.s <= 36 * k + 1e-6 && f.right * state.s <= 36 * k + 1e-6, `${width}x${height}@${frame}: бока top растушёваны на ${f.left * state.s}/${f.right * state.s} px`);
+        assert.ok(Math.abs(f.top * state.s - featherPx * k) < 1e-6, `${width}x${height}@${frame}: верх top`);
+      }
     }
-    assert.ok(feathered > 100, `${width}x${height}: проверка не увидела ни одного открытого края (${feathered})`);
+    assert.ok(open > 100, `${width}x${height}: проверка не увидела ни одного открытого края (${open})`);
   }
 });
 
