@@ -217,6 +217,12 @@ test('blocking preview gates stop publication and keep the previous preview', (t
   assert.match(seen.sourceSha256, /^[a-f0-9]{64}$/u);
   assert.equal(seen.brief.title, 'ПРЕДПРОСМОТР');
   assert.equal(fs.existsSync(seen.finishedPath), false);
+  // Входы отчёта: brief и исходник проекта с sha256, которые preview уже посчитал.
+  const briefFile = path.join(fixture.workspace.dir, fixture.published.relativePath);
+  assert.equal(seen.briefPath, briefFile);
+  assert.equal(seen.briefSha256, require('node:crypto').createHash('sha256').update(fs.readFileSync(briefFile)).digest('hex'));
+  assert.equal(path.relative(fixture.workspace.dir, seen.sourcePath).startsWith('..'), false);
+  assert.ok(fs.statSync(seen.sourcePath).isFile());
 });
 
 test('an unwritten gate report stops a kit preview after printing the verdict; other previews publish', (t) => {

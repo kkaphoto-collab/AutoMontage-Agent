@@ -238,6 +238,7 @@ function runPreview(options, dependencies = {}) {
       if (kind !== 'motion-reel') {
         gateResult = runPreviewGatesImpl({
           projectDir, brief, manifest, hasMusic: Boolean(prepared.music), range: prepared.range, sourceSha256,
+          sourcePath: sourceVideo, briefPath, briefSha256,
           finishedPath: planned.finishedPath,
           musicPath: prepared.music ? (lease.musicPath || prepared.music.sourcePath) : null,
           mixArgs: prepared.music ? prepared.music.mixArgs : null,

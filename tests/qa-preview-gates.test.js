@@ -321,3 +321,44 @@ test('layers with different profiles: G8 uses the profile of the first layer in 
   assert.equal(swapped.report.profile, 'avatar');
   assert.deepEqual(statuses(swapped), [['L', 'pass'], ['G8', 'pass']]);
 });
+
+test('the preview report records its inputs with project-relative paths: source, brief and each checked layer', (t) => {
+  const dir = project(t);
+  addLayer(dir, { layer: 'motion-v01', render: sha('1'), canonical: sha('a') });
+  addLayer(dir, { layer: 'motion-v02', render: sha('2'), canonical: sha('b') });
+  const scenes = [videoScene(sha('a'), 'id-motion-v01'), videoScene(sha('b'), 'id-motion-v02')];
+  // preview отдаёт абсолютные пути – в отчёт они попадают относительными к проекту, как в отчётах layer.
+  const result = runPreviewGates(base(dir, {
+    brief: { scenes, music: { gainDb: -16 } },
+    sourcePath: path.join(dir, 'source', 'speaker.mp4'),
+    briefPath: path.join(dir, 'brief', 'lesson-brief.json'), briefSha256: sha('f'),
+  }), { measureImpl: good });
+  const expected = [
+    { role: 'source', path: 'source/speaker.mp4', sha256: SOURCE },
+    { role: 'brief', path: 'brief/lesson-brief.json', sha256: sha('f') },
+    { role: 'layer', path: 'assets/broll/video/id-motion-v01/media.mp4', sha256: sha('a') },
+    { role: 'layer', path: 'assets/broll/video/id-motion-v02/media.mp4', sha256: sha('b') },
+  ];
+  assert.deepEqual(result.report.inputs, expected);
+  const written = fs.readFileSync(result.paths.jsonPath, 'utf8');
+  assert.deepEqual(JSON.parse(written).inputs, expected);
+  assert.equal(written.includes(dir), false);
+
+  // Ролик без слоя kit: только исходник и brief. Без путей и sha256 входов нет – вход без sha256 не пишется.
+  const plain = runPreviewGates(base(project(t), {
+    brief: { scenes: [], music: { gainDb: -16 } },
+    sourcePath: path.join(dir, 'source', 'speaker.mp4'), briefPath: path.join(dir, 'brief', 'b.json'), briefSha256: sha('f'),
+  }), { measureImpl: good, write: false });
+  assert.deepEqual(plain.report.inputs.map((i) => i.role), ['source', 'brief']);
+  assert.deepEqual(runPreviewGates(base(project(t), { brief: { scenes: [], music: { gainDb: -16 } }, sourceSha256: undefined }),
+    { measureImpl: good, write: false }).report.inputs, []);
+});
+
+test('a preview report with layer inputs is never taken for a layer render report', (t) => {
+  const dir = project(t, { registered: true, render: sha('r'), canonical: sha('c') });
+  const { findRenderReport } = require('../scripts/layer/registry');
+  runPreviewGates(base(dir, { sourcePath: path.join(dir, 'source', 'speaker.mp4') }), { measureImpl: good });
+  // Вход «layer» preview-отчёта – импортированный ассет (canonicalSha256): поиск рендера по нему ничего не находит.
+  assert.equal(findRenderReport(dir, sha('c')), null);
+  assert.equal(findRenderReport(dir, sha('r')).kind, 'layer-render');
+});

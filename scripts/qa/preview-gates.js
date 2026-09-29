@@ -165,6 +165,29 @@ function writeReason(error) {
   return error?.code ? `не удалось записать в qa/ (${error.code})` : `не удалось записать в qa/: ${message(error).replace(/'[^']*'|"[^"]*"/gu, '…')}`;
 }
 
+// Путь входа для отчёта – относительно проекта и через «/», как во входах отчётов layer (scripts/layer/common.js
+// relative): абсолютный путь пользователя в qa/ не попадает. Если относительного пути нет (другой диск в
+// Windows), остаётся только имя файла.
+function projectRelative(projectDir, file) {
+  const relative = path.relative(projectDir, path.resolve(projectDir, file));
+  return path.isAbsolute(relative) ? path.basename(file) : relative.split(path.sep).join('/');
+}
+
+// Входы отчёта preview той же формы {role, path, sha256}, что у layer render: исходник и brief – по sha256,
+// которые preview уже посчитал (здесь ничего не хешируется), и каждый слой kit из реестра, который проверил
+// гейт L, – импортированный ассет (reference) и его canonicalSha256. Вход без пути или sha256 не пишется.
+// findRenderReport такие входы «layer» не видит: он читает только отчёты layer-*-render-NN.json.
+function previewInputs(projectDir, { sourcePath, sourceSha256, briefPath, briefSha256, entries }) {
+  const inputs = [];
+  const add = (role, file, sha256) => {
+    if (typeof file === 'string' && file && typeof sha256 === 'string') inputs.push({ role, path: projectRelative(projectDir, file), sha256 });
+  };
+  add('source', sourcePath, sourceSha256);
+  add('brief', briefPath, briefSha256);
+  for (const entry of entries) add('layer', entry.reference, entry.canonicalSha256);
+  return inputs;
+}
+
 // Справочный G8 для ролика без слоя kit: статус skipped (нейтральный), без порога и без советов.
 function infoVoiceMusic(note) {
   return gate('G8', VOICE_MUSIC_TITLE, { status: 'skipped', hint: `для справки: ${note}` });
@@ -185,8 +208,10 @@ function infoFromMeasured(measured) {
 // всегда, даже если его не удалось записать (paths = null, writeError – короткая причина).
 // words – слова {s, e} (иначе читаются из транскрипта manifest); range – диапазон preview в секундах исходника;
 // finishedPath – звук после finish.js; musicPath и mixArgs – те же, что получил mix-music.js.
+// sourcePath (иначе manifest.source.localPath), briefPath и briefSha256 – входы отчёта; пути пишутся относительными.
 // deps: measureImpl – замер G8 (подмена в тестах), now – время отчёта, write: false – не писать отчёт.
-function runPreviewGates({ projectDir, brief, manifest, hasMusic, words, range, sourceSha256, finishedPath, musicPath, mixArgs }, deps = {}) {
+function runPreviewGates({ projectDir, brief, manifest, hasMusic, words, range, sourceSha256, finishedPath, musicPath, mixArgs,
+  sourcePath, briefPath, briefSha256 }, deps = {}) {
   const layer = layerGate(projectDir, brief, sourceSha256);
   // Слоёв с разными профилями быть не должно (голос один – исходник проекта); если всё же так, берём профиль
   // первого слоя по порядку сцен, а не «строжайший»: коридоры avatar и live не вложены друг в друга.
@@ -218,8 +243,10 @@ function runPreviewGates({ projectDir, brief, manifest, hasMusic, words, range, 
       ? gate('G8', VOICE_MUSIC_TITLE, { status: 'fail', hint: `замер не удался: ${message(error)}` })
       : infoVoiceMusic(`замер не удался: ${message(error)}`));
   }
+  const inputs = previewInputs(projectDir, { sourcePath: sourcePath ?? manifest?.source?.localPath, sourceSha256,
+    briefPath, briefSha256, entries: layer.entries });
   const report = buildReport({ kind: 'preview', layer: layer.entries.map((e) => e.layer).join(', ') || null,
-    profile: profileName, gates, now: (deps.now || (() => new Date()))() });
+    profile: profileName, gates, inputs, now: (deps.now || (() => new Date()))() });
   const result = { report, block: layer.strict && report.summary.status === 'fail', enforced: layer.strict, paths: null, writeError: null };
   if (deps.write !== false) {
     try {
