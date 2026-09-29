@@ -612,6 +612,85 @@ test(
 );
 
 test(
+  'the server takes no project lease while a preview job runs',
+  { timeout: 20000 },
+  async (t) => {
+    const { startReviewServer } = require('../scripts/review/server');
+    const { spawn } = require('node:child_process');
+    const f = fixture(t);
+    fs.writeFileSync(path.join(f.workspace.dir, 'transcript/words.json'), '[]');
+    const leasePath = path.join(f.workspace.dir, '.project-mutation.lock');
+    let jobRunning = false;
+    let leasesDuringJob = 0;
+    // Lease берётся жёсткой ссылкой на project-mutation.lock: считаем такие ссылки сервера,
+    // пока preview-процесс жив.
+    const fileSystem = new Proxy(fs, {
+      get(target, key) {
+        if (key !== 'linkSync') return Reflect.get(target, key);
+        return (existing, destination) => {
+          if (jobRunning && path.resolve(String(destination)) === leasePath) leasesDuringJob += 1;
+          return target.linkSync(existing, destination);
+        };
+      },
+    });
+    const session = await startReviewServer({
+      projectDir: f.workspace.dir,
+      editable: true,
+      open: false,
+      fileSystem,
+      runToolImpl: () => ({ status: 1 }),
+      previewSpawnImpl(command, args, options) {
+        const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 1200)'], options);
+        jobRunning = true;
+        child.once('close', () => {
+          jobRunning = false;
+        });
+        return child;
+      },
+    });
+    try {
+      const headers = {
+        Authorization: `Bearer ${session.token}`,
+        Origin: session.origin,
+        'Content-Type': 'application/json',
+      };
+      const state = await (
+        await fetch(session.origin + '/api/state', { headers })
+      ).json();
+      const response = await fetch(session.origin + '/api/broll/preview', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          baseRevision: state.session.baseRevision,
+          baseHash: state.session.baseHash,
+          manifestHash: state.session.manifestHash,
+          kind: 'full',
+        }),
+      });
+      assert.equal(response.status, 202);
+      const { jobId } = await response.json();
+      const deadline = Date.now() + 10000;
+      let job;
+      let polls = 0;
+      do {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        job = await (
+          await fetch(`${session.origin}/api/broll/preview-job?id=${encodeURIComponent(jobId)}`, { headers })
+        ).json();
+        await fetch(session.origin + '/api/state', { headers });
+        polls += 1;
+      } while (job.status === 'running' && Date.now() < deadline);
+      assert.equal(job.status, 'complete');
+      assert.ok(polls > 5, `опросов во время preview: ${polls}`);
+      assert.equal(leasesDuringJob, 0, `сервер брал project lease во время preview: ${leasesDuringJob}`);
+    } finally {
+      await new Promise((resolve) => session.server.close(resolve));
+      await session.waitForActiveImports();
+    }
+  },
+);
+
+test(
   'status polls of a running preview never take the project lease its publication needs',
   { timeout: 20000 },
   async (t) => {

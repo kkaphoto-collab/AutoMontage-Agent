@@ -220,6 +220,30 @@ process.send({ type: 'result', counts, unexpected }, () => process.exit(0));
   );
 });
 
+test('a lease path that keeps vanishing is a conflict, but a missing project folder keeps its own error', (t) => {
+  const workspace = makeProject(t, 'Vanishing lease');
+  const leasePath = path.join(workspace.dir, '.project-mutation.lock');
+  // Lease-файл каждый раз исчезает между existsSync и realpathSync: проект на месте, lease занят.
+  const flickering = new Proxy(fs, {
+    get(target, key) {
+      if (key === 'existsSync') {
+        return (filename) => (path.resolve(String(filename)) === leasePath ? true : target.existsSync(filename));
+      }
+      return Reflect.get(target, key);
+    },
+  });
+  assert.throws(
+    () => acquireProjectMutationLease(workspace.dir, { fileSystem: flickering }),
+    (error) => error && error.code === 'PROJECT_MANIFEST_CONFLICT',
+  );
+
+  const missing = path.join(path.dirname(workspace.dir), 'deleted-project');
+  assert.throws(
+    () => acquireProjectMutationLease(missing),
+    (error) => error && error.code === 'ENOENT',
+  );
+});
+
 test('a hard process exit leaves a provably dead lease that the next mutation reclaims', async (t) => {
   const workspace = makeProject(t, 'Dead owner');
   const workerPath = writeLeaseWorker(path.dirname(workspace.dir));

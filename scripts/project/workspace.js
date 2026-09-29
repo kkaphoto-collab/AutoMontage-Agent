@@ -997,7 +997,10 @@ function acquireProjectMutationLease(projectDir, {
     });
   } catch (error) {
     // Lease другого процесса исчезает и появляется непрерывно: это занятость, а не сбой.
-    if (isVanishedEntry(error)) throw manifestConflict();
+    // Но если пропала сама папка проекта, это не «повторите позже»: отдаём исходную ошибку.
+    if (isVanishedEntry(error) && lstatIfPresent(fileSystem, resolvedProjectDir)?.isDirectory()) {
+      throw manifestConflict();
+    }
     throw error;
   }
   const token = safeTemporaryId(temporaryId);
