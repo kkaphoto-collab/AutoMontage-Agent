@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### Добавлено
+
+- Система задач проекта: формы GitHub для бага, идеи и технического долга, доска
+  [Product Backlog](https://github.com/orgs/mcdenil-skills/projects/1) со статусами и приоритетами
+  P0–P3, инструкция [CONTRIBUTING.md](CONTRIBUTING.md) и стратегическая карта
+  [ROADMAP.md](ROADMAP.md). `AGENTS.md` учит агента перед крупной работой находить задачу и
+  закрывать её только после выпуска и проверки.
+
 ### Исправлено
 
 - Review Workbench больше не срывает свой же preview. Интерфейс писал «Preview не готов», хотя
