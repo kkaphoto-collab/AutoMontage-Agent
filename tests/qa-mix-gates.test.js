@@ -313,17 +313,25 @@ test('the avatar corridor is calibrated on the approved reference preview', () =
 });
 
 // Коридор live не откалиброван (D-035: шкалы старого qa:preview и G8 расходятся на десятки единиц):
-// выход из него – предупреждение без совета по music.gainDb, стоп остаётся только у avatar.
-test('the uncalibrated live corridor never stops and gives no gain advice', () => {
+// выход из него – предупреждение без совета по music.gainDb. Нижний порог от шкалы не зависит: музыка
+// вровень с голосом или громче (< 3 LU) – стоп и для live.
+test('the uncalibrated live corridor only warns, except music at or above the voice level', () => {
   const live = getProfile('live');
   assert.equal(live.voiceMusic.calibrated, false);
   assert.notEqual(avatar.voiceMusic.calibrated, false);
   const at = (gapLu) => gateVoiceMusic({ gapLu, voiceLufs: -14, musicLufs: -14 - gapLu, blocks: 100 }, live, { gainDb: -12 });
-  for (const gapLu of [30, 2, 20, -1]) {
+  for (const gapLu of [30, 3.5, 20, 11.9]) {
     const g = at(gapLu);
     assert.equal(g.status, 'warn', `${gapLu} LU`);
     assert.match(g.hint, /коридор live не откалиброван/u);
     assert.doesNotMatch(g.hint, /music\.gainDb|увеличьте|уменьшите/u);
+  }
+  assert.equal(live.voiceMusic.stopLow, 3);
+  for (const gapLu of [2.9, 0, -1]) {
+    const g = at(gapLu);
+    assert.equal(g.status, 'fail', `${gapLu} LU`);
+    assert.match(g.hint, /вровень с голосом или громче – стоп и для live/u);
+    assert.doesNotMatch(g.hint, /music\.gainDb|увеличьте/u);
   }
   assert.equal(at(15).status, 'pass');
   assert.equal(at(30).value, 30);

@@ -147,13 +147,13 @@ test('a layer composition that looks like a flag never reaches the Remotion comm
   const layerDir = fs.mkdtempSync(path.join(os.tmpdir(), 'automontage-layer-composition-'));
   t.after(() => fs.rmSync(layerDir, { recursive: true, force: true }));
   const writeLayer = (composition) => fs.writeFileSync(path.join(layerDir, 'layer.json'), JSON.stringify({ version: 1, composition, sfxMasterDb: -5 }));
-  for (const payload of ['--env-file=../../.env', '--gl=swiftshader', '--overwrite', '-q', 'Layer --props=x', '', 'Лейер', 42, undefined]) {
+  for (const payload of ['--env-file=../../.env', '--gl=swiftshader', '--overwrite', '-q', 'Layer --props=x', '', 'Лейер', 'Layer_1', 42, undefined]) {
     assert.throws(() => command(payload), /composition/u, String(payload));
     writeLayer(payload);
     assert.throws(() => readLayerJson(layerDir), /^Error: layer\.json: composition должен быть именем композиции Remotion/u, String(payload));
   }
   // Легитимные имена проходят и стоят ровно на месте композиции.
-  for (const name of ['Layer', 'Motion_Layer-2']) {
+  for (const name of ['Layer', 'Motion-Layer-2']) {
     assert.deepEqual(command(name).args.slice(2, 5), ['render', 'projects/p/motion-v01/src/index.jsx', name]);
     writeLayer(name);
     assert.equal(readLayerJson(layerDir).composition, name);

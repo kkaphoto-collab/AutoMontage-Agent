@@ -153,8 +153,11 @@ function gainAdvice(m, v, gainDb) {
 
 // Коридор без калибровки (live, calibrated: false): вне него только предупреждение. Совета по громкости
 // музыки нет: цель такого коридора не проверена и могла бы увести утверждённый на слух микс (D-038).
+// Исключение – нижний стоп (stopLow 3 LU): музыка вровень с голосом или громче – нарушение на любой шкале.
 const UNCALIBRATED = 'коридор live не откалиброван (стартовые числа, D-035) – это предупреждение, а не стоп: '
   + 'баланс сверьте на слух, громкость музыки по этому числу не двигайте';
+const AT_VOICE_LEVEL = 'музыка вровень с голосом или громче – стоп и для live: сделайте музыку заметно тише голоса '
+  + '(коридор live не откалиброван, но такой баланс неверен на любой шкале)';
 
 // gainDb – текущий music.gainDb из brief: с ним совет не выходит за −60…0 дБ схемы.
 function gateVoiceMusic(result, profile, { hasMusic = true, gainDb } = {}) {
@@ -163,7 +166,7 @@ function gateVoiceMusic(result, profile, { hasMusic = true, gainDb } = {}) {
   const calibrated = v.calibrated !== false;
   const threshold = calibrated
     ? `${number(v.warnLow)}–${number(v.warnHigh)} LU, стоп < ${number(v.stopLow)} или > ${number(v.stopHigh)}`
-    : `${number(v.warnLow)}–${number(v.warnHigh)} LU, не откалиброван – без стопа`;
+    : `${number(v.warnLow)}–${number(v.warnHigh)} LU, не откалиброван – стоп только < ${number(v.stopLow)}`;
   if (gainDb !== undefined && gainDb !== null && !(typeof gainDb === 'number' && Number.isFinite(gainDb))) {
     throw new Error(`gateVoiceMusic: gainDb должен быть конечным числом (music.gainDb из brief), получено ${String(gainDb)}`);
   }
@@ -182,7 +185,9 @@ function gateVoiceMusic(result, profile, { hasMusic = true, gainDb } = {}) {
   }
   const status = m < v.stopLow || m > v.stopHigh ? 'fail' : m < v.warnLow || m > v.warnHigh ? 'warn' : 'pass';
   if (!calibrated && status !== 'pass') {
-    return gate('G8', title, { status: 'warn', value: r1(m), unit: 'LU', threshold, hint: `${gapWords(m)}: ${UNCALIBRATED}` });
+    const floor = m < v.stopLow;
+    return gate('G8', title, { status: floor ? 'fail' : 'warn', value: r1(m), unit: 'LU', threshold,
+      hint: `${gapWords(m)}: ${floor ? AT_VOICE_LEVEL : UNCALIBRATED}` });
   }
   const advice = gainAdvice(m, v, gainDb === null ? undefined : gainDb);
   return gate('G8', title, { status, value: r1(m), unit: 'LU', threshold, hint: `${gapWords(m)}${advice}` });

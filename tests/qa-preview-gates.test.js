@@ -173,6 +173,25 @@ test('other previews longer than 180 s are not measured; kit layers still are', 
   assert.equal(kit.block, true);
 });
 
+test('a kit layer with the live profile only warns on G8: the live corridor is not calibrated', (t) => {
+  const gap30 = () => ({ gapLu: 30, voiceLufs: -14, musicLufs: -44, blocks: 100 });
+  const live = runPreviewGates(base(project(t, { registered: true, profile: 'live' })), { measureImpl: gap30 });
+  assert.equal(live.report.profile, 'live');
+  assert.equal(live.enforced, true);
+  assert.equal(live.block, false);
+  assert.deepEqual(statuses(live), [['L', 'pass'], ['G8', 'warn']]);
+  assert.match(live.report.gates[1].hint, /коридор live не откалиброван/u);
+  assert.doesNotMatch(live.report.gates[1].hint, NO_ADVICE);
+  // Музыка вровень с голосом – объективное нарушение на любой шкале: стоп и для live.
+  const level = runPreviewGates(base(project(t, { registered: true, profile: 'live' })), { measureImpl: loud });
+  assert.equal(level.block, true);
+  assert.deepEqual(statuses(level), [['L', 'pass'], ['G8', 'fail']]);
+  // Для avatar стоп на месте: тот же слой с музыкой вровень с голосом блокируется.
+  const avatar = runPreviewGates(base(project(t, { registered: true })), { measureImpl: loud });
+  assert.equal(avatar.block, true);
+  assert.deepEqual(statuses(avatar), [['L', 'pass'], ['G8', 'fail']]);
+});
+
 test('every video scene is checked: one bad layer of two blocks and is named', (t) => {
   const dir = project(t);
   addLayer(dir, { layer: 'motion-v01', render: sha('1'), canonical: sha('a') });
