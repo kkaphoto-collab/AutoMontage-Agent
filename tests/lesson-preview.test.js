@@ -162,6 +162,7 @@ function fakePreviewTools({ calls, failStage = null }) {
     openMediaFileImpl: () => { throw new Error('must not open with open=false'); },
     now: () => new Date('2026-08-23T17:05:00.000Z'),
     temporaryId: idSequence(),
+    log: () => {},
   };
 }
 
@@ -216,6 +217,42 @@ test('blocking preview gates stop publication and keep the previous preview', (t
   assert.match(seen.sourceSha256, /^[a-f0-9]{64}$/u);
   assert.equal(seen.brief.title, 'ПРЕДПРОСМОТР');
   assert.equal(fs.existsSync(seen.finishedPath), false);
+});
+
+test('an unwritten gate report stops a kit preview after printing the verdict; other previews publish', (t) => {
+  const report = { kind: 'preview', summary: { status: 'pass', fail: 0, warn: 0 }, gates: [] };
+  const unwritten = (enforced) => () => ({ report, block: false, enforced, paths: null, writeError: 'не удалось записать в qa/ (EEXIST)' });
+
+  const kit = makeProject(t, { music: true });
+  const current = path.join(kit.workspace.dir, 'previews', 'current-preview.mp4');
+  fs.writeFileSync(current, 'previous-preview');
+  const printed = [];
+  assert.throws(() => runPreview({ projectDir: kit.workspace.dir, briefPath: kit.published.relativePath, open: false },
+    { ...fakePreviewTools({ calls: [] }), log: (line) => printed.push(line), runPreviewGatesImpl: unwritten(true) }),
+  /^Error: preview не опубликован: отчёт проверок не записан \(не удалось записать в qa\/ \(EEXIST\)\)$/u);
+  assert.match(printed.join('\n'), /Проверки \(preview\): всё хорошо/u);
+  assert.equal(fs.readFileSync(current, 'utf8'), 'previous-preview');
+
+  const other = makeProject(t, { music: true });
+  const notes = [];
+  const result = runPreview({ projectDir: other.workspace.dir, briefPath: other.published.relativePath, open: false },
+    { ...fakePreviewTools({ calls: [] }), log: (line) => notes.push(line), runPreviewGatesImpl: unwritten(false) });
+  assert.equal(fs.readFileSync(result.currentPath, 'utf8'), 'mixed-preview');
+  assert.match(notes.join('\n'), /отчёт проверок не записан: не удалось записать в qa\/ \(EEXIST\)/u);
+});
+
+test('the real gates publish a project without kit layers and record a reference-only report', (t) => {
+  const fixture = makeProject(t, { music: true });
+  const printed = [];
+  const result = runPreview({ projectDir: fixture.workspace.dir, briefPath: fixture.published.relativePath, open: false },
+    { ...fakePreviewTools({ calls: [] }), log: (line) => printed.push(line) });
+  assert.equal(fs.readFileSync(result.currentPath, 'utf8'), 'mixed-preview');
+  assert.match(printed.join('\n'), /G8 Голос и музыка/u);
+  const reports = fs.readdirSync(path.join(fixture.workspace.dir, 'qa')).filter((name) => /^preview-.*\.json$/u.test(name));
+  assert.equal(reports.length, 1);
+  const saved = JSON.parse(fs.readFileSync(path.join(fixture.workspace.dir, 'qa', reports[0]), 'utf8'));
+  assert.deepEqual(saved.gates.map((g) => [g.id, g.status]), [['G8', 'skipped']]);
+  assert.doesNotMatch(saved.gates[0].hint, /music\.gainDb|увеличьте|уменьшите/u);
 });
 
 test('render, finish, and music failures preserve the previous current preview byte-for-byte', async (t) => {

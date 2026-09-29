@@ -119,13 +119,14 @@ function renderReportProblem(report, { layer } = {}) {
 
 // Отчёт layer render собран для текущего исходника проекта: sha256 входа «source» равен sha256 исходника сейчас.
 // Старый рендер до замены исходника не проходит; перерендер того же слоя не поможет (layer render откажет в
-// assertLayerSource) — нужен новый слой. Проверяют layer import и layer brief.
-function assertReportSource(report, { projectDir, sourcePath }) {
+// assertLayerSource) — нужен новый слой. Проверяют layer import, layer brief и барьер preview; sourceSha256 —
+// уже посчитанный sha256 исходника (preview хеширует его сам), тогда файл не читается второй раз.
+function assertReportSource(report, { projectDir, sourcePath, sourceSha256 }) {
   const source = (Array.isArray(report.inputs) ? report.inputs : []).find((input) => input?.role === 'source');
   if (typeof source?.sha256 !== 'string') {
     throw new Error(`qa/${report.fileName}: в отчёте нет sha256 исходника — пересоберите: automontage layer render --project-dir "${projectDir}" --layer ${report.layer}`);
   }
-  if (source.sha256 !== sha256File(sourcePath)) {
+  if (source.sha256 !== (sourceSha256 ?? sha256File(sourcePath))) {
     throw new Error(`слой собран для другого исходника (отчёт qa/${report.fileName}) — создайте новый слой: `
       + `automontage layer new --project-dir "${projectDir}" → layer render → layer import`);
   }

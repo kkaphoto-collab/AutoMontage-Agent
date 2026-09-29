@@ -137,6 +137,7 @@ function runPreview(options, dependencies = {}) {
     || publishCurrentPreview;
   const openMediaFileImpl = dependencies.openMediaFileImpl || openMediaFile;
   const runPreviewGatesImpl = dependencies.runPreviewGatesImpl || runPreviewGates;
+  const log = dependencies.log || console.log;
   const now = dependencies.now || (() => new Date());
   const temporaryId = dependencies.temporaryId || randomUUID;
 
@@ -244,8 +245,13 @@ function runPreview(options, dependencies = {}) {
       }
     });
 
-    // Стоп — до полного декодирования: прошлый preview остаётся, промежуточные файлы убирает finally.
-    if (gateResult) console.log(formatReport(gateResult.report));
+    // Сначала вердикт, потом решение. Стоп — до полного декодирования: прошлый preview остаётся, промежуточные
+    // файлы убирает finally. Слой kit без записанного отчёта не публикуется; прочим роликам сбой записи не мешает.
+    if (gateResult) log(formatReport(gateResult.report));
+    if (gateResult?.writeError) {
+      if (gateResult.enforced) throw new Error(`preview не опубликован: отчёт проверок не записан (${gateResult.writeError})`);
+      log(`⚠️ отчёт проверок не записан: ${gateResult.writeError}`);
+    }
     if (gateResult?.block) {
       throw new Error(`preview не опубликован: проверки не пройдены (${gateResult.paths?.textPath || 'qa/'})`);
     }
