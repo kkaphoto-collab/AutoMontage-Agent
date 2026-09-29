@@ -18,24 +18,37 @@ test('real Remotion stills of the template show the expected kit texts inside th
   const { bundle } = require('@remotion/bundler');
   const { openBrowser, renderStill, selectComposition } = require('@remotion/renderer');
   const { withMotionKitAlias } = require('../scripts/remotion-webpack');
-  const { safeRect } = require('../scripts/qa/safe-rect');
+  const { overflow, safeRect } = require('../scripts/qa/safe-rect');
   const { makeLayerProject } = require('./helpers/layer-project');
   const newLayer = require('../scripts/layer/new');
 
-  const { projectDir, sfxDir } = makeLayerProject(t, { seconds: 10, size: '1080x1920' });
+  const { root, projectDir, sfxDir } = makeLayerProject(t, { seconds: 10, size: '1080x1920' });
+  // Восстанавливаем прежнее значение (или отсутствие переменной) — тест не должен менять окружение
+  // для соседних тестов того же процесса, если снаружи AUTOMONTAGE_SFX_DIR уже был задан.
+  const previousSfxDir = process.env.AUTOMONTAGE_SFX_DIR;
   process.env.AUTOMONTAGE_SFX_DIR = sfxDir;
-  t.after(() => { delete process.env.AUTOMONTAGE_SFX_DIR; });
+  t.after(() => {
+    if (previousSfxDir === undefined) delete process.env.AUTOMONTAGE_SFX_DIR;
+    else process.env.AUTOMONTAGE_SFX_DIR = previousSfxDir;
+  });
   assert.equal(await newLayer.run({ 'project-dir': projectDir }), 0);
   const layerDir = path.join(projectDir, 'motion-v01');
 
+  // outDir обязателен: без него bundle() пишет во временную remotion-webpack-bundle-* папку прямо в
+  // $TMPDIR и никогда её не убирает — root уже чистится в t.after у makeLayerProject (motion-kit-render
+  // .test.js так же кладёт bundle внутрь своей рабочей папки).
   const serveUrl = await bundle({
     entryPoint: path.join(layerDir, 'src', 'index.jsx'), publicDir: path.join(layerDir, 'public'),
-    webpackOverride: (config) => withMotionKitAlias(config),
+    outDir: path.join(root, 'bundle'), webpackOverride: (config) => withMotionKitAlias(config),
   });
   const browser = await openBrowser('chrome', { logLevel: 'error' });
   t.after(() => browser.close({ silent: true }));
   const composition = await selectComposition({ serveUrl, id: 'Layer', puppeteerInstance: browser });
-  const safe = safeRect(1080, 1920);
+  // Геометрия слоя — из самой композиции, а не захардкожена: изменившийся размер слоя должен
+  // провалить это утверждение явно, а не молча сравниваться с чужой safe-zone.
+  assert.equal(composition.width, 1080);
+  assert.equal(composition.height, 1920);
+  const safe = safeRect(composition.width, composition.height);
 
   // measured копится по вкладкам, которые renderStill открывает и закрывает; перед каждым кадром её
   // очищаем, чтобы «кадр без текста» не подхватил боксы предыдущего кадра по ошибке. texts —
@@ -96,14 +109,12 @@ test('real Remotion stills of the template show the expected kit texts inside th
       assert.ok(bleeds.length, `frame ${frame}: сток должен быть виден ([data-kit-bleed]), элементов нет`);
     }
     for (const box of texts) {
-      const { rect } = box;
-      assert.ok(rect.left >= safe.left - 0.5 && rect.right <= safe.right + 0.5
-        && rect.top >= safe.top - 0.5 && rect.bottom <= safe.bottom + 0.5,
-      `frame ${frame} (${box.id}): выход за safe-zone ${JSON.stringify({ rect, safe })}`);
-      if (box.id === 'captions') {
-        assert.ok(box.scrollWidth <= box.clientWidth + 1, `frame ${frame}: субтитры обрезаны по ширине ${JSON.stringify(box)}`);
-        assert.ok(box.scrollHeight <= box.clientHeight + 1, `frame ${frame}: субтитры обрезаны по высоте ${JSON.stringify(box)}`);
-      }
+      const out = overflow(box.rect, safe);
+      assert.equal(out, null, `frame ${frame} (${box.id}): выход за safe-zone по сторонам ${JSON.stringify(out)} — ${JSON.stringify({ rect: box.rect, safe })}`);
+      // Каждый [data-kit-text] — не только полоса субтитров: реальный контент не должен вылезать за
+      // собственный box ни по ширине, ни по высоте.
+      assert.ok(box.scrollWidth <= box.clientWidth + 1, `frame ${frame} (${box.id}): контент обрезан по ширине ${JSON.stringify(box)}`);
+      assert.ok(box.scrollHeight <= box.clientHeight + 1, `frame ${frame} (${box.id}): контент обрезан по высоте ${JSON.stringify(box)}`);
     }
   }
 });
