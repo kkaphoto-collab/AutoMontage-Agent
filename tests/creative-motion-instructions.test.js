@@ -111,4 +111,8 @@ test('motion layer brief and creative motion start with the kit and its gates', 
   // Правило владельца о музыке остаётся рядом с G8, чья заглушка ждёт калибровки.
   assert.match(checklist, /12–18 dB ниже голоса/u);
   assert.match(checklist, /G8[\s\S]*заглушк/u);
+  // Широкое правило: музыку ради заглушки G8 не трогают вовсе, а не только игнорируют подсказку.
+  for (const [name, text] of [['brief', brief], ['creative', creative], ['checklist', checklist]]) {
+    assert.match(text, /ради заглушки не меня/u, name);
+  }
 });
