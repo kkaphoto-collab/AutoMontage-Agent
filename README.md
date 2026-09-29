@@ -459,7 +459,7 @@ automontage layer sheet --project-dir projects/<ролик>               # ко
 `--title`, `--head-cream` и `--head-orange` – подписи для Markdown и пульта, в видео слоя их
 не видно. Звуковые эффекты слоя берутся из локальной библиотеки `AUTOMONTAGE_SFX_DIR`
 (по умолчанию `projects/.library/sfx`, см. [`.env.example`](.env.example)); без неё слой
-собирается без эффектов. Подробно: [`docs/MOTION-KIT.md`](docs/MOTION-KIT.md).
+собирается без эффектов, и `layer new` об этом предупреждает. Подробно: [`docs/MOTION-KIT.md`](docs/MOTION-KIT.md).
 
 ### Пульт роликов: все ролики в одном окне
 

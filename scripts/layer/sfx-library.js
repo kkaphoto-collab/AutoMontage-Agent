@@ -10,11 +10,13 @@ const SOUND_NAME = /^[a-z0-9][a-z0-9-]*\.wav$/u;
 // папки (Notes.txt, README.md, LICENSE) – не опечатка в имени звука, они не попадают сюда вовсе.
 const AUDIO_LIKE_EXT = /\.(wav|mp3|flac|aif|aiff|ogg|m4a)$/i;
 
-// Дефолтная папка вправе молча отсутствовать (обычный клон без приватного пакета звуков), но явная
-// AUTOMONTAGE_SFX_DIR на несуществующую папку – это опечатка в пути, а не «звуков нет»: остальной
-// код молча получил бы пустую библиотеку и никто не узнал бы, что путь вообще не тот.
-function sfxLibraryDir(env = process.env) {
-  if (!env.AUTOMONTAGE_SFX_DIR) return path.join(ENGINE_ROOT, 'projects', '.library', 'sfx');
+// Дефолтная папка вправе отсутствовать (обычный клон или worktree без приватного пакета звуков –
+// layer new тогда предупреждает и собирает слой без эффектов), но явная AUTOMONTAGE_SFX_DIR на
+// несуществующую папку – это опечатка в пути, а не «звуков нет»: остальной код молча получил бы
+// пустую библиотеку и никто не узнал бы, что путь вообще не тот. defaultDir – только для тестов.
+const DEFAULT_SFX_DIR = path.join(ENGINE_ROOT, 'projects', '.library', 'sfx');
+function sfxLibraryDir(env = process.env, defaultDir = DEFAULT_SFX_DIR) {
+  if (!env.AUTOMONTAGE_SFX_DIR) return defaultDir;
   const resolved = path.resolve(env.AUTOMONTAGE_SFX_DIR);
   const stat = fs.statSync(resolved, { throwIfNoEntry: false });
   if (!stat || !stat.isDirectory()) {
@@ -147,7 +149,7 @@ function readLibraryMeta(metaPath) {
 // остаются на месте (вызывающий код, `layer new`, в ответ на ошибку выбрасывает всю свежую папку
 // слоя целиком, а не пытается угадать, что в target уже безопасно).
 function copySfxLibrary(libraryDir, targetDir) {
-  if (!fs.existsSync(libraryDir)) return { library: { sounds: {} }, sourceRows: [], skipped: [], unknownMeta: [] };
+  if (!fs.existsSync(libraryDir)) return { library: { sounds: {} }, sourceRows: [], skipped: [], unknownMeta: [], missing: true };
   const meta = readLibraryMeta(path.join(libraryDir, 'library.json'));
 
   const names = [];
@@ -234,7 +236,7 @@ function copySfxLibrary(libraryDir, targetDir) {
   const processedNames = new Set(names.map((fileName) => fileName.slice(0, -4)));
   const unknownMeta = Object.keys(meta.sounds || {}).filter((name) => !processedNames.has(name));
 
-  return { library: { sounds }, sourceRows, skipped, unknownMeta };
+  return { library: { sounds }, sourceRows, skipped, unknownMeta, missing: false };
 }
 
 module.exports = { copySfxLibrary, sfxLibraryDir };

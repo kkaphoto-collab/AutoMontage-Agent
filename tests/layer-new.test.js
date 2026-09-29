@@ -140,6 +140,30 @@ test('the sound library is copied into public/sfx with provenance, and skipped f
   assert.match(out.log.join('\n'), /звуков в библиотеке: 1/);
 });
 
+// Проба Task 49: в worktree (и в любом клоне без приватного пакета звуков) папки по умолчанию нет, и
+// layer new молча собирал слой без эффектов. Это не ошибка – слой без звуков допустим, – но молчать
+// нельзя: предупреждение называет ожидаемую папку и переменную AUTOMONTAGE_SFX_DIR.
+test('without the sound library at the default path layer new warns in Russian, names the path and AUTOMONTAGE_SFX_DIR, and still builds the layer', { skip: !hasFfmpeg }, async (t) => {
+  const { root, projectDir } = makeLayerProject(t);
+  const missing = path.join(root, 'engine', 'projects', '.library', 'sfx');
+  const { deps, out } = quiet();
+  assert.equal(await newLayer.run({ 'project-dir': projectDir }, { ...deps, env: {}, defaultSfxDir: missing }), 0);
+  assert.equal(out.warn.length, 1, out.warn.join('\n'));
+  assert.match(out.warn[0], /^⚠️ библиотеки звуков нет/);
+  assert.ok(out.warn[0].includes(missing), out.warn[0]);
+  assert.match(out.warn[0], /AUTOMONTAGE_SFX_DIR/);
+  assert.match(out.warn[0], /без звуковых эффектов/);
+  const dir = path.join(projectDir, 'motion-v01');
+  assert.ok(fs.existsSync(path.join(dir, 'layer.json')));
+  assert.match(fs.readFileSync(path.join(dir, 'src', 'sfx-library.js'), 'utf8'), /export default \{"sounds":\{\}\};/);
+  assert.match(out.log.join('\n'), /звуков в библиотеке: 0/);
+});
+
+test('the default sound library path is projects/.library/sfx of the engine', () => {
+  const { sfxLibraryDir } = require('../scripts/layer/sfx-library');
+  assert.equal(sfxLibraryDir({}), path.join(__dirname, '..', 'projects', '.library', 'sfx'));
+});
+
 // --- Папка слоя занимается атомарно, отказ не оставляет половины слоя ---
 
 // Одновременный второй `layer new`: подменённый fs.mkdirSync создаёт ту же папку слоя «чужим»

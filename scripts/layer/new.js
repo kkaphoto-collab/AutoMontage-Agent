@@ -214,7 +214,7 @@ async function run(options, deps = {}) {
   const profile = options.profile || 'avatar';
   if (!PROFILES.includes(profile)) throw new Error('--profile: avatar или live');
   // Всё, что может отказать без записи, – до захвата папки: путь к звукам, транскрипт, исходник.
-  const libraryDir = sfxLibraryDir(deps.env || process.env);
+  const libraryDir = sfxLibraryDir(deps.env || process.env, deps.defaultSfxDir);
   transcriptPath(projectDir, manifest);
   const source = inspectSource(sourcePath, manifest, { probeVideoImpl: deps.probeVideo || probeVideo, probeMediaImpl: deps.probeMedia || probeMediaPath });
 
@@ -245,6 +245,10 @@ async function run(options, deps = {}) {
   if (failure) throw failure;
   const { name } = claim;
   for (const note of notes) warn(note);
+  // Папки звуков нет (свежий клон, worktree): слой без эффектов допустим, но не молча.
+  if (sfx.missing) {
+    warn(`⚠️ библиотеки звуков нет: ${libraryDir} – слой ${name} собран без звуковых эффектов. Положите звуки <имя>.wav в эту папку или укажите папку библиотеки в AUTOMONTAGE_SFX_DIR, затем создайте новый слой`);
+  }
   if (sfx.skipped.length) {
     warn(`⚠️ не скопированы из библиотеки звуков (имя не вида pop-soft.wav): ${sfx.skipped.join(', ')}`);
   }
