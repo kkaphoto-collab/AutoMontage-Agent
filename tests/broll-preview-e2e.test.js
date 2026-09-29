@@ -15,9 +15,12 @@ const { resolveRemotionCommand } = require('../scripts/env');
 const ROOT = path.resolve(__dirname, '..');
 // Ждём само preview-задание, а не косвенный признак в интерфейсе: сбой виден сразу и с причиной.
 const PREVIEW_JOB_TIMEOUT_MS = 180000;
-function outputTail(file) {
+// Хвост вывода preview.js. Если процесс уже закрылся, сначала дожидаемся записи лога до конца.
+async function outputTail(log) {
+  if (!log) return '(preview.js не запускался)';
+  if (log.closed) await log.finished;
   try {
-    return fs.readFileSync(file, 'utf8').slice(-4000);
+    return fs.readFileSync(log.file, 'utf8').slice(-4000);
   } catch (_) {
     return '(вывода нет)';
   }
@@ -157,12 +160,20 @@ test(
     const previewLogs = [];
     const previewSpawnImpl = (command, args, options) => {
       const child = spawn(command, args, options);
-      const logFile = path.join(dir, `preview-job-${previewLogs.length + 1}.log`);
-      previewLogs.push(logFile);
-      const log = fs.createWriteStream(logFile);
-      child.stdout?.on('data', (chunk) => log.write(chunk));
-      child.stderr?.on('data', (chunk) => log.write(chunk));
-      child.once('close', (code, signal) => log.end(`\n[preview.js: ${signal || code}]\n`));
+      const file = path.join(dir, `preview-job-${previewLogs.length + 1}.log`);
+      const stream = fs.createWriteStream(file);
+      const log = {
+        file,
+        closed: false,
+        finished: new Promise((resolve) => stream.once('close', resolve)),
+      };
+      previewLogs.push(log);
+      child.stdout?.on('data', (chunk) => stream.write(chunk));
+      child.stderr?.on('data', (chunk) => stream.write(chunk));
+      child.once('close', (code, signal) => {
+        log.closed = true;
+        stream.end(`\n[preview.js: ${signal || code}]\n`);
+      });
       return child;
     };
     const session = await startReviewServer({
@@ -195,13 +206,23 @@ test(
     page.on('pageerror', (error) => errors.push(error.message));
     const previewJobs = new Map();
     page.on('response', async (response) => {
-      if (new URL(response.url()).pathname !== '/api/broll/preview-job') return;
+      const url = new URL(response.url());
+      if (url.pathname !== '/api/broll/preview-job') return;
+      // Ключ – id из запроса: у ответа с ошибкой нет jobId, а интерфейс после такого ответа
+      // опрос прекращает, поэтому ожидание должно закончиться сразу.
+      const id = url.searchParams.get('id');
+      let body = null;
       try {
-        const { state: _state, ...job } = await response.json();
-        previewJobs.set(job.jobId, job);
+        body = await response.json();
       } catch (_) {
-        /* ответ без JSON разберёт ожидание ниже по таймауту */
+        /* тело без JSON: код HTTP всё равно попадёт в сообщение */
       }
+      if (!response.ok()) {
+        previewJobs.set(id, { status: 'poll-failed', http: response.status(), error: body?.error });
+        return;
+      }
+      const { state: _state, ...job } = body || {};
+      previewJobs.set(id, job.status ? job : { status: 'poll-failed', http: response.status() });
     });
     async function runPreview(buttonName) {
       const started = page.waitForResponse(
@@ -221,16 +242,17 @@ test(
           .not.toBe('running');
       } catch (error) {
         throw new Error(
-          `preview-задание не завершилось за ${PREVIEW_JOB_TIMEOUT_MS / 1000} с; вывод preview.js:\n${outputTail(previewLogs.at(-1))}`,
+          `preview-задание не завершилось за ${PREVIEW_JOB_TIMEOUT_MS / 1000} с; вывод preview.js:\n${await outputTail(previewLogs.at(-1))}`,
           { cause: error },
         );
       }
       const job = previewJobs.get(body.jobId);
-      assert.equal(
-        job.status,
-        'complete',
-        `preview-задание ${job.error}${job.reason ? `: ${job.reason}` : ''}; вывод preview.js:\n${outputTail(previewLogs.at(-1))}`,
-      );
+      if (job.status !== 'complete') {
+        const where = job.status === 'poll-failed' ? `опрос вернул HTTP ${job.http}` : 'задание упало';
+        assert.fail(
+          `preview: ${where}, ${job.error || 'без кода'}${job.reason ? `: ${job.reason}` : ''}; вывод preview.js:\n${await outputTail(previewLogs.at(-1))}`,
+        );
+      }
     }
     await page.goto(session.url);
     await expect(page.locator('main')).toHaveAttribute('data-review-ready', '');
