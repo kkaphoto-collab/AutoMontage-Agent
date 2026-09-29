@@ -806,7 +806,10 @@ Pexels подменён. `tests/qa-preview.test.js` в той же маске �
   `compilePlan` и форма манифеста; React-компоненты – через рендер в разметку; alias
   `@automontage/motion-kit` для Node и Remotion; `motion-kit-node.test.js` – сборка слоя esbuild,
   понятные ошибки сломанного слоя и граница `plan.js` (в том числе пути Windows);
-  `motion-kit-docs.test.js` – что `docs/MOTION-KIT.md` называет все гейты и команды;
+  `motion-kit-docs.test.js` – что `docs/MOTION-KIT.md` называет G1–G12, все команды `layer` и
+  `@automontage/motion-kit/core` и не содержит личных путей и папок роликов, README показывает
+  `automontage layer new --project-dir`, а `.env.example` и `ASSETS.md` называют
+  `AUTOMONTAGE_SFX_DIR`;
 - гейты (`qa-*`): форма отчёта и коды выхода, G1–G5 и G9–G11 по манифесту, G6 и G7 по настоящему
   звуку и видео, замер G8 в LU, G12 по доле контуров, барьер preview (строгий только для слоя из
   реестра, справочный G8 для прочих, отчёт `qa/preview-*`, сбой записи);
@@ -828,7 +831,8 @@ Pexels подменён. `tests/qa-preview.test.js` в той же маске �
 - `layer-render.test.js`: видео короче композиции при дополненном до полной длины звуке (G6);
   слой длиннее исходника (G6); голос аватара в звуке слоя через настоящую цепочку рендера (G7);
 - `layer-template.test.js`: stock-вставка с `cover: false` не проходит мимо G4 – слой не собирается;
-- `layer-sheet.test.js`: нечитаемый кадр даёт честную ошибку, а не «ролик короче»;
+- `layer-sheet.test.js`: кадр, который ffmpeg не отдал, останавливает команду честной ошибкой, а не
+  «ролик короче» (кадр без посчитанной доли контуров G12 считает пустым);
 - `layer-stock.test.js`: неизвестный `--insert`, неверные `--sec` и `--pick`, повторная загрузка
   не перезаписывает файл, скачанное не mp4, небезопасный id или ссылка, пустой поиск,
   `public/stock` – ссылка наружу, гонка файла с тем же id.
@@ -840,16 +844,17 @@ Pexels подменён. `tests/qa-preview.test.js` в той же маске �
 `motion-workflow.test.js` закрепляет известный пробел: motion-reel барьер не вызывает.
 
 Настоящий Remotion-рендер kit и кадры шаблона – по флагу и **только из корня движка**
-(`remotion.config.js` ищет kit от текущей папки, из другой папки Remotion начинает скачивать
-Chrome):
+(Remotion ищет скачанный браузер в `node_modules/.remotion` рядом с ближайшим `package.json` выше
+текущей папки; из другой папки он начинает скачивать Chrome):
 
 ```bash
 AUTOMONTAGE_TEST_MOTION_RENDER=1 node --test tests/motion-kit-render.test.js tests/layer-render-still.test.js
 ```
 
 `motion-kit-render.test.js` проверяет, что кегль субтитров одинаков на каждом кадре и текст не
-обрезается, а `FontLoader` рядом с субтитрами, а не вокруг слоя, роняет рендер. `layer-render-still.test.js`
-снимает кадры 15, 40, 90 и 160 шаблона и требует на них ожидаемые тексты kit внутри safe-зоны.
+обрезается, а `FontLoader` рядом с субтитрами, а не вокруг слоя, роняет рендер.
+`layer-render-still.test.js` снимает кадры 15, 40, 90 и 160 шаблона и требует на них ожидаемые
+тексты kit внутри safe-зоны.
 Прогон занимает несколько минут и в CI не входит.
 
 В CI Windows-джоб выполняет отдельный шаг «Проверить сборку motion-слоя и границу plan.js»
@@ -859,7 +864,8 @@ AUTOMONTAGE_TEST_MOTION_RENDER=1 node --test tests/motion-kit-render.test.js tes
 Ручная проверка слоя перед показом владельцу:
 
 1. `automontage layer check` и `automontage layer render` без ❌; предупреждения прочитаны.
-2. `automontage preview` опубликован, отчёт `qa/preview-*.txt` без стопа.
+2. `automontage preview` опубликован (до калибровки – brief без `--music`), отчёт
+   `qa/preview-*.txt` без стопа.
 3. `automontage layer sheet --project-dir projects/<ролик>`: на контакт-листе `qa/sheet-*.jpg`
    текст внутри рамки safe-зоны, нет пустых кадров (G12), графика не выпала.
 4. Глазами в preview – кадры входов и выходов карточек и вставок, первые 3 с (спикер виден),

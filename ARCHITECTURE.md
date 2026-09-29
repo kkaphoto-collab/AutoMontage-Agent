@@ -770,12 +770,14 @@ flowchart TD
 
 - **Kit.** `src/motion-kit/` – ESM. `core.js` реэкспортирует только чистые модули (`time`,
   `words`, `safe`, `camera`, `motion`, `inserts`, `sfx`, `captions`, `compile`, `manifest`,
-  `screen`), `index.js` добавляет React-компоненты (`SpeakerLayer`, `KitBox`, `Inserts`, `Screen`,
-  `SfxTrack`, `Subtitles`, `FontLoader`). Слой подключает kit по имени `@automontage/motion-kit`:
-  Remotion – через webpack alias `withMotionKitAlias` (`scripts/remotion-webpack.js`; каталог kit
-  `remotion.config.js` считает от текущей папки, поэтому рендер идёт из корня движка), Node – через
-  alias esbuild в `scripts/motion-kit-node.js`. Из остального движка kit берёт только
-  `src/scenes/safezone.js`, и safe-зона у kit и lesson-сцен одна.
+  `screen`), `index.js` добавляет React-компоненты: `SpeakerLayer`, `KitBox`, `FullscreenReveal` и
+  `StockInsert` (модуль `Inserts.jsx`), `BrowserFrame`, `ScrollShot` и `ShutterFlash` (модуль
+  `Screen.jsx`), `SfxTrack`, `Subtitles`, `FontLoader`. Слой подключает kit по имени
+  `@automontage/motion-kit`: Remotion – через webpack alias `withMotionKitAlias`
+  (`scripts/remotion-webpack.js`; каталог kit `remotion.config.js` считает от текущей папки,
+  поэтому рендер идёт из корня движка), Node – через alias esbuild в `scripts/motion-kit-node.js`.
+  Из остального движка kit берёт только `src/scenes/safezone.js`, и safe-зона у kit и lesson-сцен
+  одна.
 - **Одна сборка на две стороны.** `compilePlan(buildPlan, ctx)` превращает план в дорожки по
   кадрам: камера, элементы, вставки, звуковые события, субтитры, исключения (`KIT_VERSION` из
   `compile.js`). Её вызывают и `src/Root.jsx` слоя (что рендерится), и `buildLayerManifest`
@@ -784,7 +786,8 @@ flowchart TD
   проверяет границу импортов `findPlanViolation` (только `@automontage/motion-kit/core` и файлы
   слоя, `process.env` пуст) и отдаёт `buildManifest` из kit. Граница – ограждение от случайностей,
   а не песочница: `layer check` выполняет `plan.js`. `loadKitCore` так же собирает `core` для
-  слов и написания из транскрипта (`layer words`, `layer new`) и проверки `sfxMasterDb` в `layer.json`.
+  слов и написания из транскрипта (`layer words`, `layer new`) и проверки `sfxMasterDb` в
+  `layer.json`.
 - **`layer new`** (`scripts/layer/new.js`) нерекурсивно занимает следующую `motion-vNN` (номера не
   переиспользуются), копирует `templates/motion-layer/` (`src/index.jsx`, `src/Root.jsx`,
   `src/plan.js`, `src/scenes.jsx`, `README.md`), исходник в `public/speaker.mp4`, шрифты, звуки
@@ -802,14 +805,14 @@ flowchart TD
   свободной машины (`scripts/layer/busy.js`: только настоящие процессы `node` и их командная
   строка, без предков самой команды; опрос раз в 30 с, до 3 ч; на Windows не проверяется), после
   ожидания – повторный `layer check`. Манифест читается в память сразу после проверки. Номер
-  рендера занимает пустая заявка `renders/layer-NN.raw.mp4` с `wx`; номер с готовым файлом или
-  отчётом не переиспользуется. Remotion запускается командой `remotionLayerRenderCommand`
-  (`scripts/build-commands.js`) поверх `resolveRemotionCommand` (`scripts/env.js`): пустой
-  защищённый `--env-file`, `--public-dir` слоя, без `--props`, `cwd` – корень движка. ffmpeg
-  приводит видео к ограниченному `yuv420p`, звук – к AAC 48 кГц ровно на длину кадров слоя.
-  `scripts/qa/media-gates.js`: G6 сравнивает длину **видеопотока**, размер и FPS с исходником,
-  G7 – звук слоя с голосом исходника по окнам `cues.kept` манифеста. Заявка снимается только
-  после записи отчёта.
+  рендера занимает заявка `renders/layer-NN.raw.mp4`, созданная с `wx`; в неё же Remotion пишет
+  сырой рендер. Номер с готовым файлом или отчётом не переиспользуется. Remotion запускается
+  командой `remotionLayerRenderCommand` (`scripts/build-commands.js`) поверх
+  `resolveRemotionCommand` (`scripts/env.js`): пустой защищённый `--env-file`, `--public-dir`
+  слоя, без `--props`, `cwd` – корень движка. ffmpeg приводит видео к ограниченному `yuv420p`,
+  звук – к AAC 48 кГц ровно на длину кадров слоя. `scripts/qa/media-gates.js`: G6 сравнивает
+  длину **видеопотока**, размер и FPS с исходником, G7 – звук слоя с голосом исходника по окнам
+  `cues.kept` манифеста. Заявка снимается только после записи отчёта.
 - **`layer import`** (`scripts/layer/import.js`) принимает только сам рендер: файл внутри
   проекта, чей путь и sha256 стоят во входе `role: 'layer'` самого свежего отчёта `layer render`
   (`findRenderReport`, `renderReportProblem` в `scripts/layer/registry.js`: целый отчёт с G6 и G7,
@@ -818,6 +821,10 @@ flowchart TD
   `assets/broll/video/<id>/media.mp4`, и в реестр `qa/layer-imports.json` пишется связь
   `renderSha256` → `canonicalSha256` целого ассета вместе с профилем, слоем и путём отчёта.
   Реестр – единственный признак слоя kit: sha256 рендера и ассета различаются из-за перекодирования.
+- **`layer stock`** (`scripts/layer/stock.js`) ищет клип клиентом Pexels из B-roll discovery,
+  режет его без звука под размер, FPS и длину вставки (`--sec`, иначе длина `--insert` из
+  `buildLayerManifest`, иначе 2,5 с) в `public/stock/` и дописывает в `public/SOURCE.md` строку из
+  четырёх ячеек: файл, лицензия и автор, страница с запросом и отрезком, SHA-256. `plan.js` не правит.
 - **`layer brief`** (`scripts/layer/brief.js`) публикует draft lesson brief прежнего формата:
   одна сцена `broll` с `overlay: 'none'` на весь хронометраж, звук слоя `audioMode: 'mix'`, голос из
   исходника по глобальному таймкоду, музыка по желанию. Ассет должен быть в реестре, цел и собран
@@ -838,7 +845,9 @@ flowchart TD
 - **`layer sheet`** (`scripts/layer/sheet.js`) работает с текущим preview проекта: контакт-лист
   4×4 с рамкой safe-зоны, полоски по 5 кадров вокруг новых правок пульта и G12
   (`scripts/qa/empty-frame-gate.js`: доля пикселей с перепадом яркости больше 24 на кадре,
-  уменьшенном до 135 px). Команда только предупреждает: qa-отчёт не пишет, код 0.
+  уменьшенном до 135 px; кадр, для которого долю не удалось посчитать, считается пустым). Если
+  ffmpeg не отдал сам кадр контакт-листа, команда останавливается с ошибкой; иначе она только
+  предупреждает: qa-отчёт не пишет, код 0.
 - **Отчёты и коды.** `scripts/qa/report.js` строит отчёт (`buildReport`, статус `error` при
   любой ошибке), печатает его (`formatReport`) и пишет атомарно (`writeReport`). `layer check` и
   `layer render` возвращают 0 (пройдено или предупреждения), 1 (стоп) или 2 (оценить нельзя);
@@ -985,8 +994,9 @@ symlink; symlink прерывает построение cache key.
 - `projects/<id>/motion-vNN/` – слой motion-kit (игнорируется Git вместе с `projects/`):
   `layer.json`, `spelling.json`, `src/`, `public/` (`speaker.mp4`, шрифты, `sfx/`, `stock/`,
   `shots/`, `SOURCE.md` с лицензиями и SHA-256), `out/manifest.json` (манифест гейтов, пишет
-  `layer check`) и `renders/layer-NN.mp4` (пишет `layer render`; пустая заявка
-  `renders/layer-NN.raw.mp4` занимает номер и остаётся только после прерванного рендера).
+  `layer check`) и `renders/layer-NN.mp4` (пишет `layer render`; заявка
+  `renders/layer-NN.raw.mp4` занимает номер и принимает сырой рендер Remotion, остаётся только
+  после прерванного рендера и тогда может содержать недописанное видео).
 - `projects/<id>/qa/` – отчёты гейтов `<имя>.json` + `.txt`: `layer-<слой>-check`,
   `layer-<слой>-render-NN`, `preview-<UTC-дата-время>-NN` (для каждого lesson-preview); реестр
   проверенных слоёв `layer-imports.json` (пишет только `layer import`); контакт-листы
@@ -1025,7 +1035,7 @@ portable descriptor-relative `unlinkat`/`rmdirat`, поэтому между п�
 | `OPENVERSE_CLIENT_SECRET` | зарезервировано | будущий провайдер, в 1.6.0 не читается рабочим кодом |
 | `THEMES_EXT` | опционально | корневая папка внешних тем `<id>/theme.json` |
 | `AUTOMONTAGE_FFMPEG_DIR` | опционально | каталог отдельной `ffmpeg` + `ffprobe`; CLI ставит его первым в дочерний `PATH` |
-| `AUTOMONTAGE_SFX_DIR` | опционально | папка библиотеки звуков для `layer new`; по умолчанию `projects/.library/sfx`, несуществующая папка – ошибка |
+| `AUTOMONTAGE_SFX_DIR` | опционально | папка библиотеки звуков для `layer new`; по умолчанию `projects/.library/sfx`. Заданная переменная с несуществующей папкой – ошибка; без переменной и без папки по умолчанию слой собирается без звуков |
 
 Dynamic, канонический lesson через текущую подписку Claude Code/Codex, Review, preview, render,
 QA и `automontage demo` работают без provider API-ключей.
@@ -1039,6 +1049,8 @@ QA и `automontage demo` работают без provider API-ключей.
 - ffmpeg/ffprobe – анализ, аудио, нормализация импорта, сборка и контроль результата. Для фото
   в Review обязателен encoder `libwebp`; video import также использует `libx264`, `libvpx`,
   `libopus` и AAC. `automontage doctor` проверяет WebP и объясняет выбор отдельной полной сборки.
+- esbuild 0.28.1 (явная закреплённая зависимость) – сборка kit и `plan.js` слоя в Node для
+  команд `layer` (`scripts/motion-kit-node.js`).
 - Chromium для Playwright – browser regression tests и пересборка PNG-моков скриптами
   `shot-*`; обычный Review открывается в установленном системном браузере.
 - Tesseract OCR локально проверяет изображения и три кадра выбранного видео на встроенный текст.

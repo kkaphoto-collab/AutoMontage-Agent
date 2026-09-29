@@ -95,6 +95,9 @@ npm run review -- --project-dir projects/YYYY.MM.DD_tema-rolika --edit
 
 Терминал с командой Review должен оставаться открытым. После окончания работы вернись в него и
 нажми `Ctrl+C`. Во время импорта сначала дождись завершения или нажми **«Отменить загрузку»**.
+Закрытое окно терминала (сигнал SIGHUP) завершает Review так же, как `Ctrl+C`, и `nohup` его не
+удерживает. Для работы в фоне запускай `automontage review --project-dir projects/<ролик> & disown`
+(macOS, Linux) или через `setsid` (Linux).
 
 ## 3. Что находится в окне
 
