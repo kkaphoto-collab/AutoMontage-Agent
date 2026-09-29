@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 const fs = require('node:fs');
 const path = require('node:path');
+const { resolveProjectsBaseDir } = require('../projects-dir');
 const { createHash } = require('node:crypto');
 const { isDeepStrictEqual } = require('node:util');
 const { ROOT, configureMediaToolPath, resolveRemotionCommand } = require('../env');
@@ -108,7 +109,7 @@ function runMotion(options, dependencies = {}) {
   const runNodeToolImpl = dependencies.runNodeToolImpl || runNodeTool;
   const probeOptions = dependencies.probeOpenedAudioImpl ? { probeOpenedAudioImpl: dependencies.probeOpenedAudioImpl } : {};
   if (!options.briefPath) {
-    const { workspace, probe } = createMotionProject({ baseDir: path.join(process.cwd(), 'projects'), name: options.project,
+    const { workspace, probe } = createMotionProject({ baseDir: resolveProjectsBaseDir(process.cwd()), name: options.project,
       projectDir: options.projectDir, narrationPath: options.narrationPath, ...probeOptions });
     dependencies.narrationGuard?.assertCurrent();
     if (workspace.manifest.currentBrief) throw new Error('project already has a brief; continue with preview or an approved --brief');
@@ -198,7 +199,7 @@ async function runScriptMotion(options, dependencies) {
   }
   const { prepareNarrationWorkspace, loadVoiceConfig, synthesizeWithTimestamps } = require('../voice/elevenlabs');
   const projectId = formatProjectId({ date: new Date(), name: options.project });
-  const projectDir = path.resolve(options.projectDir || path.join(process.cwd(), 'projects', projectId));
+  const projectDir = path.resolve(options.projectDir || path.join(resolveProjectsBaseDir(process.cwd()), projectId));
   if (fs.existsSync(path.join(projectDir, 'project.json'))) {
     throw new Error('motion TTS requires a new project; continue the existing project with its saved audio/brief');
   }

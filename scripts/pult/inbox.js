@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 const fs = require('node:fs');
 const path = require('node:path');
+const { resolveProjectsBaseDir } = require('../projects-dir');
 
 const { scanProjects } = require('./catalog');
 const { cardIdFor } = require('./cards');
@@ -159,9 +160,7 @@ function formatInbox(items, { projectsDir, cwd = process.cwd() }) {
 }
 
 function parseInboxOptions(argv, { root = ROOT } = {}) {
-  // AUTOMONTAGE_PROJECTS_DIR переменная окружения для решения проблемы hard links на ExFAT.
-  const envProjectsDir = process.env.AUTOMONTAGE_PROJECTS_DIR;
-  const defaultProjectsDir = envProjectsDir ? path.resolve(envProjectsDir) : path.join(root, 'projects');
+  const defaultProjectsDir = resolveProjectsBaseDir(root);
   const options = { projectsDir: defaultProjectsDir, accept: null };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];

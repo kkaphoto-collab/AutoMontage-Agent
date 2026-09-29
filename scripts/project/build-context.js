@@ -1,6 +1,7 @@
 const { randomUUID } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const { resolveProjectsBaseDir } = require('../projects-dir');
 
 const {
   createOrOpenProject,
@@ -217,7 +218,7 @@ function legacyPaths(root, id, kind) {
 function resolveProjectDirectory(root, projectName, projectDir) {
   if (projectDir) return path.resolve(projectDir);
   if (!projectName) return null;
-  const namedDirectory = path.join(root, 'projects', projectName);
+  const namedDirectory = path.join(resolveProjectsBaseDir(root), projectName);
   if (fs.existsSync(path.join(namedDirectory, 'project.json'))) return namedDirectory;
   return null;
 }
@@ -261,7 +262,7 @@ function createBuildContext({
 
   const existingProjectDir = resolveProjectDirectory(resolvedRoot, projectName, projectDir);
   const project = createOrOpenProject({
-    baseDir: path.join(resolvedRoot, 'projects'),
+    baseDir: resolveProjectsBaseDir(resolvedRoot),
     name: existingProjectDir ? undefined : projectName,
     projectDir: existingProjectDir,
     sourcePath: resolvedVideo,
