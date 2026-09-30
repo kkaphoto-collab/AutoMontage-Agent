@@ -100,6 +100,15 @@ export const getStatFontSize = (text, width, land) => {
   return Math.max(96, Math.min(base, fitted));
 };
 
+// Тот же приём, что и getStatFontSize (шрифт Oswald 700), но с действующим потолком
+// blur-overlay: 240 в альбомной, 360 в портретной. Без него одиночное несгибаемое слово
+// (нет пробела для переноса) вылезает за safe-зону по обеим сторонам кадра.
+export const getBlurBigFontSize = (text, width, land) => {
+  const base = land ? 240 : 360;
+  const fitted = Math.floor(width / (Math.max(1, text.length) * 0.48));
+  return Math.max(96, Math.min(base, fitted));
+};
+
 export const getKeywordMotion = (frame, fps) => {
   const period = fps * 1.2;
   const cycle = (frame % period) / period;
@@ -397,13 +406,14 @@ export const SceneBlurOverlay = (p) => {
     );
   }
 
+  const bigSize = p.big ? getBlurBigFontSize(p.big, sw, land) : null;
   return (
     <AbsoluteFill style={{ background: k.bg, color: k.cream }}>
       <FaceLayer faceSrc={p.faceSrc} facePos={p.facePos} faceZoom={p.faceZoom} sourceStartFrame={p.sourceStartFrame} blur={16} dark={0.34} />
       <SceneBg />
       {!p.hideChip && <Chip text={p.label || 'ФАКТ'} />}
       <div style={{ position: 'absolute', left: s.left, right: s.right, top: '50%', transform: 'translateY(-50%)', textAlign: 'center' }}>
-        {p.big ? <div style={{ ...bigR, fontFamily: k.fonts.display, fontWeight: 700, fontSize: land ? 240 : 360, lineHeight: 0.8, color: k.orange }}>{p.big}</div> : null}
+        {p.big ? <div style={{ ...bigR, fontFamily: k.fonts.display, fontWeight: 700, fontSize: bigSize, lineHeight: 0.8, color: k.orange }}>{p.big}</div> : null}
         <FitHeading cream={p.headCream} orange={p.headOrange} width={sw} maxSize={land ? 80 : 92} style={{ marginTop: 6 }} />
         {p.sub ? <div style={{ marginTop: 22, fontSize: 36, opacity: 0.9 }}>{p.sub}</div> : null}
       </div>
