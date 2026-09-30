@@ -33,6 +33,7 @@ const { finiteNumber, parseBuildOptions } = require('./build-options');
 const { parseVideoProbe } = require('./media-probe');
 const { resolveSourceTiming } = require('./source-timing');
 const { captureTool, runNodeTool, runTool } = require('./process');
+const { collectWords } = require('./tighten');
 const { loadExtTheme } = require('./load-ext-theme');
 const { resolveOutputGeometry } = require('./lesson/aspect');
 const { REMOTION_AUDIO_ADVANCE_MS } = require('./finish-audio');
@@ -412,11 +413,19 @@ if (lessonAction === 'render') {
 
   let prepared;
   try {
+    let captionWords = null;
+    try {
+      const transcriptRaw = fs.readFileSync(buildContext.paths.transcript, 'utf8');
+      captionWords = collectWords(JSON.parse(transcriptRaw));
+    } catch (_) {
+      captionWords = null;
+    }
     prepared = prepareLessonRender({
       brief,
       theme: resolveTheme(brief.theme),
       sourceVideo: srcVideo,
       framesOverride,
+      captionWords,
     });
     const mediaVerification = verifyBriefBrollMedia({
       root: ROOT, workspace: buildContext.project, brief,

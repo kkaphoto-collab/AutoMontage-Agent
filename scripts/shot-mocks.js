@@ -1,6 +1,6 @@
 const { chromium } = require('playwright');
 (async () => {
-  const b = await chromium.launch();
+  const b = await chromium.launch({ channel: 'chrome' });
   for (const [html, out] of [['iphone-mock','iphone'],['screenshot-mock','screenshot']]) {
     const p = await b.newPage({ viewport: { width: 1024, height: 1536 }, deviceScaleFactor: 1.5 });
     await p.goto(`file://${process.cwd()}/scripts/${html}.html`);

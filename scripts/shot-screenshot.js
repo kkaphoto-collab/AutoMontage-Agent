@@ -1,6 +1,6 @@
 const { chromium } = require('playwright');
 (async () => {
-  const b = await chromium.launch();
+  const b = await chromium.launch({ channel: 'chrome' });
   const p = await b.newPage({ viewport: { width: 1536, height: 1024 }, deviceScaleFactor: 1.5 });
   await p.goto(`file://${process.cwd()}/scripts/screenshot-mock.html`);
   await p.evaluate(() => document.fonts.ready);

@@ -424,6 +424,26 @@ test('approved speaker crop is preserved in render props', () => {
   assert.equal(props.faceZoom, 1.08);
 });
 
+test('a scene can override the global face crop for shot-size rhythm', () => {
+  const brief = makeBrief({
+    facePos: { x: 0.5, y: 0.5 },
+    faceZoom: 1.0,
+    scenes: [{
+      scene: 'fullscreen',
+      start: 0,
+      end: 3,
+      caption: 'КРУПНЫЙ ПЛАН',
+      facePos: { x: 0.4, y: 0.3 },
+      faceZoom: 1.3,
+    }],
+  });
+
+  assert.deepEqual(validateLessonBrief(brief), { ok: true, errors: [] });
+  const invalid = structuredClone(brief);
+  invalid.scenes[0].faceZoom = 2.5;
+  assert.equal(validateLessonBrief(invalid).ok, false);
+});
+
 test('approved lesson music is validated and becomes render props', () => {
   const brief = makeBrief({
     status: 'approved',

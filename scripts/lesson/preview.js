@@ -11,6 +11,7 @@ function prepareLessonPreview(options = {}) {
     brief,
     theme,
     sourceVideo,
+    captionWords = null,
   } = options;
   const hasFrom = Object.prototype.hasOwnProperty.call(options, 'fromSec');
   const hasTo = Object.prototype.hasOwnProperty.call(options, 'toSec')
@@ -31,6 +32,7 @@ function prepareLessonPreview(options = {}) {
     brief,
     theme,
     sourceFile: LESSON_SOURCE_ALIAS,
+    captionWords,
   });
   const fps = props.fps;
   const durationSec = props.durationInFrames / fps;

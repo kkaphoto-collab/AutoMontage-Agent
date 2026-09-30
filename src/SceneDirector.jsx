@@ -1,9 +1,10 @@
-import { AbsoluteFill, Sequence, Audio, staticFile, useVideoConfig } from 'remotion';
+import { AbsoluteFill, Sequence, Audio, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
 import { FontStyle } from './fonts';
 import { ThemeContext, getTheme } from './theme';
 import { SCENES } from './scenes/scenes';
 import { safeFor } from './scenes/safezone';
 import { sourceVolumeForFrame } from './scenes/BrollMedia';
+import { CaptionsAuto } from './blocks/CaptionsAuto';
 
 const src = (s) => (s && s.startsWith('http') ? s : staticFile(s));
 
@@ -40,6 +41,18 @@ export const getMusicPlaybackProps = ({ trimBeforeFrames = 0, playbackRate = 1 }
 // Сцены идут жёстким склеенным cut: fade без перекрытия оставлял пустой кадр на каждом стыке.
 const SceneLayer = ({ children }) => <AbsoluteFill style={{ opacity: 1 }}>{children}</AbsoluteFill>;
 
+// Слово-в-слово караоке-субтитры (CaptionsAuto) поверх активной сцены. Показываем только на
+// fullscreen: другие официальные сцены уже несут собственный текст (заголовки/схемы/цитаты/
+// b-roll) в той же нижней части safe-zone, и вторая плашка перекрывала бы её.
+const SceneCaptions = ({ captionGroups, timedScenes }) => {
+  const frame = useCurrentFrame();
+  const active = timedScenes.find(
+    ({ from, durationInFrames }) => frame >= from && frame < from + durationInFrames,
+  );
+  if (!active || active.scene.scene !== 'fullscreen') return null;
+  return <CaptionsAuto groups={captionGroups} />;
+};
+
 // Отладочная рамка сейф-зоны (тексты должны быть внутри)
 const SafeGuide = () => {
   const { width, height } = useVideoConfig(); const s = safeFor(width, height);
@@ -47,7 +60,7 @@ const SafeGuide = () => {
 };
 
 // Режиссёр сцен: рендерит список сцен по таймкодам с переходами.
-export const SceneDirector = ({ theme = 'lesson-neutral', scenes = [], faceSrc = null, facePos = null, faceZoom = 1, audioSrc = null, musicSrc = null, musicGainDb = -17, musicFadeInSec = 0, musicFadeOutSec = 0, musicTrimBeforeFrames = 0, musicPlaybackRate = 1, videoTitle = 'ВИДЕО', draftPreview = false, debug = false }) => {
+export const SceneDirector = ({ theme = 'lesson-neutral', scenes = [], faceSrc = null, facePos = null, faceZoom = 1, audioSrc = null, musicSrc = null, musicGainDb = -17, musicFadeInSec = 0, musicFadeOutSec = 0, musicTrimBeforeFrames = 0, musicPlaybackRate = 1, videoTitle = 'ВИДЕО', captionGroups = null, draftPreview = false, debug = false }) => {
   const t = getTheme(theme);
   const { fps, durationInFrames, width, height } = useVideoConfig();
   const safe = safeFor(width, height);
@@ -88,6 +101,8 @@ export const SceneDirector = ({ theme = 'lesson-neutral', scenes = [], faceSrc =
             </Sequence>
           );
         })}
+        {Array.isArray(captionGroups) && captionGroups.length > 0
+          && <SceneCaptions captionGroups={captionGroups} timedScenes={timedScenes} />}
         {draftPreview && (
           <div
             data-draft-preview-watermark="true"

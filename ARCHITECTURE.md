@@ -770,10 +770,24 @@ Motion `media` использует `Img`/`OffthreadVideo` с утверждён
 Видео по умолчанию muted; `mix`/`replace` переиспользуют общие аудио-envelope, включая
 приглушение единственного narration в глобальном интервале `replace`-сцены.
 
+Любая официальная сцена может скрыть верхнюю плашку названия через `hideChip: true` — `Chip`
+рендерится в семи местах `src/scenes/scenes.jsx`, каждое проверяет `!p.hideChip` (в `broll` —
+вместе с уже существующим `overlay.chip`). Без поля поведение не меняется.
+
 `SceneDirector.jsx` раскладывает сцены по глобальным таймкодам. Видео внутри каждой сцены
 получает `trimBefore`, равный глобальному стартовому кадру; единая аудиодорожка не сбрасывается.
 Сцены соединяются непрозрачным hard cut: fade-in без перекрытия запрещён, потому что он создавал
 пустой кадр на каждом стыке.
+
+Опциональный проп `captionGroups` включает слово-в-слово караоке-субтитры (переиспользует
+`src/blocks/CaptionsAuto.jsx`, ранее подключённый только в демо-композиции `ReelCaptions`).
+Группы строит чистая функция `buildCaptionGroups()` в `scripts/lesson/captions.js` по правилу
+`docs/STEP-04-captions.md`. `scripts/lesson/brief.js#buildLessonProps()` принимает необязательный
+`captionWords` (слова активного транскрипта проекта) и кладёт `props.captionGroups`, только если
+список непустой; `scripts/preview.js` и `scripts/build.js` сами читают
+`manifest.transcript.words` и передают его – `lesson-brief.schema.json` не меняется. Плашка
+рендерится поверх только той сцены, что сейчас активна по кадру, и только когда это `fullscreen`:
+остальные официальные сцены уже несут собственный текст в той же нижней части safe-zone.
 
 `src/scenes/BrollMedia.jsx` сохраняет legacy image через `Img`, а structured video выводит через
 Remotion `OffthreadVideo`. `trimBefore = round(trimStartSec × fps)`, а длину ограничивает

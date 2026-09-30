@@ -7,6 +7,6 @@ module.exports = {
   },
   projects: [{
     name: 'chromium',
-    use: { browserName: 'chromium', headless: true },
+    use: { browserName: 'chromium', headless: true, channel: 'chrome' },
   }],
 };

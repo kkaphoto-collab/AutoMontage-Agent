@@ -146,7 +146,7 @@ const SpeakerCircleDiagram = ({ p, k, s, width, height, frame, fps }) => {
   return (
     <AbsoluteFill style={{ background: k.bg, color: k.cream }}>
       <SceneBg />
-      <Chip text={p.videoTitle || 'ВИДЕО'} />
+      {!p.hideChip && <Chip text={p.videoTitle || 'ВИДЕО'} />}
       <div style={{ position: 'absolute', left: s.left, right: s.right, top: s.top + 70, textAlign: 'center' }}>
         <FitHeading cream={p.headCream} orange={p.headOrange} width={width - s.left - s.right} maxSize={land ? 86 : 94} />
       </div>
@@ -176,7 +176,7 @@ const SalesFunnelDiagram = ({ p, k, s, width, height, frame, fps }) => {
   return (
     <AbsoluteFill style={{ background: k.bg, color: k.cream }}>
       <SceneBg />
-      <Chip text={p.videoTitle || 'ВИДЕО'} />
+      {!p.hideChip && <Chip text={p.videoTitle || 'ВИДЕО'} />}
       <div style={{ position: 'absolute', left: s.left, right: s.right, top: s.top + 60, textAlign: 'center' }}>
         <FitHeading cream={p.headCream} orange={p.headOrange} width={width - s.left - s.right} maxSize={land ? 86 : 94} />
       </div>
@@ -231,7 +231,7 @@ export const SceneFullscreen = (p) => {
     <AbsoluteFill style={{ background: k.bg }}>
       <FaceLayer faceSrc={p.faceSrc} facePos={p.facePos} faceZoom={p.faceZoom} sourceStartFrame={p.sourceStartFrame} />
       <AbsoluteFill style={{ background: 'linear-gradient(180deg, rgba(0,0,0,.35), transparent 26%, transparent 62%, rgba(0,0,0,.78))' }} />
-      <Chip text={p.videoTitle || 'ВИДЕО'} />
+      {!p.hideChip && <Chip text={p.videoTitle || 'ВИДЕО'} />}
       {p.caption ? <div style={{ position: 'absolute', left: s.left, right: s.right, bottom: s.bottom, textAlign: 'center', color: k.cream, fontFamily: k.fonts.display, fontWeight: 700, textTransform: 'uppercase', fontSize: land ? 60 : 72, lineHeight: 0.95, ...r }}>{p.caption}</div> : null}
     </AbsoluteFill>
   );
@@ -255,7 +255,7 @@ export const SceneSplit = (p) => {
       <AbsoluteFill style={{ background: k.bg, color: k.cream }}>
         {p.variant === 'animated-gradient' ? <AnimatedSplitGradient k={k} frame={frame} fps={fps} /> : null}
         <SceneBg />
-        <Chip text={p.videoTitle || 'ВИДЕО'} />
+        {!p.hideChip && <Chip text={p.videoTitle || 'ВИДЕО'} />}
         <div style={{ position: 'absolute', left: s.left, top: s.top + 40, bottom: s.bottom + 40, width: cardW, borderRadius: 30, overflow: 'hidden', border: `1px solid ${k.orange}70`, boxShadow: k.cardShadow, ...cardEnter }}>
           {badge}
           <FaceLayer faceSrc={p.faceSrc} facePos={facePos} faceZoom={p.faceZoom} sourceStartFrame={p.sourceStartFrame} />
@@ -274,7 +274,7 @@ export const SceneSplit = (p) => {
     <AbsoluteFill style={{ background: k.bg, color: k.cream }}>
       {p.variant === 'animated-gradient' ? <AnimatedSplitGradient k={k} frame={frame} fps={fps} /> : null}
       <SceneBg />
-      <Chip text={p.videoTitle || 'ВИДЕО'} />
+      {!p.hideChip && <Chip text={p.videoTitle || 'ВИДЕО'} />}
       <div style={{ position: 'absolute', left: s.left, right: s.right, top: s.top + 50, height: 660, borderRadius: 34, overflow: 'hidden', border: `1px solid ${k.orange}70`, boxShadow: k.cardShadow, ...cardEnter }}>
         {badge}
         <FaceLayer faceSrc={p.faceSrc} facePos={p.facePos} faceZoom={p.faceZoom} sourceStartFrame={p.sourceStartFrame} />
@@ -319,7 +319,7 @@ export const SceneBottomDiagram = (p) => {
     return (
       <AbsoluteFill style={{ background: k.bg, color: k.cream }}>
         <SceneBg />
-        <Chip text={p.videoTitle || 'ВИДЕО'} />
+        {!p.hideChip && <Chip text={p.videoTitle || 'ВИДЕО'} />}
         <div style={{ position: 'absolute', left: s.left, top: s.top + 40, bottom: s.bottom + 40, width: cardW, borderRadius: 30, overflow: 'hidden', border: `1px solid ${k.orange}70`, boxShadow: k.cardShadow, ...cardEnter }}>
           {badge}
           <FaceLayer faceSrc={p.faceSrc} facePos={facePos} faceZoom={p.faceZoom} sourceStartFrame={p.sourceStartFrame} />
@@ -338,7 +338,7 @@ export const SceneBottomDiagram = (p) => {
   return (
     <AbsoluteFill style={{ background: k.bg, color: k.cream }}>
       <SceneBg />
-      <Chip text={p.videoTitle || 'ВИДЕО'} />
+      {!p.hideChip && <Chip text={p.videoTitle || 'ВИДЕО'} />}
       <div style={{ position: 'absolute', left: s.left, right: s.right, top: s.top + 60 }}>
         <FitHeading cream={p.headCream} orange={p.headOrange} width={sw} maxSize={92} />
         <div style={{ marginTop: 40, display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -364,7 +364,7 @@ export const SceneBlurOverlay = (p) => {
       <AbsoluteFill style={{ background: k.bg, color: k.cream }}>
         <FaceLayer faceSrc={p.faceSrc} facePos={p.facePos} faceZoom={p.faceZoom} sourceStartFrame={p.sourceStartFrame} blur={16 * blurProgress} dark={1 - blurProgress * 0.66} />
         <SceneBg chrome={false} />
-        <Chip text={p.label || 'ВИЗУАЛ'} />
+        {!p.hideChip && <Chip text={p.label || 'ВИЗУАЛ'} />}
       </AbsoluteFill>
     );
   }
@@ -380,7 +380,7 @@ export const SceneBlurOverlay = (p) => {
       <AbsoluteFill style={{ background: k.bg, color: k.cream }}>
         <FaceLayer faceSrc={p.faceSrc} facePos={p.facePos} faceZoom={p.faceZoom} sourceStartFrame={p.sourceStartFrame} blur={16} dark={0.3} />
         <SceneBg />
-        <Chip text={p.label || 'ВИЗУАЛ'} />
+        {!p.hideChip && <Chip text={p.label || 'ВИЗУАЛ'} />}
         <div style={{ position: 'absolute', left: s.left, right: s.right, top: s.top + 70, textAlign: 'center' }}>
           <FitHeading cream={p.headCream} orange={p.headOrange} width={sw} maxSize={land ? 76 : 88} />
         </div>
@@ -401,7 +401,7 @@ export const SceneBlurOverlay = (p) => {
     <AbsoluteFill style={{ background: k.bg, color: k.cream }}>
       <FaceLayer faceSrc={p.faceSrc} facePos={p.facePos} faceZoom={p.faceZoom} sourceStartFrame={p.sourceStartFrame} blur={16} dark={0.34} />
       <SceneBg />
-      <Chip text={p.label || 'ФАКТ'} />
+      {!p.hideChip && <Chip text={p.label || 'ФАКТ'} />}
       <div style={{ position: 'absolute', left: s.left, right: s.right, top: '50%', transform: 'translateY(-50%)', textAlign: 'center' }}>
         {p.big ? <div style={{ ...bigR, fontFamily: k.fonts.display, fontWeight: 700, fontSize: land ? 240 : 360, lineHeight: 0.8, color: k.orange }}>{p.big}</div> : null}
         <FitHeading cream={p.headCream} orange={p.headOrange} width={sw} maxSize={land ? 80 : 92} style={{ marginTop: 6 }} />
@@ -421,7 +421,7 @@ export const SceneTextOnly = (p) => {
     return (
       <AbsoluteFill style={{ background: k.bg, color: k.cream }}>
         <SceneBg />
-        <Chip text={p.label || 'ХОЧЕШЬ ТАК ЖЕ?'} />
+        {!p.hideChip && <Chip text={p.label || 'ХОЧЕШЬ ТАК ЖЕ?'} />}
         <div style={{ position: 'absolute', left: s.left, right: s.right, top: '50%', transform: 'translateY(-50%)', textAlign: 'center' }}>
           <FitHeading cream={p.quoteCream} width={sw} maxSize={land ? 112 : 98} />
           <div style={{ margin: '34px auto 38px', display: 'inline-block', background: k.orange, color: k.bg, borderRadius: 18, padding: land ? '16px 38px' : '22px 42px', fontFamily: k.fonts.display, fontWeight: 700, fontSize: land ? 108 : 124, lineHeight: 0.9, boxShadow: `0 18px 55px ${k.orange}45`, transform: `translateY(${motion.y}px) scale(${motion.scale}) rotate(${motion.rotate}deg)` }}>«{p.animateKeyword || 'МОНТАЖ'}»</div>
@@ -434,7 +434,7 @@ export const SceneTextOnly = (p) => {
   return (
     <AbsoluteFill style={{ background: k.bg, color: k.cream }}>
       <SceneBg />
-      <Chip text={p.label || 'ГЛАВНОЕ'} />
+      {!p.hideChip && <Chip text={p.label || 'ГЛАВНОЕ'} />}
       <div style={{ position: 'absolute', left: s.left, right: s.right, top: '50%', transform: 'translateY(-50%)', textAlign: land ? 'center' : 'left' }}>
         <div style={{ fontFamily: k.fonts.display, fontWeight: 700, fontSize: 120, lineHeight: 0.4, color: k.orange }}>“</div>
         <FitHeading cream={p.quoteCream} orange={p.quoteOrange} width={sw} maxSize={land ? 132 : 104} style={{ marginTop: 10 }} />
@@ -454,7 +454,7 @@ export const SceneStat = (p) => {
     <AbsoluteFill style={{ background: k.bg, color: k.cream }}>
       <FaceLayer faceSrc={p.faceSrc} facePos={p.facePos} faceZoom={p.faceZoom} sourceStartFrame={p.sourceStartFrame} blur={22} dark={0.22} />
       <SceneBg />
-      <Chip text={p.label || 'РЕЗУЛЬТАТ'} />
+      {!p.hideChip && <Chip text={p.label || 'РЕЗУЛЬТАТ'} />}
       <div style={{ position: 'absolute', left: s.left, right: s.right, top: '50%', transform: 'translateY(-50%)', textAlign: 'center' }}>
         <div style={{ ...bigR, fontFamily: k.fonts.display, fontWeight: 700, fontSize: statSize, lineHeight: 0.85, whiteSpace: 'nowrap', letterSpacing: -2 }}>
           <span style={{ color: k.cream }}>{p.statCream}</span><span style={{ color: k.orange, marginLeft: 12 }}>{p.statOrange}</span>
@@ -488,7 +488,7 @@ export const SceneBroll = (p) => {
       {p.brollMedia || p.brollSrc ? <BrollMedia media={p.brollMedia} legacySrc={p.brollSrc} durationInFrames={p.durationInFrames} />
         : <AbsoluteFill style={{ background: 'repeating-linear-gradient(135deg,#241a12,#241a12 40px,#1d1610 40px,#1d1610 80px)' }}><AbsoluteFill style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6f5e49', fontFamily: k.fonts.mono, fontSize: 38 }}>[ B-ROLL ]</AbsoluteFill></AbsoluteFill>}
       {overlay.bottomGradient ? <AbsoluteFill style={{ background: 'linear-gradient(180deg, transparent 45%, rgba(0,0,0,.8))' }} /> : null}
-      {overlay.chip ? <Chip text={p.videoTitle || 'ВИДЕО'} /> : null}
+      {overlay.chip && !p.hideChip ? <Chip text={p.videoTitle || 'ВИДЕО'} /> : null}
       {overlay.speakerPip && shouldShowBrollSpeakerPip(p.faceSrc, p.showSpeakerPip) ? <div style={{ position: 'absolute', right: s.right, top: circleTop, width: circle, height: circle, borderRadius: 26, overflow: 'hidden', border: `1px solid ${k.orange}70`, ...cardEnter }}><FaceLayer faceSrc={p.faceSrc} facePos={speakerPos} faceZoom={p.faceZoom} sourceStartFrame={p.sourceStartFrame} /></div> : null}
       {overlay.textBlock ? <div style={{ position: 'absolute', left: s.left, width: textW, bottom: s.bottom }}>
         <FitHeading cream={p.headCream} orange={p.headOrange} width={textW} maxSize={92} />
@@ -514,7 +514,7 @@ export const SceneChart = (p) => {
     <AbsoluteFill style={{ background: k.bg, color: k.cream }}>
       <FaceLayer faceSrc={p.faceSrc} facePos={p.facePos} faceZoom={p.faceZoom} sourceStartFrame={p.sourceStartFrame} blur={22} dark={0.2} />
       <SceneBg chrome={false} />
-      <Chip text={p.label || 'ЭКОНОМИЯ ЗА ГОД'} />
+      {!p.hideChip && <Chip text={p.label || 'ЭКОНОМИЯ ЗА ГОД'} />}
       <div style={{ position: 'absolute', left: s.left, right: s.right, top: s.top + 40, textAlign: 'center' }}>
         <div style={{ fontFamily: k.fonts.display, fontWeight: 700, fontSize: 150, lineHeight: 0.9 }}>
           <span style={{ color: k.orange }}>{fmt(counter)}</span><span style={{ color: k.cream }}> ₽</span>

@@ -17,6 +17,7 @@ const { prepareMotionPreview } = require('./motion/workflow');
 const { prepareLessonPreview } = require('./lesson/preview');
 const { probeVideo } = require('./media-probe');
 const { runNodeTool, runTool } = require('./process');
+const { collectWords } = require('./tighten');
 const {
   planPreview,
   publishCurrentPreview,
@@ -68,6 +69,20 @@ function parsePreviewOptions(argv) {
     throw new Error('preview range requires both --from-sec and --to-sec');
   }
   return options;
+}
+
+// Слова транскрипта для караоке-субтитров (CaptionsAuto): опциональные, preview не должен
+// падать, если файл отсутствует или повреждён — субтитры просто не появятся.
+function readTranscriptWords(workspace, fileSystem) {
+  try {
+    const wordsPath = resolveProjectPath(workspace.dir, workspace.manifest.transcript.words, {
+      label: 'transcript words path', fileSystem, mustExist: true, type: 'file',
+    });
+    const segments = JSON.parse(fileSystem.readFileSync(wordsPath, 'utf8'));
+    return collectWords(segments);
+  } catch (_) {
+    return null;
+  }
 }
 
 function openMediaFile(filename, { spawnSyncImpl = spawnSync } = {}) {
@@ -163,6 +178,9 @@ function runPreview(options, dependencies = {}) {
   }
   const externalTheme = kind === 'motion-reel' ? null : loadExtTheme(brief.theme);
   const prepareOptions = { brief, theme: externalTheme || brief.theme, sourceVideo };
+  if (kind !== 'motion-reel') {
+    prepareOptions.captionWords = readTranscriptWords(workspace, fileSystem);
+  }
   if (options.fromSec !== undefined || options.toSec !== undefined) {
     prepareOptions.fromSec = options.fromSec;
     prepareOptions.toSec = options.toSec;

@@ -6,6 +6,7 @@ const {
   frameSnapSeconds,
   isCanonicalBrollReference,
 } = require('./broll-media');
+const { buildCaptionGroups } = require('./captions');
 
 const OFFICIAL_SCENES = [
   'fullscreen',
@@ -114,7 +115,9 @@ function ensureApproved(brief) {
   if (!result.ok) throw new Error(result.errors.join('\n'));
 }
 
-function buildLessonProps({ brief, theme, sourceFile = 'source.mp4', includeMusic = true }) {
+function buildLessonProps({
+  brief, theme, sourceFile = 'source.mp4', includeMusic = true, captionWords = null,
+}) {
   const props = {
     theme: theme ?? brief.theme,
     scenes: brief.scenes,
@@ -128,6 +131,12 @@ function buildLessonProps({ brief, theme, sourceFile = 'source.mp4', includeMusi
   };
   if (brief.facePos) props.facePos = brief.facePos;
   if (brief.faceZoom) props.faceZoom = brief.faceZoom;
+  // Опционально: слово-в-слово караоке-субтитры (CaptionsAuto) поверх fullscreen-сцен.
+  // Без captionWords поведение не меняется — обратная совместимость с существующими роликами.
+  if (Array.isArray(captionWords) && captionWords.length > 0) {
+    const groups = buildCaptionGroups(captionWords);
+    if (groups.length > 0) props.captionGroups = groups;
+  }
   if (brief.music && includeMusic) {
     const extension = path.extname(brief.music.file).toLowerCase() || '.mp3';
     props.musicSrc = `source-music${extension}`;
@@ -140,14 +149,16 @@ function buildLessonProps({ brief, theme, sourceFile = 'source.mp4', includeMusi
   return props;
 }
 
-function buildDraftPreviewProps({ brief, theme, sourceFile = 'source.mp4' }) {
+function buildDraftPreviewProps({ brief, theme, sourceFile = 'source.mp4', captionWords = null }) {
   const result = validateLessonBrief(brief);
   if (!result.ok) throw new Error(result.errors.join('\n'));
   if (brief.status !== 'draft') {
     throw new Error('предпросмотр требует текущий brief со статусом draft');
   }
   return {
-    ...buildLessonProps({ brief, theme, sourceFile, includeMusic: false }),
+    ...buildLessonProps({
+      brief, theme, sourceFile, includeMusic: false, captionWords,
+    }),
     draftPreview: true,
   };
 }

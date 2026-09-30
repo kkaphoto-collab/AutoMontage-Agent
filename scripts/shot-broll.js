@@ -1,6 +1,6 @@
 const { chromium } = require('playwright');
 (async () => {
-  const b = await chromium.launch();
+  const b = await chromium.launch({ channel: 'chrome' });
   const p = await b.newPage({ viewport: { width: 720, height: 1280 }, deviceScaleFactor: 2 });
   await p.goto(`file://${process.cwd()}/scripts/broll-growth.html`);
   await p.evaluate(() => document.fonts.ready);

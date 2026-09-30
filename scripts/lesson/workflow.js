@@ -80,7 +80,9 @@ function buildGenBriefArgs({
   return args;
 }
 
-function prepareLessonRender({ brief, theme, sourceVideo, framesOverride = null }) {
+function prepareLessonRender({
+  brief, theme, sourceVideo, framesOverride = null, captionWords = null,
+}) {
   const approvedSource = path.resolve(brief.source);
   const requestedSource = path.resolve(sourceVideo);
   if (approvedSource !== requestedSource) {
@@ -94,6 +96,7 @@ function prepareLessonRender({ brief, theme, sourceVideo, framesOverride = null 
     theme,
     sourceFile: LESSON_SOURCE_ALIAS,
     includeMusic: false,
+    captionWords,
   });
   const requestedFrames = Number(framesOverride);
   if (Number.isFinite(requestedFrames) && requestedFrames > 0) {
