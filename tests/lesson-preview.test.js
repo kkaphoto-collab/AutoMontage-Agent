@@ -162,6 +162,7 @@ function fakePreviewTools({ calls, failStage = null }) {
     openMediaFileImpl: () => { throw new Error('must not open with open=false'); },
     now: () => new Date('2026-08-23T17:05:00.000Z'),
     temporaryId: idSequence(),
+    log: () => {},
   };
 }
 
@@ -184,6 +185,80 @@ test('preview command runs the real composition stages in order without final hi
   assert.equal(manifest.renders.length, 0);
   assert.equal(manifest.latestRender, null);
   assert.equal(fs.existsSync(path.join(fixture.workspace.dir, 'final', 'preview-test.mp4')), false);
+});
+
+test('blocking preview gates stop publication and keep the previous preview', (t) => {
+  const fixture = makeProject(t, { music: true });
+  const current = path.join(fixture.workspace.dir, 'previews', 'current-preview.mp4');
+  fs.writeFileSync(current, 'previous-preview');
+  const beforeManifest = fs.readFileSync(path.join(fixture.workspace.dir, 'project.json'));
+  const calls = [];
+  let seen = null;
+  const blocked = { block: true, paths: { textPath: 'qa/preview-1.txt' },
+    report: { kind: 'preview', summary: { status: 'fail', fail: 1, warn: 0 }, gates: [] } };
+  const runPreviewGatesImpl = (input) => {
+    seen = { ...input, finishedExists: fs.existsSync(input.finishedPath), musicExists: fs.existsSync(input.musicPath) };
+    return blocked;
+  };
+  assert.throws(() => runPreview({ projectDir: fixture.workspace.dir, briefPath: fixture.published.relativePath, open: false },
+    { ...fakePreviewTools({ calls }), runPreviewGatesImpl }),
+  /preview не опубликован: проверки не пройдены \(qa\/preview-1\.txt\)/);
+  assert.deepEqual(calls, ['preview Remotion', 'preview finish', 'preview music mix']);
+  assert.equal(fs.readFileSync(current, 'utf8'), 'previous-preview');
+  assert.deepEqual(fs.readFileSync(path.join(fixture.workspace.dir, 'project.json')), beforeManifest);
+  assert.ok(!readProjectManifest(fixture.workspace.dir).currentPreview);
+  // Гейты видели настоящие дорожки preview после микса, промежуточные файлы потом убрал finally.
+  assert.equal(seen.projectDir, fixture.workspace.dir);
+  assert.equal(seen.hasMusic, true);
+  assert.equal(seen.finishedExists, true);
+  assert.equal(seen.musicExists, true);
+  assert.ok(seen.mixArgs.includes('--gain'));
+  assert.deepEqual([seen.range.fromSec, seen.range.toSec], [0, 4]);
+  assert.match(seen.sourceSha256, /^[a-f0-9]{64}$/u);
+  assert.equal(seen.brief.title, 'ПРЕДПРОСМОТР');
+  assert.equal(fs.existsSync(seen.finishedPath), false);
+  // Входы отчёта: brief и исходник проекта с sha256, которые preview уже посчитал.
+  const briefFile = path.join(fixture.workspace.dir, fixture.published.relativePath);
+  assert.equal(seen.briefPath, briefFile);
+  assert.equal(seen.briefSha256, require('node:crypto').createHash('sha256').update(fs.readFileSync(briefFile)).digest('hex'));
+  assert.equal(path.relative(fixture.workspace.dir, seen.sourcePath).startsWith('..'), false);
+  assert.ok(fs.statSync(seen.sourcePath).isFile());
+});
+
+test('an unwritten gate report stops a kit preview after printing the verdict; other previews publish', (t) => {
+  const report = { kind: 'preview', summary: { status: 'pass', fail: 0, warn: 0 }, gates: [] };
+  const unwritten = (enforced) => () => ({ report, block: false, enforced, paths: null, writeError: 'не удалось записать в qa/ (EEXIST)' });
+
+  const kit = makeProject(t, { music: true });
+  const current = path.join(kit.workspace.dir, 'previews', 'current-preview.mp4');
+  fs.writeFileSync(current, 'previous-preview');
+  const printed = [];
+  assert.throws(() => runPreview({ projectDir: kit.workspace.dir, briefPath: kit.published.relativePath, open: false },
+    { ...fakePreviewTools({ calls: [] }), log: (line) => printed.push(line), runPreviewGatesImpl: unwritten(true) }),
+  /^Error: preview не опубликован: отчёт проверок не записан \(не удалось записать в qa\/ \(EEXIST\)\)$/u);
+  assert.match(printed.join('\n'), /Проверки \(preview\): всё хорошо/u);
+  assert.equal(fs.readFileSync(current, 'utf8'), 'previous-preview');
+
+  const other = makeProject(t, { music: true });
+  const notes = [];
+  const result = runPreview({ projectDir: other.workspace.dir, briefPath: other.published.relativePath, open: false },
+    { ...fakePreviewTools({ calls: [] }), log: (line) => notes.push(line), runPreviewGatesImpl: unwritten(false) });
+  assert.equal(fs.readFileSync(result.currentPath, 'utf8'), 'mixed-preview');
+  assert.match(notes.join('\n'), /отчёт проверок не записан: не удалось записать в qa\/ \(EEXIST\)/u);
+});
+
+test('the real gates publish a project without kit layers and record a reference-only report', (t) => {
+  const fixture = makeProject(t, { music: true });
+  const printed = [];
+  const result = runPreview({ projectDir: fixture.workspace.dir, briefPath: fixture.published.relativePath, open: false },
+    { ...fakePreviewTools({ calls: [] }), log: (line) => printed.push(line) });
+  assert.equal(fs.readFileSync(result.currentPath, 'utf8'), 'mixed-preview');
+  assert.match(printed.join('\n'), /G8 Голос и музыка/u);
+  const reports = fs.readdirSync(path.join(fixture.workspace.dir, 'qa')).filter((name) => /^preview-.*\.json$/u.test(name));
+  assert.equal(reports.length, 1);
+  const saved = JSON.parse(fs.readFileSync(path.join(fixture.workspace.dir, 'qa', reports[0]), 'utf8'));
+  assert.deepEqual(saved.gates.map((g) => [g.id, g.status]), [['G8', 'skipped']]);
+  assert.doesNotMatch(saved.gates[0].hint, /music\.gainDb|увеличьте|уменьшите/u);
 });
 
 test('render, finish, and music failures preserve the previous current preview byte-for-byte', async (t) => {

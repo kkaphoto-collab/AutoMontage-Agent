@@ -1,0 +1,111 @@
+name: Что-то сломалось
+description: Движок, Review, пульт, preview или final работает не так, как описано в документации.
+title: "[Баг] "
+labels: ["type:bug"]
+projects: ["mcdenil-skills/1"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо, что записали проблему. Отвечайте простыми словами: технические термины не обязательны.
+
+        **Не вставляйте сюда** API-ключи, токены, пароли, содержимое `.env`, личные данные,
+        клиентские видео, исходники, рендеры и сырые логи с личными путями. Репозиторий публичный.
+        Уязвимость безопасности сообщайте через
+        [закрытую форму](https://github.com/mcdenil-skills/AutoMontage-Agent/security/advisories/new),
+        а не здесь.
+
+  - type: textarea
+    id: observed
+    attributes:
+      label: Что произошло
+      description: Опишите, что вы увидели. Если была ошибка, скопируйте её текст без ключей и личных путей.
+      placeholder: "Пример: в пульте висит «Preview не готов», хотя рендер закончился."
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Что должно было произойти
+      description: Как это должно работать по вашему ожиданию или по документации.
+      placeholder: "Пример: после рендера пульт показывает новый preview."
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Как повторить
+      description: По шагам, что вы делали перед проблемой. Команды можно вставить как есть, без ключей.
+      placeholder: |
+        1. Запустил automontage preview ...
+        2. Открыл пульт ...
+        3. Увидел ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scale
+    attributes:
+      label: Как часто и у кого
+      description: Масштаб помогает выбрать приоритет.
+      options:
+        - Один раз, повторить не удалось
+        - Иногда повторяется
+        - Повторяется каждый раз
+        - Ломает работу у всех или на всех роликах
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Где это
+      description: Выберите ближайшее. Если не уверены, выберите «Не знаю».
+      options:
+        - motion-kit
+        - QA-гейты
+        - Review
+        - Пульт
+        - Preview и рендер
+        - Звук
+        - Документация и курс
+        - Тесты и CI
+        - Инфраструктура
+        - Не знаю
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Чем это мешает
+      description: "Что нельзя сделать из-за проблемы: ролик не собирается, теряется правка, приходится делать вручную и так далее."
+    validations:
+      required: true
+
+  - type: textarea
+    id: done
+    attributes:
+      label: Как понять, что исправлено
+      description: Что вы проверите, чтобы убедиться, что проблемы больше нет.
+      placeholder: "Пример: три preview подряд публикуются в пульт без ошибки."
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Версия и система
+      description: "Версия AutoMontage-Agent (package.json или automontage --version), система (macOS, Windows, Linux), вывод npm run doctor без личных путей."
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Проверка перед отправкой
+      options:
+        - label: В тексте нет ключей, паролей, личных данных, клиентских видео и личных путей.
+          required: true

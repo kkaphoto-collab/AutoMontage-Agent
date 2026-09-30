@@ -419,7 +419,8 @@ node scripts/benchmark-preview.js \
 реального media toolchain является ошибкой окружения, а не скрытым skip. Поэтому browser setup
 не может скрыть обычную Node-регрессию. Windows job ставит фиксированный FFmpeg 7.1.1 с
 обязательной проверкой checksum и запускает только переносимые probe/import/recovery/Save/
-approval/final-publication tests; полный POSIX-контракт остаётся в Linux `npm test`.
+approval/final-publication tests и сборку motion-слоя с границей `plan.js`; полный POSIX-контракт
+остаётся в Linux `npm test`.
 Release-checker проверяет committed current tree без base и работает с shallow checkout.
 Отдельный job устанавливает закреплённый Gitleaks CLI и сканирует полную Git-историю на секреты
 без отдельной лицензии GitHub App для организации.
@@ -571,9 +572,15 @@ node --test tests/broll-discovery.test.js tests/broll-review-security.test.js te
 node --test tests/broll-preview-approval.test.js
 node --test tests/broll-render-env-security.test.js tests/env.test.js
 npm run test:review-ui
+npx remotion browser ensure
 node --test --test-concurrency=1 tests/broll-preview-e2e.test.js tests/video-broll-e2e.test.js tests/custom-face-media-real.test.js
 node scripts/broll/live-acceptance.js
 ```
+
+`npx remotion browser ensure` заранее скачивает браузер Remotion. Без него на свежей установке
+первый настоящий preview качает браузер внутри ожидания теста, и скорость сети решает исход теста.
+`tests/broll-preview-e2e.test.js` ждёт само preview-задание, а не галочку в интерфейсе: сбой
+preview сразу роняет тест с кодом ошибки и хвостом вывода `preview.js`.
 
 Нужна полная сборка FFmpeg с WebP/H.264/VP8/Opus/AAC, а для нативного OCR - Tesseract с локальным
 `eng` language pack. На Ubuntu CI устанавливает `ffmpeg tesseract-ocr tesseract-ocr-eng`.
@@ -781,3 +788,96 @@ job). Прогон занимает до полуминуты.
 4. Через 30 минут без открытого окна процесс пульта завершается, `projects/.pult/instance.json`
    удалён.
 5. Человек без опыта без подсказок находит финал, оставляет правку и копирует фразу для агента.
+
+## 12. Motion-kit и гейты
+
+Как собирать слой и что значит каждый гейт – [docs/MOTION-KIT.md](docs/MOTION-KIT.md); почему
+гейты устроены так – D-034…D-040 в [DECISIONS.md](DECISIONS.md).
+
+```bash
+node --test tests/motion-kit-*.test.js tests/qa-*.test.js tests/layer-*.test.js
+node --test tests/lesson-preview.test.js tests/motion-workflow.test.js   # барьер внутри preview
+```
+
+Все эти файлы входят в обычный `npm test`. Тесты команд `layer` и гейтов по звуку и видео
+собирают маленькие проекты во временной папке и генерируют медиа через ffmpeg lavfi; без
+`ffmpeg` на `PATH` они пропускаются (в Linux CI он обязателен). Настоящие ролики, звуки
+библиотеки и ключи не читаются: библиотека звуков в тестах – пустая папка `no-library`,
+Pexels подменён. `tests/qa-preview.test.js` в той же маске – прежний QA preview, не motion-kit.
+
+Что проверяется:
+
+- kit (`motion-kit-*`): время и кадры, слова и написание, safe-зона, камера и пресеты, входы и
+  габариты элементов, вставки и возврат спикера, звуки и прореживание, субтитры, сборка
+  `compilePlan` и форма манифеста; React-компоненты – через рендер в разметку; alias
+  `@automontage/motion-kit` для Node и Remotion; `motion-kit-node.test.js` – сборка слоя esbuild,
+  понятные ошибки сломанного слоя и граница `plan.js` (в том числе пути Windows);
+  `motion-kit-docs.test.js` – что `docs/MOTION-KIT.md` называет G1–G12, все команды `layer` и
+  `@automontage/motion-kit/core` и не содержит личных путей и папок роликов, README показывает
+  `automontage layer new --project-dir`, а `.env.example` и `ASSETS.md` называют
+  `AUTOMONTAGE_SFX_DIR`;
+- гейты (`qa-*`): форма отчёта и коды выхода, G1–G5 и G9–G11 по манифесту, G6 и G7 по настоящему
+  звуку и видео, замер G8 в LU (логика G8 – на явном тестовом коридоре; отдельный тест закрепляет
+  откалиброванный коридор `avatar` 3/35/38/41/46 LU и то, что разрыв эталона 37,95 LU в нём
+  проходит; обе дорожки замера ровно длины preview и на ffmpeg 6.1 из apt в CI, где `-shortest`
+  обрезает сам файл микса на ~6 мс раньше; результат между версиями ffmpeg совпадает до сотых LU;
+  окна речи после конца голоса дают «голос не звучит», а не пропуск G8), G12 по доле контуров, барьер preview (строгий только для слоя из реестра, справочный
+  G8 для прочих, отчёт `qa/preview-*`, сбой записи);
+- команды (`layer-*`): `new`, `words`, `check`, `render` (с подменой Remotion), `import`, `brief`,
+  `stock`, `sheet`, ожидание свободной машины `layer-busy.test.js`, шаблон слоя
+  `layer-template.test.js` и маршрутизация CLI, строгие флаги и коды выхода `layer-cli.test.js`.
+
+Плохие случаи, которые обязаны остановить работу (`BAD CASE` в имени теста):
+
+- `qa-timeline-gates.test.js`: статичный план спикера 5 с; cover-вставка с 0 с прячет спикера,
+  даже пока камера ещё гаснет (G4); текст на x=40 и влёт элемента из-за края (G5, весь отрезок
+  нарушения); перелёт `pop` на пике, а не на первом кадре;
+- `qa-media-gates.test.js`: слой на 0,2 с длиннее исходника (G6, один кадр разницы проходит);
+  голос аватара в звуке слоя (G7, редкие эффекты проходят);
+- `qa-mix-gates.test.js`: музыка на уровне голоса останавливает preview, разрыв 12 LU проходит;
+- `layer-check.test.js`: один статичный план на весь слой (код 1) и сломанный план (код 2);
+  неверный `sfxMasterDb`; `plan.js`, импортирующий `node:fs`; исходник проекта сменился после
+  `layer new`;
+- `layer-render.test.js`: видео короче композиции при дополненном до полной длины звуке (G6);
+  слой длиннее исходника (G6); голос аватара в звуке слоя через настоящую цепочку рендера (G7);
+- `layer-template.test.js`: stock-вставка с `cover: false` не проходит мимо G4 – слой не собирается;
+- `layer-sheet.test.js`: кадр, который ffmpeg не отдал, останавливает команду честной ошибкой, а не
+  «ролик короче» (кадр без посчитанной доли контуров G12 считает пустым);
+- `layer-stock.test.js`: неизвестный `--insert`, неверные `--sec` и `--pick`, повторная загрузка
+  не перезаписывает файл, скачанное не mp4, небезопасный id или ссылка, пустой поиск,
+  `public/stock` – ссылка наружу, гонка файла с тем же id.
+
+Барьер preview без пометки `BAD CASE` проверяют `qa-preview-gates.test.js` (слой с музыкой на
+уровне голоса, проваленный или правленный руками отчёт рендера, слой для другого исходника,
+битый реестр, `qa/` как ссылка, один плохой слой из двух) и `lesson-preview.test.js` (стоп
+оставляет прошлый preview, незаписанный отчёт останавливает только preview слоя kit).
+`motion-workflow.test.js` закрепляет известный пробел: motion-reel барьер не вызывает.
+
+Настоящий Remotion-рендер kit и кадры шаблона – по флагу и **только из корня движка**
+(Remotion ищет скачанный браузер в `node_modules/.remotion` рядом с ближайшим `package.json` выше
+текущей папки; из другой папки он начинает скачивать Chrome):
+
+```bash
+AUTOMONTAGE_TEST_MOTION_RENDER=1 node --test tests/motion-kit-render.test.js tests/layer-render-still.test.js
+```
+
+`motion-kit-render.test.js` проверяет, что кегль субтитров одинаков на каждом кадре и текст не
+обрезается, а `FontLoader` рядом с субтитрами, а не вокруг слоя, роняет рендер.
+`layer-render-still.test.js` снимает кадры 15, 40, 90 и 160 шаблона и требует на них ожидаемые
+тексты kit внутри safe-зоны.
+Прогон занимает несколько минут и в CI не входит.
+
+В CI Windows-джоб выполняет отдельный шаг «Проверить сборку motion-слоя и границу plan.js»
+(`node --test tests/motion-kit-node.test.js`): пути и metafile esbuild на Windows другие.
+Первый настоящий прогон этого шага на Windows будет в CI после push или PR ветки.
+
+Ручная проверка слоя перед показом владельцу:
+
+1. `automontage layer check` и `automontage layer render` без ❌; предупреждения прочитаны.
+2. `automontage preview` опубликован, отчёт `qa/preview-*.txt` без стопа; с утверждённым рецептом
+   музыки аватар-роликов G8 около 38 LU (коридор 35–41 LU).
+3. `automontage layer sheet --project-dir projects/<ролик>`: на контакт-листе `qa/sheet-*.jpg`
+   текст внутри рамки safe-зоны, нет пустых кадров (G12), графика не выпала.
+4. Глазами в preview – кадры входов и выходов карточек и вставок, первые 3 с (спикер виден),
+   стыки вставок (спикер резкий до закрытия вставки), громкость эффектов и музыки под речью.
+5. После правок пульта – полоски `qa/sheet-<…>-comment-<id>.jpg` вокруг каждой правки.

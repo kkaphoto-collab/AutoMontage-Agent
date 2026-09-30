@@ -21,6 +21,10 @@
 [«Монтаж от видео до готового MP4»](docs/MONTAGE-GUIDE.md). В ней показано, что попросить у
 агента, где выбрать B-roll, почему Save не создаёт видео и как перейти от preview к final.
 
+Полный курс для новичка: [«Ролики с нуля: от идеи до готового видео»](docs/reels-guide/README.md).
+Тема и текст, аватар HeyGen или своя съёмка на телефон, монтаж с живой камерой и звуками,
+«Пульт роликов», финал и публикация – по шагам и с готовыми фразами для агента.
+
 📐 <b>Шаблоны и стили</b>: каталог со скринами в [docs/TEMPLATES.md](docs/TEMPLATES.md).
 Флагман: <b>lesson-presentation</b> (урок/эфир, 9:16 или 16:9). Свой фирменный стиль подключается
 внешней темой (`THEMES_EXT`) и в открытый репозиторий не попадает.
@@ -131,7 +135,7 @@ legacy/developer opt-in и не входит в стандартный путь 
 |---|---|---|
 | Claude Code или Codex | агент читает транскрипт и готовит монтажный лист | нет, используется текущая подписка |
 | faster-whisper | локальная расшифровка; модель может скачаться из Hugging Face при первом запуске | нет |
-| Pexels API | необязательный поиск готовых фото и видео в Review | `PEXELS_API_KEY` |
+| Pexels API | необязательный поиск готовых фото и видео в Review и `automontage layer stock` | `PEXELS_API_KEY` |
 | ElevenLabs API | необязательная платная озвучка motion по явному согласию | `ELEVENLABS_API_KEY`, приватный `ELEVENLABS_VOICE_ID` |
 | FFmpeg, Remotion, Tesseract | локальный монтаж, preview, render, нормализация и OCR | нет |
 | Anthropic/OpenAI API | только отдельные legacy/developer-скрипты или явно подтверждённая генерация | опционально, возможна оплата |
@@ -456,6 +460,27 @@ Top-level `faceSrc`/`audioSrc` не являются источником дов
 не попадает в props. Baseline фиксируется до render callback, после него сверка строгая: даже
 восстановленный byte-for-byte файл с новым `ctime` закрывает сборку.
 
+### Motion-слой из деталей kit
+
+Слой Creative Motion собирается из готовых деталей движка (камера, карточки, звуки, сток,
+субтитры), а автоматические проверки ритма, safe-zone, звука и баланса голоса и музыки не
+пускают слабый preview в пульт:
+
+```bash
+automontage layer new --project-dir projects/<ролик>                 # motion-слой из деталей kit
+automontage layer check --project-dir projects/<ролик> --layer motion-v01
+automontage layer render --project-dir projects/<ролик> --layer motion-v01
+automontage layer import --project-dir projects/<ролик> --file projects/<ролик>/motion-v01/renders/layer-01.mp4
+automontage layer brief --project-dir projects/<ролик> --asset <reference> --title … --head-cream … --head-orange …
+automontage preview --project-dir projects/<ролик> --brief brief/vNN-draft.lesson.json
+automontage layer sheet --project-dir projects/<ролик>               # контакт-лист и кадры правок
+```
+
+`--title`, `--head-cream` и `--head-orange` – подписи для Markdown и пульта, в видео слоя их
+не видно. Звуковые эффекты слоя берутся из локальной библиотеки `AUTOMONTAGE_SFX_DIR`
+(по умолчанию `projects/.library/sfx`, см. [`.env.example`](.env.example)); без неё слой
+собирается без эффектов, и `layer new` об этом предупреждает. Подробно: [`docs/MOTION-KIT.md`](docs/MOTION-KIT.md).
+
 ### Пульт роликов: все ролики в одном окне
 
 Когда роликов много, откройте «Пульт роликов» – русский главный экран со всеми роликами из
@@ -776,16 +801,21 @@ Remotion (анимация плашек кодом), faster-whisper (распо�
 - [docs/TAKES.md](docs/TAKES.md) – монтаж одного ролика из нескольких дублей или разных записей.
 - [docs/MONTAGE-GUIDE.md](docs/MONTAGE-GUIDE.md) – простая инструкция от исходника до final MP4.
 - [docs/SCENE-CATALOG.md](docs/SCENE-CATALOG.md) – семь официальных сцен и их возможности.
+- [docs/MOTION-KIT.md](docs/MOTION-KIT.md) – motion-слой из деталей kit, проверки G1–G12 и что
+  делать, если проверка остановила работу.
 - [ARCHITECTURE.md](ARCHITECTURE.md) – модули, потоки данных и границы системы.
 - [TESTING.md](TESTING.md) – от быстрых тестов до проверки готового MP4.
 - [DECISIONS.md](DECISIONS.md) – решения, которые не нужно заново переигрывать в каждой сессии.
 - [CHANGELOG.md](CHANGELOG.md) – история релизов и заметные изменения по версиям.
 - [SECURITY.md](SECURITY.md) – политика отчётов об уязвимостях и правила для dependency advisories.
 - [AGENTS.md](AGENTS.md) – правила работы AI-агентов и обязательный синхрон документации.
+- [CONTRIBUTING.md](CONTRIBUTING.md) – как сообщить о баге или идее: формы задач, приоритеты и
+  [доска задач](https://github.com/orgs/mcdenil-skills/projects/1).
+- [ROADMAP.md](ROADMAP.md) – крупные направления развития продукта.
 
 ### Версии и история изменений
 
-Текущая версия исходников: **v1.9.0**. Опубликованные сборки находятся на странице
+Текущая версия исходников: **v1.10.0**. Опубликованные сборки находятся на странице
 [GitHub Releases](https://github.com/mcdenil-skills/AutoMontage-Agent/releases). Источник номера
 в репозитории – `version` в `package.json` и корневая запись в `package-lock.json`; состав
 релиза описан в [CHANGELOG.md](CHANGELOG.md).

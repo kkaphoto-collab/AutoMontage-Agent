@@ -105,6 +105,10 @@ jobs:
         shell: pwsh
         run: node --test --test-name-pattern='motion|old video|legacy' tests/project-workspace.test.js
 
+      - name: Проверить сборку motion-слоя и границу plan.js
+        shell: pwsh
+        run: node --test tests/motion-kit-node.test.js
+
       - name: Проверить portable import и final publication
         shell: pwsh
         run: node --test --test-name-pattern='import publishes video when ffprobe average FPS is 0/0|Windows-mode import requires identity and bytes|real tiny images and videos normalize|Windows-mode claim recovery ignores POSIX mode bits|Windows-mode handoff stays exclusive|review save returns a fixed 500|publish final fsyncs through a write-capable handle' tests/review-media-import.test.js tests/review-imported-assets.test.js tests/review-server-security.test.js tests/project-workspace.test.js
@@ -173,6 +177,10 @@ jobs:
 
       - name: Запустить Review browser tests
         run: npm run test:review-ui
+
+      # Иначе первый настоящий preview скачивает браузер Remotion внутри ожидания теста.
+      - name: Подготовить браузер Remotion
+        run: npx remotion browser ensure
 
       - name: Проверить настоящий preview, approval и final на синтетических медиа
         run: node --test --test-concurrency=1 tests/broll-preview-e2e.test.js tests/video-broll-e2e.test.js tests/custom-face-media-real.test.js
